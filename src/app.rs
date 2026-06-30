@@ -136,6 +136,13 @@ pub struct PaintApp {
     pub show_rulers: bool,
     // Texte (roadmap #2) : taille courante + élément en cours d'édition.
     pub text_size: f32,
+    // Style de texte courant (Sprint 3) : appliqué aux nouveaux textes, et au
+    // texte édité/sélectionné lorsqu'on modifie ces réglages.
+    pub text_font: crate::model::text::TextFont,
+    pub text_bold: bool,
+    pub text_align: crate::model::text::TextAlign,
+    pub text_outline_w: f32,
+    pub text_outline_color: [u8; 4],
     editing_text: Option<u64>,
     text_focus_pending: bool,
     // Export bitmap (capture d'écran différée d'une frame) + format demandé.
@@ -194,6 +201,11 @@ impl Default for PaintApp {
             crop_rect: None,
             crop_ratio: None,
             text_size: 28.0,
+            text_font: crate::model::text::TextFont::Proportional,
+            text_bold: false,
+            text_align: crate::model::text::TextAlign::Left,
+            text_outline_w: 0.0,
+            text_outline_color: [255, 255, 255, 255],
             editing_text: None,
             text_focus_pending: false,
             export_requested: false,
@@ -732,6 +744,38 @@ impl PaintApp {
         self.crop_mode
     }
 
+    /// Texte ciblé par les réglages de style : celui en cours d'édition, sinon
+    /// l'unique texte sélectionné. Sert à l'édition live depuis la barre d'outils.
+    fn styled_text_id(&self) -> Option<u64> {
+        if let Some(id) = self.editing_text {
+            return Some(id);
+        }
+        if self.selection.len() == 1 {
+            let id = *self.selection.iter().next()?;
+            if self.doc.layers[self.doc.active_layer].texts.iter().any(|t| t.id == id) {
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// Recopie le style courant dans le texte ciblé (édité/sélectionné), le cas
+    /// échéant. Appelé quand l'utilisateur change un réglage de style.
+    pub fn sync_text_style(&mut self) {
+        let Some(id) = self.styled_text_id() else { return };
+        let active = self.doc.active_layer;
+        let color = [self.brush.color[0], self.brush.color[1], self.brush.color[2], 255];
+        if let Some(t) = self.doc.layers[active].texts.iter_mut().find(|t| t.id == id) {
+            t.font = self.text_font;
+            t.bold = self.text_bold;
+            t.align = self.text_align;
+            t.outline_w = self.text_outline_w;
+            t.outline_color = self.text_outline_color;
+            t.color = color;
+            self.history.touch();
+        }
+    }
+
     /// Active le mode recadrage si une seule image est sélectionnée.
     pub fn start_crop(&mut self) {
         if self.single_image_idx().is_some() {
@@ -848,6 +892,11 @@ impl PaintApp {
             let color = [self.brush.color[0], self.brush.color[1], self.brush.color[2], 255];
             let mut item = crate::model::TextItem::new(id, d, self.text_size, color);
             item.z = self.bump_z();
+            item.font = self.text_font;
+            item.bold = self.text_bold;
+            item.align = self.text_align;
+            item.outline_w = self.text_outline_w;
+            item.outline_color = self.text_outline_color;
             let layer = self.doc.active_id();
             self.history.push(&mut self.doc, Command::AddText { layer, text: item });
             self.editing_text = Some(id);
@@ -1919,11 +1968,15 @@ impl PaintApp {
         egui::Area::new(egui::Id::new(("text_edit", id)))
             .fixed_pos(pos)
             .show(ctx, |ui| {
+                let font = egui::FontId::new(
+                    t.size.clamp(12.0, 48.0),
+                    crate::render::text::family(t.font),
+                );
                 let resp = ui.add(
                     egui::TextEdit::multiline(&mut t.text)
                         .desired_width(260.0)
                         .hint_text("Tapez votre texte…")
-                        .font(egui::FontId::proportional(t.size.clamp(12.0, 48.0))),
+                        .font(font),
                 );
                 if self.text_focus_pending {
                     resp.request_focus();
@@ -2761,16 +2814,25 @@ fn draw_image(
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// Dessine un texte via le painter, en coords écran (taille ∝ zoom), tourné.
+/// Dessine un texte riche via le painter, en coords écran (taille ∝ zoom),
+/// tourné. Police + alignement via le helper partagé ; contour et faux-bold via
+/// les passes (cohérent avec le compositeur CPU).
 fn draw_text(painter: &egui::Painter, t: &crate::model::TextItem, view: &ViewTransform, opacity: f32) {
-    let color = Color32::from_rgba_unmultiplied(t.color[0], t.color[1], t.color[2], t.color[3])
-        .gamma_multiply(opacity);
-    let galley = painter.layout_no_wrap(
-        t.text.clone(),
-        egui::FontId::proportional(t.size * view.scale),
-        color,
-    );
-    let mut shape = egui::epaint::TextShape::new(view.doc_to_screen(t.pos), galley, color);
-    shape.angle = t.rot;
-    painter.add(shape);
+    if t.text.is_empty() {
+        return;
+    }
+    let galley = crate::render::text::layout(painter.ctx(), t, view.scale);
+    let anchor = view.doc_to_screen(t.pos);
+    let (c, s) = (t.rot.cos(), t.rot.sin());
+    for (off, col) in crate::render::text::passes(t) {
+        // Décalage de passe (unités document) → écran, tourné comme le texte.
+        let (ox, oy) = (off.0 * view.scale, off.1 * view.scale);
+        let pos = egui::pos2(anchor.x + ox * c - oy * s, anchor.y + ox * s + oy * c);
+        let color = Color32::from_rgba_unmultiplied(col[0], col[1], col[2], col[3])
+            .gamma_multiply(opacity);
+        let mut shape = egui::epaint::TextShape::new(pos, galley.clone(), color);
+        shape.override_text_color = Some(color);
+        shape.angle = t.rot;
+        painter.add(shape);
+    }
 }

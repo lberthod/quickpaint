@@ -153,6 +153,12 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
         mix(t.size.to_bits() as u64);
         mix(t.rot.to_bits() as u64);
         mix(u32::from_le_bytes(t.color) as u64);
+        // Style (Sprint 3) : police, gras, alignement, contour.
+        mix(t.font as u64);
+        mix(t.bold as u64);
+        mix(t.align as u64);
+        mix(t.outline_w.to_bits() as u64);
+        mix(u32::from_le_bytes(t.outline_color) as u64);
         for b in t.text.bytes() {
             mix(b as u64);
         }
@@ -210,66 +216,68 @@ fn raster_text(
     if t.text.trim().is_empty() {
         return;
     }
-    let galley = ctx.fonts(|f| {
-        f.layout_no_wrap(t.text.clone(), egui::FontId::proportional(t.size), Color32::WHITE)
-    });
+    // Mise en page partagée (police + alignement), en espace document (1 px/doc).
+    let galley = crate::render::text::layout(ctx, t, 1.0);
     let (aw, ah) = (atlas.size[0], atlas.size[1]);
     let (pw, ph) = (pm.width() as usize, pm.height() as usize);
-    let [tr, tg, tb, ta] = t.color;
     let rotated = t.rot.abs() > 1e-5;
     let (c, s) = (t.rot.cos(), t.rot.sin());
 
-    for row in &galley.rows {
-        for g in &row.glyphs {
-            let uv = g.uv_rect;
-            if uv.is_nothing() {
-                continue;
-            }
-            let (mnx, mny) = (uv.min[0] as f32, uv.min[1] as f32);
-            let (mxx, mxy) = (uv.max[0] as f32, uv.max[1] as f32);
-            let (dw, dh) = (uv.size.x, uv.size.y);
-            if dw <= 0.0 || dh <= 0.0 {
-                continue;
-            }
-            let ox = t.pos.0 + g.pos.x + uv.offset.x;
-            let oy = t.pos.1 + g.pos.y + uv.offset.y;
-            let sample = |u: f32, v: f32| {
-                let sx = (mnx + u * (mxx - mnx)).clamp(0.0, (aw - 1) as f32) as usize;
-                let sy = (mny + v * (mxy - mny)).clamp(0.0, (ah - 1) as f32) as usize;
-                atlas.pixels[sy * aw + sx]
-            };
-            if !rotated {
-                for dy in 0..dh.ceil() as i32 {
-                    for dx in 0..dw.ceil() as i32 {
-                        let cov = sample((dx as f32 + 0.5) / dw, (dy as f32 + 0.5) / dh);
-                        let (px, py) = ((ox + dx as f32) as i32, (oy + dy as f32) as i32);
-                        blend_pixel(pm, px, py, pw, ph, cov, [tr, tg, tb, ta]);
-                    }
+    // Chaque passe (contour / gras / remplissage) blitte le galley décalé+teinté.
+    for ((offx, offy), color) in crate::render::text::passes(t) {
+        let base = (t.pos.0 + offx, t.pos.1 + offy);
+        for row in &galley.rows {
+            for g in &row.glyphs {
+                let uv = g.uv_rect;
+                if uv.is_nothing() {
+                    continue;
                 }
-            } else {
-                // Mapping inverse : on parcourt la boîte écran du glyphe tourné
-                // et on retrouve la couverture par rotation inverse (pas de trou).
-                let corners = [(ox, oy), (ox + dw, oy), (ox + dw, oy + dh), (ox, oy + dh)];
-                let rot = |p: (f32, f32)| {
-                    let (vx, vy) = (p.0 - t.pos.0, p.1 - t.pos.1);
-                    (t.pos.0 + vx * c - vy * s, t.pos.1 + vx * s + vy * c)
+                let (mnx, mny) = (uv.min[0] as f32, uv.min[1] as f32);
+                let (mxx, mxy) = (uv.max[0] as f32, uv.max[1] as f32);
+                let (dw, dh) = (uv.size.x, uv.size.y);
+                if dw <= 0.0 || dh <= 0.0 {
+                    continue;
+                }
+                let ox = base.0 + g.pos.x + uv.offset.x;
+                let oy = base.1 + g.pos.y + uv.offset.y;
+                let sample = |u: f32, v: f32| {
+                    let sx = (mnx + u * (mxx - mnx)).clamp(0.0, (aw - 1) as f32) as usize;
+                    let sy = (mny + v * (mxy - mny)).clamp(0.0, (ah - 1) as f32) as usize;
+                    atlas.pixels[sy * aw + sx]
                 };
-                let rc: Vec<(f32, f32)> = corners.iter().map(|p| rot(*p)).collect();
-                let minx = rc.iter().map(|p| p.0).fold(f32::INFINITY, f32::min).floor() as i32;
-                let maxx = rc.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
-                let miny = rc.iter().map(|p| p.1).fold(f32::INFINITY, f32::min).floor() as i32;
-                let maxy = rc.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
-                for py in miny..=maxy {
-                    for px in minx..=maxx {
-                        let (vx, vy) = (px as f32 + 0.5 - t.pos.0, py as f32 + 0.5 - t.pos.1);
-                        // Rotation inverse (-rot).
-                        let lx = t.pos.0 + vx * c + vy * s;
-                        let ly = t.pos.1 - vx * s + vy * c;
-                        if lx < ox || lx >= ox + dw || ly < oy || ly >= oy + dh {
-                            continue;
+                if !rotated {
+                    for dy in 0..dh.ceil() as i32 {
+                        for dx in 0..dw.ceil() as i32 {
+                            let cov = sample((dx as f32 + 0.5) / dw, (dy as f32 + 0.5) / dh);
+                            let (px, py) = ((ox + dx as f32) as i32, (oy + dy as f32) as i32);
+                            blend_pixel(pm, px, py, pw, ph, cov, color);
                         }
-                        let cov = sample((lx - ox) / dw, (ly - oy) / dh);
-                        blend_pixel(pm, px, py, pw, ph, cov, [tr, tg, tb, ta]);
+                    }
+                } else {
+                    // Mapping inverse : on parcourt la boîte écran du glyphe tourné
+                    // et on retrouve la couverture par rotation inverse (pas de trou).
+                    let corners = [(ox, oy), (ox + dw, oy), (ox + dw, oy + dh), (ox, oy + dh)];
+                    let rot = |p: (f32, f32)| {
+                        let (vx, vy) = (p.0 - t.pos.0, p.1 - t.pos.1);
+                        (t.pos.0 + vx * c - vy * s, t.pos.1 + vx * s + vy * c)
+                    };
+                    let rc: Vec<(f32, f32)> = corners.iter().map(|p| rot(*p)).collect();
+                    let minx = rc.iter().map(|p| p.0).fold(f32::INFINITY, f32::min).floor() as i32;
+                    let maxx = rc.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
+                    let miny = rc.iter().map(|p| p.1).fold(f32::INFINITY, f32::min).floor() as i32;
+                    let maxy = rc.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
+                    for py in miny..=maxy {
+                        for px in minx..=maxx {
+                            let (vx, vy) = (px as f32 + 0.5 - t.pos.0, py as f32 + 0.5 - t.pos.1);
+                            // Rotation inverse (-rot).
+                            let lx = t.pos.0 + vx * c + vy * s;
+                            let ly = t.pos.1 - vx * s + vy * c;
+                            if lx < ox || lx >= ox + dw || ly < oy || ly >= oy + dh {
+                                continue;
+                            }
+                            let cov = sample((lx - ox) / dw, (ly - oy) / dh);
+                            blend_pixel(pm, px, py, pw, ph, cov, color);
+                        }
                     }
                 }
             }

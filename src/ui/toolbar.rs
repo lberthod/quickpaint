@@ -428,6 +428,64 @@ fn draw_icon(p: &egui::Painter, rect: egui::Rect, tool: ActiveTool, col: Color32
     }
 }
 
+/// Barre d'options de l'outil Texte : taille, police, gras, alignement,
+/// contour et couleur. Les changements s'appliquent au texte édité/sélectionné.
+fn text_options(ui: &mut Ui, app: &mut PaintApp) {
+    use crate::model::text::{TextAlign, TextFont};
+    let mut changed = false;
+
+    ui.label("Taille :");
+    ui.add(egui::Slider::new(&mut app.text_size, 8.0..=200.0));
+
+    ui.separator();
+    ui.label("Police :");
+    for f in TextFont::ALL {
+        if ui.selectable_value(&mut app.text_font, f, f.label()).changed() {
+            changed = true;
+        }
+    }
+    if ui.selectable_label(app.text_bold, "𝐆").on_hover_text("Gras").clicked() {
+        app.text_bold = !app.text_bold;
+        changed = true;
+    }
+
+    ui.separator();
+    ui.label("Aligner :");
+    for a in TextAlign::ALL {
+        if ui.selectable_value(&mut app.text_align, a, a.label()).changed() {
+            changed = true;
+        }
+    }
+
+    ui.separator();
+    ui.label("Texte :");
+    let c = app.brush.color;
+    let mut col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
+    if ui.color_edit_button_srgba(&mut col).changed() {
+        app.brush.color = col.to_srgba_unmultiplied();
+        // La couleur du texte suit `brush.color` ; on la pousse aussi au texte ciblé.
+        changed = true;
+    }
+
+    ui.separator();
+    ui.label("Contour :");
+    if ui.add(egui::Slider::new(&mut app.text_outline_w, 0.0..=8.0)).changed() {
+        changed = true;
+    }
+    if app.text_outline_w > 0.0 {
+        let o = app.text_outline_color;
+        let mut oc = Color32::from_rgba_unmultiplied(o[0], o[1], o[2], o[3]);
+        if ui.color_edit_button_srgba(&mut oc).changed() {
+            app.text_outline_color = oc.to_srgba_unmultiplied();
+            changed = true;
+        }
+    }
+
+    if changed {
+        app.sync_text_style();
+    }
+}
+
 fn options_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
         // Outil Sélection : choix du mode (rectangle / lasso / baguette).
@@ -450,6 +508,11 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             if ui.color_edit_button_srgba(&mut col).changed() {
                 app.brush.color = col.to_srgba_unmultiplied();
             }
+            return;
+        }
+        // Outil Texte : taille + style riche (police, gras, alignement, contour).
+        if app.active_tool == ActiveTool::Text {
+            text_options(ui, app);
             return;
         }
         ui.label("Taille :");

@@ -15,7 +15,7 @@ Légende : ✅ présent · 🟡 partiel · ❌ absent
 | Pression (simulée vitesse) | ✅ | ❌ | ✅ (stylet) | ✅ | ✅ |
 | Gomme | ✅ (vectorielle/objet) | 🟡 | ✅ | ✅ | ✅ |
 | Formes (ligne/rect/ellipse) | ✅ (contour+plein) | ✅ | ✅ | ✅ | ✅ |
-| **Texte** | ❌ | ✅ (cœur) | ✅ | ✅ | ✅ |
+| Texte riche (police/gras/aligne/contour) | ✅ | ✅ (cœur) | ✅ | ✅ | ✅ |
 | **Sélection / déplacer / transformer** | ✅ (clic + rect/lasso/baguette) | ✅ | ✅ | ✅ (cœur) | ✅ |
 | **Plume / courbes de Bézier** | ❌ | 🟡 | ✅ | ✅ (cœur) | ✅ |
 | **Pot de peinture / remplissage zone** | 🟡 (formes pleines) | ✅ | ✅ | ✅ | ✅ |
