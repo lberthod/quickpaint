@@ -32,11 +32,18 @@ cargo run --release
 ## Construire l'app macOS (`QuickPaint.app`)
 
 ```bash
-cargo build --release
-# génère l'icône, l'.icns puis assemble le bundle
-./make-app.sh   # voir le script (build + iconutil + bundle)
+./make-app.sh        # build release + .icns + bundle QuickPaint.app
 open QuickPaint.app
 ```
+
+## Distribuer (`QuickPaint.dmg`)
+
+```bash
+./make-dmg.sh        # construit l'app + un .dmg (glisser vers Applications)
+```
+
+> Sans compte Apple Developer, l'app est signée **ad-hoc** : sur une autre
+> machine, Gatekeeper demandera un **clic droit → Ouvrir** la première fois.
 
 ## Architecture
 
