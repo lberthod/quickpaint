@@ -1,55 +1,60 @@
-# QuickPaint
+<div align="center">
+  <img src="assets/logo.png" alt="QuickPaint logo" width="160" />
 
-Éditeur de dessin **tactile** pour macOS, écrit en **Rust** avec **egui/eframe**.
-Pensé pour être simple comme Paint, mais avec des fonctions modernes (calques,
-modes de fusion, formes, texte, transformations).
+  # QuickPaint
 
-Auteur : **Loïc Berthod** — <https://github.com/lberthod>
+  A **touch-friendly** drawing editor for macOS, written in **Rust** with **egui/eframe**.
+</div>
 
-## Fonctionnalités
+Designed to be as simple as Paint, but with modern features (layers, blend modes,
+shapes, text, transforms).
 
-- **Dessin** : pinceau (épaisseur simulée par la vitesse, lissage Catmull-Rom),
-  gomme **objet** ou **partielle**, pot de peinture, pipette.
-- **Formes** : ligne, flèche, rectangle, ellipse, polygone, étoile
-  (contour ou rempli, contrainte Maj).
-- **Plume** (courbes de Bézier) et **texte** éditable.
-- **Sélection** : déplacer, **redimensionner**, **tourner**, dupliquer,
-  aligner / répartir, **ordre de superposition** (premier plan / arrière-plan).
-- **Calques** : visibilité, opacité, **modes de fusion** (produit, écran…),
-  réordonnancement, **groupes**, fusion / aplatissement.
-- **Images** : import + **coller (⌘V)**, déplacement, **recadrage**, filtres
-  (luminosité, N&B, flou).
-- **Vue** : zoom/pan tactile, grille + magnétisme, taille de document fixe.
-- **Historique** non linéaire (panneau + retour direct à un état).
-- **Export** : PNG, **SVG** vectoriel ; **sauvegarde de projet** `.json`.
+Author: **Loïc Berthod** — <https://github.com/lberthod>
 
-## Compiler & lancer
+## Features
+
+- **Drawing**: brush (width simulated from stroke speed, Catmull-Rom smoothing),
+  **object** or **partial** eraser, paint bucket, color picker.
+- **Shapes**: line, arrow, rectangle, ellipse, polygon, star
+  (outline or filled, Shift constraint).
+- **Pen** (Bézier curves) and editable **text**.
+- **Selection**: move, **resize**, **rotate**, duplicate,
+  align / distribute, **z-order** (bring to front / send to back).
+- **Layers**: visibility, opacity, **blend modes** (multiply, screen…),
+  reordering, **groups**, merge / flatten.
+- **Images**: import + **paste (⌘V)**, move, **crop**, filters
+  (brightness, grayscale, blur).
+- **View**: touch zoom/pan, grid + snapping, fixed document size.
+- **History**: non-linear (panel + jump straight to any state).
+- **Export**: PNG, vector **SVG**; **project save** as `.json`.
+
+## Build & run
 
 ```bash
 cargo run --release
 ```
 
-## Construire l'app macOS (`QuickPaint.app`)
+## Build the macOS app (`QuickPaint.app`)
 
 ```bash
-./make-app.sh        # build release + .icns + bundle QuickPaint.app
+./make-app.sh        # release build + .icns + QuickPaint.app bundle
 open QuickPaint.app
 ```
 
-## Distribuer (`QuickPaint.dmg`)
+## Distribute (`QuickPaint.dmg`)
 
 ```bash
-./make-dmg.sh        # construit l'app + un .dmg (glisser vers Applications)
+./make-dmg.sh        # builds the app + a .dmg (drag to Applications)
 ```
 
-> Sans compte Apple Developer, l'app est signée **ad-hoc** : sur une autre
-> machine, Gatekeeper demandera un **clic droit → Ouvrir** la première fois.
+> Without an Apple Developer account, the app is **ad-hoc** signed: on another
+> machine, Gatekeeper will require a **right-click → Open** the first time.
 
 ## Architecture
 
-`model` (données) · `input` (capture du geste) · `render` (rendu egui + compositeur
-CPU tiny-skia) · `history` (undo/redo par commandes) · `tools` · `ui`.
+`model` (data) · `input` (gesture capture) · `render` (egui rendering + tiny-skia
+CPU compositor) · `history` (command-based undo/redo) · `tools` · `ui`.
 
-## Licence
+## License
 
 MIT © Loïc Berthod
