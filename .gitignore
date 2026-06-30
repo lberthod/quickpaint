@@ -11,3 +11,7 @@
 # Sorties d'export locales
 QuickPaint-*.png
 QuickPaint-*.svg
+QuickPaint-*.jpg
+QuickPaint-*.jpeg
+QuickPaint-*.webp
+QuickPaint-*.pdf

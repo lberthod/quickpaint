@@ -17,16 +17,18 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
   **object** or **partial** eraser, paint bucket, color picker.
 - **Shapes**: line, arrow, rectangle, ellipse, polygon, star
   (outline or filled, Shift constraint).
-- **Pen** (Bézier curves) and editable **text**.
-- **Selection**: move, **resize**, **rotate**, duplicate,
-  align / distribute, **z-order** (bring to front / send to back).
+- **Pen** (Bézier curves) and **rich text** (proportional / monospace font,
+  faux-bold, left/center/right alignment, outline).
+- **Selection**: click, **rectangle (marquee)**, **lasso**, **magic wand**
+  (by color); move, **resize**, **rotate**, duplicate, align / distribute,
+  **z-order** (bring to front / send to back).
 - **Layers**: visibility, opacity, **blend modes** (multiply, screen…),
   reordering, **groups**, merge / flatten.
-- **Images**: import + **paste (⌘V)**, move, **crop**, filters
-  (brightness, grayscale, blur).
-- **View**: touch zoom/pan, grid + snapping, fixed document size.
+- **Images**: import + **paste (⌘V)**, move, **crop** (free or ratio-constrained
+  1:1 / 4:3 / 16:9 / A4), filters (brightness, grayscale, blur).
+- **View**: touch zoom/pan, grid + snapping, **rulers**, fixed document size.
 - **History**: non-linear (panel + jump straight to any state).
-- **Export**: PNG, vector **SVG**; **project save** as `.json`.
+- **Export**: **PNG, JPEG, WebP, PDF**, vector **SVG**; **project save** as `.json`.
 
 ## Build & run
 
