@@ -37,7 +37,7 @@ Légende : ✅ présent · 🟡 partiel · ❌ absent
 | Export bitmap (PNG/JPG/WebP/PDF) | ✅ | 🟡 | ✅ | ✅ | ✅ |
 | Export SVG (vectoriel) | ✅ | 🟡 | 🟡 | ✅ | 🟡 |
 | Sauvegarde projet | ✅ (.json) | ✅ | ✅ (.psd) | ✅ (.ai) | ✅ (.xcf) |
-| **Filtres (flou, etc.)** | ❌ | ✅ | ✅ | 🟡 | ✅ |
+| Filtres (lum./contraste/satur./netteté/flou/négatif) | ✅ | ✅ | ✅ | 🟡 | ✅ |
 | **Presets de pinceau (dureté/type)** | ❌ | 🟡 | ✅ | ✅ | ✅ |
 
 ### Forces actuelles

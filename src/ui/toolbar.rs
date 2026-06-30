@@ -256,12 +256,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
         });
 
         ui.menu_button("Filtres", |ui| {
-            for f in [
-                crate::tools::filter::Filter::Brighter,
-                crate::tools::filter::Filter::Darker,
-                crate::tools::filter::Filter::Grayscale,
-                crate::tools::filter::Filter::Blur,
-            ] {
+            for f in crate::tools::filter::Filter::ALL {
                 if ui.button(f.label()).clicked() {
                     app.filter_selection(f);
                     ui.close_menu();
