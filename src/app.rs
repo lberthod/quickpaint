@@ -774,14 +774,20 @@ impl PaintApp {
             .map(|im| im.size.1)
             .fold(0.0_f32, f32::max)
             .max(1.0);
+        // Annulable : on mute une copie de la pile puis on enregistre SetLayers.
+        let before = self.doc.layers.clone();
+        let mut after = before.clone();
         let (gap, mut x, y) = (16.0, 16.0, 16.0);
-        for im in &mut self.doc.layers[i].images {
+        for im in &mut after[i].images {
             let s = target_h / im.size.1.max(1.0);
             im.size = (im.size.0 * s, target_h);
             im.pos = (x, y);
             x += im.size.0 + gap;
         }
-        self.history.touch();
+        self.history.push(
+            &mut self.doc,
+            Command::SetLayers { before, before_active: i, after, after_active: i },
+        );
         self.status = Some("Images alignées côte à côte.".into());
     }
 
@@ -932,7 +938,7 @@ impl PaintApp {
                     if horiz { (b.0 .0 + b.1 .0) * 0.5 } else { (b.0 .1 + b.1 .1) * 0.5 }
                 };
                 let mut sorted = elems.clone();
-                sorted.sort_by(|a, b| center(&a.1).partial_cmp(&center(&b.1)).unwrap());
+                sorted.sort_by(|a, b| center(&a.1).total_cmp(&center(&b.1)));
                 let first = center(&sorted.first().unwrap().1);
                 let last = center(&sorted.last().unwrap().1);
                 let step = (last - first) / (sorted.len() as f32 - 1.0);
@@ -1030,7 +1036,7 @@ impl PaintApp {
         match mode {
             ZMove::Front => {
                 let mut s = sel.clone();
-                s.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                s.sort_by(|a, b| a.1.total_cmp(&b.1));
                 let mut nz = maxz + 1.0;
                 for (id, before) in s {
                     changes.push((id, before, nz));
@@ -1039,7 +1045,7 @@ impl PaintApp {
             }
             ZMove::Back => {
                 let mut s = sel.clone();
-                s.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                s.sort_by(|a, b| b.1.total_cmp(&a.1));
                 let mut nz = minz - 1.0;
                 for (id, before) in s {
                     changes.push((id, before, nz));
@@ -1053,9 +1059,9 @@ impl PaintApp {
                 }
                 let (id, zc) = sel[0];
                 let neighbor = if matches!(mode, ZMove::Forward) {
-                    zs.iter().filter(|(_, z)| *z > zc).min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                    zs.iter().filter(|(_, z)| *z > zc).min_by(|a, b| a.1.total_cmp(&b.1))
                 } else {
-                    zs.iter().filter(|(_, z)| *z < zc).max_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                    zs.iter().filter(|(_, z)| *z < zc).max_by(|a, b| a.1.total_cmp(&b.1))
                 };
                 if let Some((oid, oz)) = neighbor.cloned() {
                     changes.push((id, zc, oz));
@@ -1230,14 +1236,30 @@ impl PaintApp {
             .clone()
             .unwrap_or_else(|| format!("Groupe {}", self.doc.next_layer_id));
         self.doc.next_layer_id += 1;
-        self.doc.layers[i].group = Some(name.clone());
-        self.doc.layers[i - 1].group = Some(name);
+        let before = self.doc.layers.clone();
+        let mut after = before.clone();
+        after[i].group = Some(name.clone());
+        after[i - 1].group = Some(name);
+        self.history.push(
+            &mut self.doc,
+            Command::SetLayers { before, before_active: i, after, after_active: i },
+        );
         self.status = Some("Calques groupés.".into());
     }
 
     /// Retire le calque actif de son groupe.
     pub fn ungroup_active(&mut self) {
-        self.doc.layers[self.doc.active_layer].group = None;
+        let i = self.doc.active_layer;
+        if self.doc.layers[i].group.is_none() {
+            return;
+        }
+        let before = self.doc.layers.clone();
+        let mut after = before.clone();
+        after[i].group = None;
+        self.history.push(
+            &mut self.doc,
+            Command::SetLayers { before, before_active: i, after, after_active: i },
+        );
     }
 
     /// Affiche / masque tous les calques d'un groupe.
@@ -1259,8 +1281,13 @@ impl PaintApp {
             return;
         }
         let j = j as usize;
-        self.doc.layers.swap(i, j);
-        self.doc.active_layer = j;
+        let before = self.doc.layers.clone();
+        let mut after = before.clone();
+        after.swap(i, j);
+        self.history.push(
+            &mut self.doc,
+            Command::SetLayers { before, before_active: i, after, after_active: j },
+        );
     }
 
     // --- Vue : zoom / pan (idée 2) ------------------------------------------
@@ -1356,11 +1383,14 @@ impl PaintApp {
         self.selection.clear();
         self.editing_text = None;
         self.reset_view();
+        // Inclut traits, images ET textes : sinon `next_id` peut retomber sous
+        // l'id d'un texte/image existant et provoquer des collisions d'ids.
         let max = self
             .doc
             .layers
             .iter()
-            .flat_map(|l| l.strokes.iter().map(|s| s.id))
+            .flat_map(|l| l.each_z())
+            .map(|(id, _)| id)
             .max()
             .unwrap_or(0);
         self.next_id = max + 1;
