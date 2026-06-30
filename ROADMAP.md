@@ -21,6 +21,8 @@ Légende : ✅ présent · 🟡 partiel · ❌ absent
 | **Pot de peinture / remplissage zone** | 🟡 (formes pleines) | ✅ | ✅ | ✅ | ✅ |
 | **Import d'image** | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Calques | ✅ (visi/opacité/ordre/renom) | ✅ | ✅ | ✅ | ✅ |
+| Masque d'écrêtage | ✅ | 🟡 | ✅ | ✅ | ✅ |
+| Masque de calque (peint) | ❌ (prochain) | 🟡 | ✅ | ✅ | ✅ |
 | **Modes de fusion (multiply…)** | ❌ | 🟡 | ✅ | ✅ | ✅ |
 | **Compositing d'opacité réel** | 🟡 (par trait) | ✅ | ✅ | ✅ | ✅ |
 | Undo / redo | ✅ | ✅ | ✅ | ✅ | ✅ |

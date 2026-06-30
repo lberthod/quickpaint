@@ -54,6 +54,10 @@ pub struct Layer {
     /// Mode de fusion avec les calques inférieurs (roadmap #8).
     #[serde(default)]
     pub blend: BlendMode,
+    /// Masque d'écrêtage (Sprint 4) : si vrai, le calque n'est visible qu'à
+    /// travers l'alpha du calque non écrêté situé immédiatement en dessous.
+    #[serde(default)]
+    pub clip: bool,
     /// Groupe (dossier) auquel appartient le calque, le cas échéant.
     #[serde(default)]
     pub group: Option<String>,
@@ -125,6 +129,7 @@ impl Layer {
             visible: true,
             opacity: 1.0,
             blend: BlendMode::Normal,
+            clip: false,
             group: None,
             strokes: Vec::new(),
             texts: Vec::new(),

@@ -55,6 +55,8 @@ impl Compositor {
         let mut base = Pixmap::new(w, h)?;
         let atlas = ctx.fonts(|f| f.image());
         let mut live = std::collections::HashSet::new();
+        // Pixmap du dernier calque NON écrêté : base d'écrêtage des suivants.
+        let mut clip_base: Option<Pixmap> = None;
         for layer in &doc.layers {
             if !layer.visible || layer.opacity <= 0.0 {
                 continue;
@@ -79,10 +81,23 @@ impl Compositor {
                 self.layers.insert(layer.id, (hash, lp));
             }
             let lp = &self.layers[&layer.id].1;
+
+            // Calque écrêté : limité à l'alpha de la base d'écrêtage (calque du
+            // dessous). Sans base, il s'affiche normalement.
+            let clipped = if layer.clip {
+                clip_base.as_ref().map(|base_pm| {
+                    let mut c = lp.clone();
+                    clip_alpha(&mut c, base_pm);
+                    c
+                })
+            } else {
+                None
+            };
+            let draw_pm = clipped.as_ref().unwrap_or(lp);
             base.draw_pixmap(
                 0,
                 0,
-                lp.as_ref(),
+                draw_pm.as_ref(),
                 &PixmapPaint {
                     opacity: layer.opacity.clamp(0.0, 1.0),
                     blend_mode: map_blend(layer.blend),
@@ -91,6 +106,10 @@ impl Compositor {
                 Transform::identity(),
                 None,
             );
+            // Un calque non écrêté devient la base d'écrêtage des suivants.
+            if !layer.clip {
+                clip_base = Some(lp.clone());
+            }
         }
         self.layers.retain(|id, _| live.contains(id));
 
@@ -164,6 +183,27 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
         }
     }
     h
+}
+
+/// Écrête `pm` par l'alpha de `base` : chaque pixel de `pm` est multiplié par
+/// l'opacité du pixel correspondant de la base (masque d'écrêtage, Sprint 4).
+/// Les pixmaps tiny-skia sont prémultipliés, donc on met à l'échelle les 4
+/// canaux par le même facteur — la prémultiplication reste valide.
+fn clip_alpha(pm: &mut Pixmap, base: &Pixmap) {
+    let base_px = base.data();
+    let px = pm.data_mut();
+    if px.len() != base_px.len() {
+        return;
+    }
+    for i in (0..px.len()).step_by(4) {
+        let f = base_px[i + 3] as u32; // 0..=255
+        if f == 255 {
+            continue;
+        }
+        for c in 0..4 {
+            px[i + c] = ((px[i + c] as u32 * f + 127) / 255) as u8;
+        }
+    }
 }
 
 fn map_blend(b: BlendMode) -> SkBlend {
@@ -340,4 +380,32 @@ fn raster_image(pm: &mut Pixmap, im: &ImageItem) {
         ts,
         None,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clip_alpha_masks_by_base() {
+        // 2×1 : base opaque à gauche, transparente à droite.
+        let mut base = Pixmap::new(2, 1).unwrap();
+        {
+            let d = base.data_mut();
+            d[0..4].copy_from_slice(&[255, 255, 255, 255]); // px0 opaque
+            d[4..8].copy_from_slice(&[0, 0, 0, 0]); // px1 transparent
+        }
+        // Calque écrêté : deux pixels blancs opaques (prémultipliés).
+        let mut pm = Pixmap::new(2, 1).unwrap();
+        {
+            let d = pm.data_mut();
+            d[0..4].copy_from_slice(&[200, 200, 200, 255]);
+            d[4..8].copy_from_slice(&[200, 200, 200, 255]);
+        }
+        clip_alpha(&mut pm, &base);
+        let d = pm.data();
+        // px0 conservé (base opaque), px1 effacé (base transparente).
+        assert_eq!(&d[0..4], &[200, 200, 200, 255]);
+        assert_eq!(&d[4..8], &[0, 0, 0, 0]);
+    }
 }

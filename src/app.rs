@@ -1715,7 +1715,8 @@ impl PaintApp {
     /// opacité < 100 % (sinon le rendu vectoriel egui reste net à tout zoom).
     fn needs_composite(&self) -> bool {
         self.doc.layers.iter().any(|l| {
-            l.visible && (l.blend != crate::model::BlendMode::Normal || l.opacity < 0.999)
+            l.visible
+                && (l.blend != crate::model::BlendMode::Normal || l.opacity < 0.999 || l.clip)
         })
     }
 
@@ -1727,6 +1728,7 @@ impl PaintApp {
             h = h.wrapping_mul(31).wrapping_add(l.visible as u64);
             h = h.wrapping_mul(31).wrapping_add((l.opacity * 1000.0) as u64);
             h = h.wrapping_mul(31).wrapping_add(l.blend as u64);
+            h = h.wrapping_mul(31).wrapping_add(l.clip as u64);
         }
         h = h
             .wrapping_mul(31)

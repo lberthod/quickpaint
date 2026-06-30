@@ -99,7 +99,8 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             } else {
                 String::new()
             };
-            let label = format!("{} ({}){}", layer.name, layer.strokes.len(), dim);
+            let clip = if layer.clip { "⤵ " } else { "" };
+            let label = format!("{}{} ({}){}", clip, layer.name, layer.strokes.len(), dim);
             if ui.selectable_label(is_active, label).clicked() {
                 select = Some(idx);
             }
@@ -137,6 +138,12 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     ui.selectable_value(&mut layer.blend, mode, mode.label());
                 }
             });
+    });
+    // Masque d'écrêtage : visible seulement à travers le calque du dessous.
+    // Indisponible pour le calque du bas (rien en dessous).
+    ui.add_enabled_ui(active > 0, |ui| {
+        ui.checkbox(&mut layer.clip, "⤵ Écrêter sur le calque du dessous")
+            .on_hover_text("Le calque n'apparaît qu'à travers l'opacité du calque inférieur");
     });
 
     // --- Liste des éléments du calque actif (voir / sélectionner) -----------
