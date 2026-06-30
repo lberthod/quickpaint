@@ -1,0 +1,13 @@
+# Rust
+/target
+
+# Bundle macOS généré (artefact de build)
+/QuickPaint.app
+*.dmg
+
+# macOS
+.DS_Store
+
+# Sorties d'export locales
+QuickPaint-*.png
+QuickPaint-*.svg

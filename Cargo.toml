@@ -1,0 +1,37 @@
+[package]
+name = "quickpaint"
+version = "0.1.0"
+edition = "2021"
+description = "QuickPaint — éditeur de dessin tactile macOS en Rust (egui)"
+authors = ["Loïc Berthod <https://github.com/lberthod>"]
+homepage = "https://github.com/lberthod/quickpaint"
+repository = "https://github.com/lberthod/quickpaint"
+license = "MIT"
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+# Encodage PNG pour l'export (étape 7). default-features off = build léger.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Sauvegarde / ouverture de projet vectoriel (.json, étape 7).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Boîtes de dialogue natives (ouvrir / enregistrer).
+rfd = "0.15"
+# Encodage base64 des images embarquées dans le projet (.json).
+base64 = "0.22"
+# Rastérisation CPU pour le compositing par calque (modes de fusion, #8).
+tiny-skia = "0.11"
+# Presse-papiers (coller une image, ⌘V) — cas d'usage « comparer 2 images ».
+arboard = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+
+# Métadonnées pour cargo-bundle (section 8 de l'architecture)
+[package.metadata.bundle]
+name = "QuickPaint"
+identifier = "com.lberthod.quickpaint"
+category = "public.app-category.graphics-design"
+copyright = "© Loïc Berthod"
