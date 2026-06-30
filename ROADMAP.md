@@ -16,7 +16,7 @@ Légende : ✅ présent · 🟡 partiel · ❌ absent
 | Gomme | ✅ (vectorielle/objet) | 🟡 | ✅ | ✅ | ✅ |
 | Formes (ligne/rect/ellipse) | ✅ (contour+plein) | ✅ | ✅ | ✅ | ✅ |
 | **Texte** | ❌ | ✅ (cœur) | ✅ | ✅ | ✅ |
-| **Sélection / déplacer / transformer** | ❌ | ✅ | ✅ | ✅ (cœur) | ✅ |
+| **Sélection / déplacer / transformer** | ✅ (clic + rect/lasso/baguette) | ✅ | ✅ | ✅ (cœur) | ✅ |
 | **Plume / courbes de Bézier** | ❌ | 🟡 | ✅ | ✅ (cœur) | ✅ |
 | **Pot de peinture / remplissage zone** | 🟡 (formes pleines) | ✅ | ✅ | ✅ | ✅ |
 | **Import d'image** | ❌ | ✅ | ✅ | ✅ | ✅ |

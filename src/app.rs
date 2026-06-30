@@ -8,13 +8,16 @@ use crate::history::{Command, History};
 use crate::input::GestureCapture;
 use crate::model::{Document, Stroke, Tool};
 use crate::render::canvas::{self, ActiveStroke, StrokeCache, ViewTransform};
-use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser};
+use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser, SelectMode};
 use crate::ui::{footer, layers, toolbar};
 use egui::{Color32, Margin, Pos2, Rect, Sense, Vec2};
 use std::collections::HashSet;
 
 /// (id d'élément, boîte englobante (min, max)) en coordonnées document.
 type ElemBounds = (u64, ((f32, f32), (f32, f32)));
+
+/// (id, boîte englobante (min, max), centre) — géométrie de sélection (Sprint 1).
+type ElemGeom = (u64, ((f32, f32), (f32, f32)), (f32, f32));
 
 /// Mouvements de profondeur (z-order) de la sélection.
 #[derive(Clone, Copy)]
@@ -107,6 +110,14 @@ pub struct PaintApp {
     pub selection: HashSet<u64>,
     move_origin: Option<(f32, f32)>,
     move_delta: (f32, f32),
+    // Sélection par région (Sprint 1) : sous-mode + tracés en cours (coords doc).
+    pub select_mode: SelectMode,
+    /// Rectangle de sélection en cours (coin de départ, coin courant).
+    marquee: Option<((f32, f32), (f32, f32))>,
+    /// Tracé du lasso en cours (échantillons monde).
+    lasso: Vec<(f32, f32)>,
+    /// Tolérance de la baguette magique (distance couleur par canal, 0–255).
+    pub wand_tol: i32,
     clip: ClipBoard,
     // Transformation interactive de la sélection (échelle / rotation).
     xform: Option<TransformDrag>,
@@ -167,6 +178,10 @@ impl Default for PaintApp {
             selection: HashSet::new(),
             move_origin: None,
             move_delta: (0.0, 0.0),
+            select_mode: SelectMode::Rect,
+            marquee: None,
+            lasso: Vec::new(),
+            wand_tol: 32,
             clip: ClipBoard::default(),
             xform: None,
             crop_mode: false,
@@ -465,6 +480,107 @@ impl PaintApp {
             l.texts.iter().filter(|t| sel.contains(&t.id)).map(|t| t.id).collect(),
             l.images.iter().filter(|im| sel.contains(&im.id)).map(|im| im.id).collect(),
         )
+    }
+
+    // --- Sélection par région : marquee / lasso / baguette (Sprint 1) --------
+
+    /// Pour chaque élément du calque actif : (id, boîte englobante, centre).
+    /// Sert au marquee (recouvrement de boîte) et au lasso (centre dans tracé).
+    fn active_elements_geom(&self) -> Vec<ElemGeom> {
+        let l = &self.doc.layers[self.doc.active_layer];
+        let mut out = Vec::new();
+        for s in &l.strokes {
+            if let Some(bb) = hit::bounds_of(std::iter::once(s)) {
+                let center = ((bb.0 .0 + bb.1 .0) * 0.5, (bb.0 .1 + bb.1 .1) * 0.5);
+                out.push((s.id, bb, center));
+            }
+        }
+        for t in &l.texts {
+            let bb = t.approx_bounds();
+            let center = ((bb.0 .0 + bb.1 .0) * 0.5, (bb.0 .1 + bb.1 .1) * 0.5);
+            out.push((t.id, bb, center));
+        }
+        for im in &l.images {
+            let bb = im.bounds();
+            let center = ((bb.0 .0 + bb.1 .0) * 0.5, (bb.0 .1 + bb.1 .1) * 0.5);
+            out.push((im.id, bb, center));
+        }
+        out
+    }
+
+    /// Sélectionne les éléments dont la boîte recoupe le rectangle (coords doc).
+    /// `additive` (Maj) conserve la sélection existante.
+    fn select_in_rect(&mut self, a: (f32, f32), b: (f32, f32), additive: bool) {
+        let rect = ((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1)));
+        if !additive {
+            self.selection.clear();
+        }
+        for (id, bb, _) in self.active_elements_geom() {
+            if hit::bbox_intersects(rect, bb) {
+                self.selection.insert(id);
+            }
+        }
+        self.report_selection();
+    }
+
+    /// Sélectionne les éléments dont le centre tombe dans le tracé du lasso.
+    fn select_in_lasso(&mut self, poly: &[(f32, f32)], additive: bool) {
+        if !additive {
+            self.selection.clear();
+        }
+        for (id, _, center) in self.active_elements_geom() {
+            if hit::point_in_polygon(poly, center) {
+                self.selection.insert(id);
+            }
+        }
+        self.report_selection();
+    }
+
+    /// Baguette magique : sélectionne les traits et textes du calque actif dont
+    /// la couleur est proche (par canal, ≤ `wand_tol`) de l'élément cliqué.
+    fn magic_wand(&mut self, d: (f32, f32), additive: bool) {
+        let Some(target) = self.color_at_active(d) else {
+            self.status = Some("Baguette : aucun élément coloré ici.".into());
+            return;
+        };
+        let tol = self.wand_tol;
+        let close = |c: [u8; 4]| {
+            (0..4).all(|i| (c[i] as i32 - target[i] as i32).abs() <= tol)
+        };
+        if !additive {
+            self.selection.clear();
+        }
+        let l = &self.doc.layers[self.doc.active_layer];
+        let ids: Vec<u64> = l
+            .strokes
+            .iter()
+            .filter(|s| close(s.color))
+            .map(|s| s.id)
+            .chain(l.texts.iter().filter(|t| close(t.color)).map(|t| t.id))
+            .collect();
+        for id in ids {
+            self.selection.insert(id);
+        }
+        self.report_selection();
+    }
+
+    /// Couleur de l'élément (trait/texte) le plus haut sous `d` sur le calque actif.
+    fn color_at_active(&self, d: (f32, f32)) -> Option<[u8; 4]> {
+        let l = &self.doc.layers[self.doc.active_layer];
+        if let Some(t) = l.texts.iter().rev().find(|t| in_bounds(d, t.approx_bounds())) {
+            return Some(t.color);
+        }
+        l.strokes.iter().rev().find(|s| hit::point_on_stroke(s, d)).map(|s| s.color)
+    }
+
+    /// Met à jour le footer après une sélection par région.
+    fn report_selection(&mut self) {
+        let n = self.selection.len();
+        self.status = Some(match n {
+            0 => "Aucun élément sélectionné.".into(),
+            1 => "1 élément sélectionné.".into(),
+            _ => format!("{n} éléments sélectionnés."),
+        });
     }
 
     /// 4 coins + poignée de rotation de la boîte de sélection (écran).
@@ -1944,6 +2060,23 @@ impl PaintApp {
         }
     }
 
+    /// Overlay de la sélection par région : rectangle (marquee) ou tracé lasso,
+    /// en bleu translucide tant que le geste est en cours.
+    fn paint_marquee(&self, painter: &egui::Painter, view: &ViewTransform) {
+        let blue = Color32::from_rgb(40, 110, 240);
+        let fill = Color32::from_rgba_unmultiplied(40, 110, 240, 28);
+        if let Some((a, b)) = self.marquee {
+            let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
+            painter.rect_filled(r, 0.0, fill);
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, blue));
+        } else if self.lasso.len() >= 2 {
+            let pts: Vec<Pos2> = self.lasso.iter().map(|&d| view.doc_to_screen(d)).collect();
+            painter.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0, blue)));
+            // Trait de fermeture (du dernier point au premier).
+            painter.line_segment([pts[pts.len() - 1], pts[0]], egui::Stroke::new(1.0, fill));
+        }
+    }
+
     /// Anneau de prévisualisation de la taille de l'outil sous le curseur
     /// (repère ergonomique « vrai Paint »). Bichromie pour rester visible sur
     /// tout fond.
@@ -2018,6 +2151,13 @@ impl PaintApp {
                     }
                     return;
                 }
+                // Échap annule une sélection par région en cours.
+                if ctx.input(|i| i.key_pressed(egui::Key::Escape))
+                    && (self.marquee.is_some() || !self.lasso.is_empty())
+                {
+                    self.marquee = None;
+                    self.lasso.clear();
+                }
                 if response.drag_started() {
                     if let Some(p) = response.interact_pointer_pos() {
                         // Poignée d'échelle / rotation en priorité.
@@ -2027,21 +2167,24 @@ impl PaintApp {
                         let d = view.screen_to_doc(p);
                         match self.topmost_at(d) {
                             // Sur un élément déjà sélectionné → on garde la sélection.
-                            Some(id) if self.selection.contains(&id) => {}
+                            Some(id) if self.selection.contains(&id) => {
+                                self.move_origin = Some(d);
+                                self.move_delta = (0.0, 0.0);
+                            }
                             Some(id) => {
                                 if !shift {
                                     self.selection.clear();
                                 }
                                 self.selection.insert(id);
+                                self.move_origin = Some(d);
+                                self.move_delta = (0.0, 0.0);
                             }
-                            None => {
-                                if !shift {
-                                    self.selection.clear();
-                                }
-                            }
+                            // Glissé sur le vide → sélection par région (marquee/lasso).
+                            None => match self.select_mode {
+                                SelectMode::Lasso => self.lasso = vec![d],
+                                _ => self.marquee = Some((d, d)),
+                            },
                         }
-                        self.move_origin = Some(d);
-                        self.move_delta = (0.0, 0.0);
                     }
                 }
                 if response.dragged() {
@@ -2049,16 +2192,25 @@ impl PaintApp {
                         if let Some(p) = response.interact_pointer_pos() {
                             self.update_transform(p, view, shift);
                         }
-                    } else if let (Some(o), Some(p)) =
-                        (self.move_origin, response.interact_pointer_pos())
-                    {
+                    } else if let Some(p) = response.interact_pointer_pos() {
                         let d = view.screen_to_doc(p);
-                        self.move_delta = (d.0 - o.0, d.1 - o.1);
+                        if let Some((s, _)) = self.marquee {
+                            self.marquee = Some((s, d));
+                        } else if !self.lasso.is_empty() {
+                            self.lasso.push(d);
+                        } else if let Some(o) = self.move_origin {
+                            self.move_delta = (d.0 - o.0, d.1 - o.1);
+                        }
                     }
                 }
                 if response.drag_stopped() {
                     if self.xform.is_some() {
                         self.commit_transform();
+                    } else if let Some((a, b)) = self.marquee.take() {
+                        self.select_in_rect(a, b, shift);
+                    } else if !self.lasso.is_empty() {
+                        let poly = std::mem::take(&mut self.lasso);
+                        self.select_in_lasso(&poly, shift);
                     } else {
                         self.commit_move();
                     }
@@ -2066,20 +2218,25 @@ impl PaintApp {
                 if response.clicked() {
                     if let Some(p) = response.interact_pointer_pos() {
                         let d = view.screen_to_doc(p);
-                        match self.topmost_at(d) {
-                            Some(id) => {
-                                if shift && self.selection.contains(&id) {
-                                    self.selection.remove(&id);
-                                } else {
+                        // Baguette magique : sélection par couleur.
+                        if self.select_mode == SelectMode::Wand {
+                            self.magic_wand(d, shift);
+                        } else {
+                            match self.topmost_at(d) {
+                                Some(id) => {
+                                    if shift && self.selection.contains(&id) {
+                                        self.selection.remove(&id);
+                                    } else {
+                                        if !shift {
+                                            self.selection.clear();
+                                        }
+                                        self.selection.insert(id);
+                                    }
+                                }
+                                None => {
                                     if !shift {
                                         self.selection.clear();
                                     }
-                                    self.selection.insert(id);
-                                }
-                            }
-                            None => {
-                                if !shift {
-                                    self.selection.clear();
                                 }
                             }
                         }
@@ -2390,6 +2547,7 @@ impl eframe::App for PaintApp {
             self.paint_selection(&painter, &view, moving);
             self.paint_pen(&content, &view, &response);
             self.paint_crop(&painter, &view);
+            self.paint_marquee(&painter, &view);
             self.paint_cursor(&painter, &response);
 
             self.text_editor(ctx, &view);

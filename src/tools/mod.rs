@@ -30,6 +30,31 @@ pub enum ActiveTool {
     Pan,
 }
 
+/// Sous-mode de l'outil Sélection (Sprint 1). Détermine le geste « glisser sur
+/// le vide » (rectangle vs lasso) ou le clic (baguette par couleur).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SelectMode {
+    /// Rectangle de sélection (marquee) : sélectionne les éléments recoupés.
+    #[default]
+    Rect,
+    /// Lasso libre : sélectionne les éléments dont le centre est dans le tracé.
+    Lasso,
+    /// Baguette magique : clic → sélectionne les traits de couleur proche.
+    Wand,
+}
+
+impl SelectMode {
+    pub const ALL: [SelectMode; 3] = [SelectMode::Rect, SelectMode::Lasso, SelectMode::Wand];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SelectMode::Rect => "Rectangle",
+            SelectMode::Lasso => "Lasso",
+            SelectMode::Wand => "Baguette",
+        }
+    }
+}
+
 impl ActiveTool {
     /// Forme associée si l'outil est un outil « forme ».
     pub fn as_shape(self) -> Option<Shape> {

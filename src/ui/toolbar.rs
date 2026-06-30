@@ -3,7 +3,7 @@
 //! l'outil. Ne dessine pas le canvas.
 
 use crate::app::{AlignMode, PaintApp};
-use crate::tools::ActiveTool;
+use crate::tools::{ActiveTool, SelectMode};
 use egui::{Align, Color32, Layout, Sense, Ui, Vec2};
 
 /// Tailles de document prédéfinies (label, largeur, hauteur).
@@ -419,6 +419,28 @@ fn draw_icon(p: &egui::Painter, rect: egui::Rect, tool: ActiveTool, col: Color32
 
 fn options_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
+        // Outil Sélection : choix du mode (rectangle / lasso / baguette).
+        if app.active_tool == ActiveTool::Select {
+            ui.label("Mode :");
+            for mode in SelectMode::ALL {
+                ui.selectable_value(&mut app.select_mode, mode, mode.label());
+            }
+            if app.select_mode == SelectMode::Wand {
+                ui.separator();
+                ui.add(
+                    egui::Slider::new(&mut app.wand_tol, 0..=128).text("Tolérance"),
+                )
+                .on_hover_text("Écart de couleur toléré par canal");
+            }
+            ui.separator();
+            ui.label("Couleur :");
+            let c = app.brush.color;
+            let mut col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
+            if ui.color_edit_button_srgba(&mut col).changed() {
+                app.brush.color = col.to_srgba_unmultiplied();
+            }
+            return;
+        }
         ui.label("Taille :");
         let (size, range) = match app.active_tool {
             ActiveTool::Eraser => (&mut app.eraser.width, 4.0..=80.0),
