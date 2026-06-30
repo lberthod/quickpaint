@@ -47,4 +47,23 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
+# --- Signature -------------------------------------------------------------
+# Si SIGN_IDENTITY est défini (ex. "Developer ID Application: Nom (TEAMID)") :
+#   signature Developer ID avec hardened runtime + horodatage, requise pour la
+#   notarisation et la distribution hors App Store. On signe le binaire interne
+#   PUIS le bundle (Apple déconseille --deep).
+# Sinon : signature ad-hoc, suffisante en local (Gatekeeper exigera quand même
+#   « clic droit → Ouvrir » sur une autre machine).
+if [[ -n "${SIGN_IDENTITY:-}" ]]; then
+  echo "▸ Signature Developer ID : $SIGN_IDENTITY"
+  codesign --force --options runtime --timestamp \
+    --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/$BIN"
+  codesign --force --options runtime --timestamp \
+    --sign "$SIGN_IDENTITY" "$APP"
+  codesign --verify --strict --verbose=2 "$APP"
+else
+  echo "▸ Signature ad-hoc (définis SIGN_IDENTITY pour une vraie signature Developer ID)"
+  codesign --force --sign - "$APP" >/dev/null 2>&1 || true
+fi
+
 echo "✓ $APP prêt — lancez : open $APP"

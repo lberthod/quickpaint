@@ -47,8 +47,27 @@ open QuickPaint.app
 ./make-dmg.sh        # builds the app + a .dmg (drag to Applications)
 ```
 
-> Without an Apple Developer account, the app is **ad-hoc** signed: on another
-> machine, Gatekeeper will require a **right-click → Open** the first time.
+By default the app is **ad-hoc** signed: on another machine, Gatekeeper will
+require a **right-click → Open** the first time.
+
+### Signed & notarized build (Apple Developer ID)
+
+With a paid Apple Developer account, set two environment variables and the same
+script signs (hardened runtime), notarizes and staples automatically — the app
+then opens with no warning on any Mac:
+
+```bash
+# one-time: store notarization credentials in the keychain
+xcrun notarytool store-credentials "quickpaint-notary" \
+  --apple-id "you@example.com" --team-id "TEAMID" \
+  --password "<app-specific-password>"
+
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+NOTARY_PROFILE="quickpaint-notary" \
+  ./make-dmg.sh
+```
+
+`SIGN_IDENTITY` alone signs without notarizing; omit both for the ad-hoc build.
 
 ## Architecture
 
