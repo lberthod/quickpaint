@@ -156,6 +156,23 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
     });
 
+    // Contrainte de ratio du recadrage (proposée pendant le mode rognage).
+    if app.is_cropping() {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Ratio :");
+            let choices: &[(&str, Option<f32>)] = &[
+                ("Libre", None),
+                ("1:1", Some(1.0)),
+                ("4:3", Some(4.0 / 3.0)),
+                ("16:9", Some(16.0 / 9.0)),
+                ("A4", Some(210.0 / 297.0)),
+            ];
+            for (label, ratio) in choices {
+                ui.selectable_value(&mut app.crop_ratio, *ratio, *label);
+            }
+        });
+    }
+
     // Disposition (z-order) de la sélection — boutons directs.
     ui.horizontal_wrapped(|ui| {
         use crate::app::ZMove;

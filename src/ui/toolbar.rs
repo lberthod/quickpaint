@@ -3,6 +3,7 @@
 //! l'outil. Ne dessine pas le canvas.
 
 use crate::app::{AlignMode, PaintApp};
+use crate::export::ExportFormat;
 use crate::tools::{ActiveTool, SelectMode};
 use egui::{Align, Color32, Layout, Sense, Ui, Vec2};
 
@@ -90,13 +91,22 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             ui.separator();
             if ui.button("🖼 Exporter en PNG (⌘E)").clicked() {
-                app.request_export(ctx);
+                app.request_export(ctx, ExportFormat::Png);
                 ui.close_menu();
             }
-            if ui.button("◢ Exporter en SVG").clicked() {
-                app.export_svg();
-                ui.close_menu();
-            }
+            ui.menu_button("Exporter sous…", |ui| {
+                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Pdf] {
+                    if ui.button(fmt.label()).clicked() {
+                        app.request_export(ctx, fmt);
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+                if ui.button("SVG (vectoriel)").clicked() {
+                    app.export_svg();
+                    ui.close_menu();
+                }
+            });
         });
 
         ui.menu_button("Édition", |ui| {
@@ -230,6 +240,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
             ui.separator();
             ui.checkbox(&mut app.show_grid, "Grille");
+            ui.checkbox(&mut app.show_rulers, "Règles");
             ui.checkbox(&mut app.snap_enabled, "Magnétisme");
             ui.add(
                 egui::DragValue::new(&mut app.grid_size).speed(1.0).range(5.0..=200.0).prefix("pas "),

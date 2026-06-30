@@ -11,8 +11,8 @@ license = "MIT"
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
-# Encodage PNG pour l'export (étape 7). default-features off = build léger.
-image = { version = "0.25", default-features = false, features = ["png"] }
+# Encodage images pour l'export (PNG/JPG/WebP). default-features off = build léger.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 # Sauvegarde / ouverture de projet vectoriel (.json, étape 7).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

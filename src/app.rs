@@ -124,18 +124,23 @@ pub struct PaintApp {
     // Recadrage d'image : mode actif + rectangle en cours (coords doc).
     crop_mode: bool,
     crop_rect: Option<((f32, f32), (f32, f32))>,
+    /// Contrainte de ratio largeur/hauteur du recadrage (`None` = libre).
+    pub crop_ratio: Option<f32>,
     // Plume (roadmap #9) : ancres du chemin en cours.
     pen: Vec<crate::tools::pen::Anchor>,
     // Grille / magnétisme (roadmap #10).
     pub show_grid: bool,
     pub snap_enabled: bool,
     pub grid_size: f32,
+    /// Règles graduées le long du canvas (Sprint 2).
+    pub show_rulers: bool,
     // Texte (roadmap #2) : taille courante + élément en cours d'édition.
     pub text_size: f32,
     editing_text: Option<u64>,
     text_focus_pending: bool,
-    // Export PNG (capture d'écran différée d'une frame).
+    // Export bitmap (capture d'écran différée d'une frame) + format demandé.
     export_requested: bool,
+    export_format: crate::export::ExportFormat,
     // Pot de peinture : point cliqué (écran) en attente de la capture.
     bucket_click: Option<Pos2>,
     last_canvas_rect: Rect,
@@ -175,6 +180,7 @@ impl Default for PaintApp {
             show_grid: false,
             snap_enabled: false,
             grid_size: 25.0,
+            show_rulers: false,
             selection: HashSet::new(),
             move_origin: None,
             move_delta: (0.0, 0.0),
@@ -186,10 +192,12 @@ impl Default for PaintApp {
             xform: None,
             crop_mode: false,
             crop_rect: None,
+            crop_ratio: None,
             text_size: 28.0,
             editing_text: None,
             text_focus_pending: false,
             export_requested: false,
+            export_format: crate::export::ExportFormat::Png,
             bucket_click: None,
             last_canvas_rect: Rect::ZERO,
             last_doc_rect: Rect::ZERO,
@@ -702,6 +710,27 @@ impl PaintApp {
     }
 
     // --- Recadrage d'image --------------------------------------------------
+
+    /// Applique la contrainte de ratio au coin courant `e` du recadrage (à
+    /// partir du coin d'ancrage `s`). Sans contrainte, renvoie `e` tel quel.
+    fn constrain_crop(&self, s: (f32, f32), e: (f32, f32)) -> (f32, f32) {
+        let Some(ratio) = self.crop_ratio else { return e };
+        if ratio <= 0.0 {
+            return e;
+        }
+        // Signe de la direction de glissé (0 → +1, pour rester déterministe).
+        let sign = |v: f32| if v < 0.0 { -1.0 } else { 1.0 };
+        let (dx, dy) = (e.0 - s.0, e.1 - s.1);
+        // La dimension la plus « ample » impose la taille ; l'autre suit le ratio.
+        let h = (dx.abs() / ratio).max(dy.abs());
+        let w = h * ratio;
+        (s.0 + w * sign(dx), s.1 + h * sign(dy))
+    }
+
+    /// `true` si le mode recadrage est actif (UI : sélecteur de ratio).
+    pub fn is_cropping(&self) -> bool {
+        self.crop_mode
+    }
 
     /// Active le mode recadrage si une seule image est sélectionnée.
     pub fn start_crop(&mut self) {
@@ -1523,8 +1552,11 @@ impl PaintApp {
 
     // --- Export PNG (idée précédente) ---------------------------------------
 
-    pub fn request_export(&mut self, ctx: &egui::Context) {
+    /// Demande un export bitmap au format `format` : déclenche une capture
+    /// d'écran différée, traitée par `handle_screenshot`.
+    pub fn request_export(&mut self, ctx: &egui::Context, format: crate::export::ExportFormat) {
         self.export_requested = true;
+        self.export_format = format;
         ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
     }
 
@@ -1564,8 +1596,10 @@ impl PaintApp {
             (r.width() * ppp).round().max(0.0) as usize,
             (r.height() * ppp).round().max(0.0) as usize,
         );
-        self.status = Some(match crate::export::save_to_desktop(&image, crop) {
-            Ok(p) => format!("PNG enregistré : {}", p.display()),
+        let format = self.export_format;
+        self.status = Some(match crate::export::save_dialog(&image, crop, format) {
+            Ok(p) => format!("{} enregistré : {}", format.label(), p.display()),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => "Export annulé.".into(),
             Err(e) => format!("Échec de l'export : {e}"),
         });
     }
@@ -1868,7 +1902,7 @@ impl PaintApp {
             }
         }
         if want_export {
-            self.request_export(ctx);
+            self.request_export(ctx, crate::export::ExportFormat::Png);
         }
     }
 
@@ -1935,6 +1969,67 @@ impl PaintApp {
             p.line_segment([a, b], stroke);
             y += g;
         }
+    }
+
+    /// Règles graduées (haut + gauche) en coordonnées document. Le pas est
+    /// choisi pour rester lisible quel que soit le zoom.
+    fn paint_rulers(&self, painter: &egui::Painter, view: &ViewTransform) {
+        const TH: f32 = 18.0; // épaisseur de la règle (px écran)
+        let cr = self.last_canvas_rect;
+        let bg = Color32::from_gray(244);
+        let line = Color32::from_gray(120);
+        let text = Color32::from_gray(90);
+        let top = Rect::from_min_max(cr.min, egui::pos2(cr.max.x, cr.min.y + TH));
+        let left = Rect::from_min_max(cr.min, egui::pos2(cr.min.x + TH, cr.max.y));
+        painter.rect_filled(top, 0.0, bg);
+        painter.rect_filled(left, 0.0, bg);
+
+        let step = ruler_step(self.zoom); // pas en unités document
+        let font = egui::FontId::proportional(9.0);
+        let (w, h) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
+
+        // Graduations horizontales (axe X) sur la règle du haut.
+        let mut x = 0.0;
+        while x <= w {
+            let sx = view.doc_to_screen((x, 0.0)).x;
+            if sx >= left.max.x && sx <= cr.max.x {
+                painter.line_segment(
+                    [egui::pos2(sx, cr.min.y + TH * 0.45), egui::pos2(sx, cr.min.y + TH)],
+                    egui::Stroke::new(1.0, line),
+                );
+                painter.text(
+                    egui::pos2(sx + 2.0, cr.min.y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}", x as i32),
+                    font.clone(),
+                    text,
+                );
+            }
+            x += step;
+        }
+        // Graduations verticales (axe Y) sur la règle de gauche.
+        let mut y = 0.0;
+        while y <= h {
+            let sy = view.doc_to_screen((0.0, y)).y;
+            if sy >= top.max.y && sy <= cr.max.y {
+                painter.line_segment(
+                    [egui::pos2(cr.min.x + TH * 0.45, sy), egui::pos2(cr.min.x + TH, sy)],
+                    egui::Stroke::new(1.0, line),
+                );
+                painter.text(
+                    egui::pos2(cr.min.x + 1.0, sy + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}", y as i32),
+                    font.clone(),
+                    text,
+                );
+            }
+            y += step;
+        }
+        // Coin + liserés de séparation.
+        painter.rect_filled(Rect::from_min_size(cr.min, Vec2::splat(TH)), 0.0, bg);
+        painter.line_segment([egui::pos2(cr.min.x, cr.min.y + TH), egui::pos2(cr.max.x, cr.min.y + TH)], egui::Stroke::new(1.0, line));
+        painter.line_segment([egui::pos2(cr.min.x + TH, cr.min.y), egui::pos2(cr.min.x + TH, cr.max.y)], egui::Stroke::new(1.0, line));
     }
 
     /// Aperçu du chemin de plume en cours : courbe + ancres + poignées.
@@ -2139,7 +2234,8 @@ impl PaintApp {
                         if let (Some((s, _)), Some(p)) =
                             (self.crop_rect, response.interact_pointer_pos())
                         {
-                            self.crop_rect = Some((s, view.screen_to_doc(p)));
+                            let e = self.constrain_crop(s, view.screen_to_doc(p));
+                            self.crop_rect = Some((s, e));
                         }
                     }
                     if response.drag_stopped() {
@@ -2549,10 +2645,24 @@ impl eframe::App for PaintApp {
             self.paint_crop(&painter, &view);
             self.paint_marquee(&painter, &view);
             self.paint_cursor(&painter, &response);
+            if self.show_rulers {
+                self.paint_rulers(&painter, &view);
+            }
 
             self.text_editor(ctx, &view);
         });
     }
+}
+
+/// Pas de graduation des règles, en unités document, choisi pour qu'un cran
+/// fasse ~50–120 px à l'écran (séquence 1-2-5 × puissances de 10).
+fn ruler_step(zoom: f32) -> f32 {
+    let target = 80.0; // px écran visés entre deux graduations
+    let raw = target / zoom.max(0.01);
+    let pow = 10f32.powf(raw.log10().floor());
+    let n = raw / pow;
+    let mult = if n < 2.0 { 2.0 } else if n < 5.0 { 5.0 } else { 10.0 };
+    (mult * pow).max(1.0)
 }
 
 /// `true` si `p` est dans la boîte `(min, max)`.

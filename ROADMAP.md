@@ -30,10 +30,10 @@ Légende : ✅ présent · 🟡 partiel · ❌ absent
 | **Sélecteur HSV / hex / alpha** | 🟡 (RVB+alpha) | ✅ | ✅ | ✅ | ✅ |
 | **Anti-aliasing des traits** | ❌ | ✅ | ✅ | ✅ | ✅ |
 | Zoom / pan | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Grille / repères / magnétisme** | ❌ | ✅ | ✅ | ✅ | ✅ |
-| **Taille de doc fixe / presets / recadrage** | ❌ (suit la fenêtre) | ✅ | ✅ | ✅ | ✅ |
-| Export PNG | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Export SVG (vectoriel)** | ❌ | 🟡 | 🟡 | ✅ | 🟡 |
+| Grille / repères / magnétisme | ✅ (grille + règles + magnétisme) | ✅ | ✅ | ✅ | ✅ |
+| Taille de doc fixe / presets / recadrage | ✅ (presets + recadrage + ratio) | ✅ | ✅ | ✅ | ✅ |
+| Export bitmap (PNG/JPG/WebP/PDF) | ✅ | 🟡 | ✅ | ✅ | ✅ |
+| Export SVG (vectoriel) | ✅ | 🟡 | 🟡 | ✅ | 🟡 |
 | Sauvegarde projet | ✅ (.json) | ✅ | ✅ (.psd) | ✅ (.ai) | ✅ (.xcf) |
 | **Filtres (flou, etc.)** | ❌ | ✅ | ✅ | 🟡 | ✅ |
 | **Presets de pinceau (dureté/type)** | ❌ | 🟡 | ✅ | ✅ | ✅ |
