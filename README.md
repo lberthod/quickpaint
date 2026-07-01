@@ -45,31 +45,54 @@ open QuickPaint.app
 
 ## Distribute (`QuickPaint.dmg`)
 
-```bash
-./make-dmg.sh        # builds the app + a .dmg (drag to Applications)
-```
+Three distribution modes, controlled entirely by environment variables:
 
-By default the app is **ad-hoc** signed: on another machine, Gatekeeper will
-require a **right-click → Open** the first time.
+### 1 — Ad-hoc (local / testing)
 
-### Signed & notarized build (Apple Developer ID)
-
-With a paid Apple Developer account, set two environment variables and the same
-script signs (hardened runtime), notarizes and staples automatically — the app
-then opens with no warning on any Mac:
+No Apple account needed. Gatekeeper will ask for a **right-click → Open** on
+another machine the first time.
 
 ```bash
-# one-time: store notarization credentials in the keychain
-xcrun notarytool store-credentials "quickpaint-notary" \
-  --apple-id "you@example.com" --team-id "TEAMID" \
-  --password "<app-specific-password>"
-
-SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
-NOTARY_PROFILE="quickpaint-notary" \
-  ./make-dmg.sh
+./make-dmg.sh
 ```
 
-`SIGN_IDENTITY` alone signs without notarizing; omit both for the ad-hoc build.
+### 2 — Self-signed Developer ID (no notarization)
+
+Removes the ad-hoc limitation; Gatekeeper still prompts once on other Macs but
+the identity is verified. Requires a **Developer ID Application** certificate in
+your keychain (Xcode → Settings → Accounts → Manage Certificates).
+
+```bash
+# find your identity
+security find-identity -v -p codesigning | grep "Developer ID"
+
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./make-dmg.sh
+```
+
+### 3 — Fully signed + notarized (recommended for distribution)
+
+The app opens with **zero warnings** on any Mac. Requires a paid Apple Developer
+account ($99/year).
+
+```bash
+# Step 1 — generate an app-specific password at appleid.apple.com
+#           (Apple ID → Security → App-Specific Passwords)
+
+# Step 2 — store credentials in the keychain (one-time)
+xcrun notarytool store-credentials "quickpaint-notary" --apple-id "you@example.com" --team-id "TEAMID" --password "xxxx-xxxx-xxxx-xxxx"
+
+# Step 3 — build, sign, notarize and staple in one command
+SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE="quickpaint-notary" ./make-dmg.sh
+
+# Step 4 — verify (should print "source=Notarized Developer ID")
+spctl --assess --type open --context context:primary-signature -v QuickPaint.dmg
+```
+
+To find your Team ID:
+```bash
+security find-identity -v -p codesigning | grep "Developer ID"
+# → "Developer ID Application: Your Name (ABCDE12345)" — ABCDE12345 is the Team ID
+```
 
 ## Architecture
 
