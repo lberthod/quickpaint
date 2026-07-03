@@ -57,10 +57,10 @@ impl ClipBoard {
     }
 }
 
-/// Style copié depuis un élément (roadmap P1 #10, pipette de style) : couleur
-/// + épaisseur/remplissage partagés par traits et formes, plus les attributs
-/// de texte si la source était un texte (`None` sinon — un collage sur un
-/// texte gardera alors sa police actuelle).
+/// Style copié depuis un élément (roadmap P1 #10, pipette de style) :
+/// couleur et épaisseur/remplissage partagés par traits et formes, plus les
+/// attributs de texte si la source était un texte (`None` sinon — un collage
+/// sur un texte gardera alors sa police actuelle).
 #[derive(Clone)]
 struct StyleClipboard {
     color: [u8; 4],
@@ -1800,10 +1800,6 @@ impl PaintApp {
         });
     }
 
-    // --- Pipette de style (roadmap P1 #10) -----------------------------------
-
-    /// Copie le style du premier élément sélectionné (couleur/épaisseur/
-    /// remplissage, plus police/gras/alignement/contour si c'est un texte).
     // --- Presets de style nommés (Sprint 10.3) ------------------------------
 
     /// Enregistre le style de l'élément sélectionné (couleur, épaisseur,
@@ -1880,6 +1876,10 @@ impl PaintApp {
         }
     }
 
+    // --- Pipette de style (roadmap P1 #10) -----------------------------------
+
+    /// Copie le style du premier élément sélectionné (couleur/épaisseur/
+    /// remplissage, plus police/gras/alignement/contour si c'est un texte).
     pub fn copy_style(&mut self) {
         let l = &self.doc.layers[self.doc.active_layer];
         let id = match self.selection.iter().next() {
@@ -3803,7 +3803,7 @@ impl PaintApp {
 
     /// Vue immuable de la surface raster ciblée par le geste en cours :
     /// le contenu du calque, ou son masque si `editing_mask` est actif.
-    fn active_raster<'a>(layer: &'a crate::model::Layer, mask: bool) -> Option<&'a crate::model::RasterLayer> {
+    fn active_raster(layer: &crate::model::Layer, mask: bool) -> Option<&crate::model::RasterLayer> {
         if mask {
             layer.mask.as_ref()
         } else {

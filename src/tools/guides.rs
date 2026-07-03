@@ -3,6 +3,9 @@
 //! Pur et testable — l'intégration (lecture des éléments du calque, rendu
 //! des lignes magenta) est dans `app`.
 
+/// Boîte englobante en coordonnées document : (coin min, coin max).
+pub type Box2 = ((f32, f32), (f32, f32));
+
 /// Une ligne de guide affichée pendant le glissé (coordonnée document).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GuideLine {
@@ -17,8 +20,8 @@ pub enum GuideLine {
 /// rester constant visuellement quel que soit le zoom). Renvoie le delta
 /// corrigé et les guides à afficher (au plus un par axe : le plus proche).
 pub fn snap(
-    moving: ((f32, f32), (f32, f32)),
-    targets: &[((f32, f32), (f32, f32))],
+    moving: Box2,
+    targets: &[Box2],
     threshold: f32,
     delta: (f32, f32),
 ) -> ((f32, f32), Vec<GuideLine>) {

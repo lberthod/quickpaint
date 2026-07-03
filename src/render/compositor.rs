@@ -293,9 +293,8 @@ fn raster_stroke(pm: &mut Pixmap, stroke: &Stroke) {
         pb.close();
     }
     let Some(path) = pb.finish() else { return };
-    let mut paint = Paint::default();
-    paint.anti_alias = true;
-    match stroke.fill.then(|| stroke.gradient.as_ref()).flatten().and_then(gradient_shader) {
+    let mut paint = Paint { anti_alias: true, ..Paint::default() };
+    match stroke.fill.then_some(stroke.gradient.as_ref()).flatten().and_then(gradient_shader) {
         Some(shader) => paint.shader = shader,
         None => {
             let [r, g, b, alpha] = stroke.color;

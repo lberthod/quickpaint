@@ -14,7 +14,10 @@ use egui::{Align, Color32, Layout, Sense, Ui, Vec2};
 /// Nouveau depuis un modèle, galerie). Calculé à chaque appel (pas `const`)
 /// pour suivre la langue courante — coût négligeable, quelques dizaines
 /// d'entrées.
-fn templates() -> Vec<(&'static str, Vec<(&'static str, u32, u32)>)> {
+/// Une catégorie de modèles : nom affiché + liste de (nom, largeur, hauteur).
+type TemplateGroup = (&'static str, Vec<(&'static str, u32, u32)>);
+
+fn templates() -> Vec<TemplateGroup> {
     vec![
         (
             t("Réseaux sociaux", "Social media"),

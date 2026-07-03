@@ -372,7 +372,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             // Ordre d'affichage : textes, puis images, puis traits (du dessus).
             let (id, lbl) = if row < nt {
                 let txt = &l.texts[nt - 1 - row];
-                (txt.id, format!("{}", short(&txt.text)))
+                (txt.id, short(&txt.text).to_string())
             } else if row < nt + ni {
                 let im = &l.images[ni - 1 - (row - nt)];
                 (im.id, format!("{} {}×{}", t("Image", "Image"), im.w, im.h))
