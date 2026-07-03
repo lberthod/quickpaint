@@ -54,6 +54,21 @@ impl Gradient {
     }
 }
 
+/// Style nommé et réutilisable (Sprint 10.3) : couleur, épaisseur, remplissage
+/// et dégradé optionnel — capturé depuis un élément sélectionné, persisté
+/// localement (`settings.json`, comme la palette et les raccourcis) et
+/// applicable en un clic à d'autres éléments. Complète la pipette de style
+/// (copier/coller ponctuel, roadmap P1 #10) par des presets qui survivent
+/// à la fermeture de l'app.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StylePreset {
+    pub name: String,
+    pub color: [u8; 4],
+    pub width: f32,
+    pub fill: bool,
+    pub gradient: Option<Gradient>,
+}
+
 /// Un trait complet, posé dans une couche.
 ///
 /// `id` est attribué à la validation (drag terminé) ; `0` = trait non encore

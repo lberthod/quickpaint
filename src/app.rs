@@ -133,6 +133,14 @@ impl Default for BatchExportState {
     }
 }
 
+/// Gabarits « riches » avec contenu pré-rempli (Sprint 10.2), au-delà de la
+/// simple taille de document de la galerie de modèles existante.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TemplateContent {
+    InstagramPromo,
+    FacebookBanner,
+}
+
 /// Nœud ciblé par un glissé pendant l'édition de plume après coup (P2 #12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PenNodeTarget {
@@ -161,6 +169,12 @@ pub struct PaintApp {
     pub custom_palette: Vec<[u8; 3]>,
     /// Raccourcis clavier des outils, personnalisables (Sprint 7.2).
     pub keybindings: crate::keybindings::KeyBindings,
+    /// Presets de style nommés (Sprint 10.3), persistés localement.
+    pub style_presets: Vec<crate::model::StylePreset>,
+    /// Panneau des presets de style ouvert ?
+    pub show_style_presets: bool,
+    /// Nom en cours de saisie pour enregistrer le style actuel.
+    pub style_preset_name: String,
     /// Panneau de préférences des raccourcis ouvert ?
     pub show_shortcuts_prefs: bool,
     /// Action en attente d'une nouvelle touche (capture au prochain appui).
@@ -275,6 +289,8 @@ pub struct PaintApp {
     pub resize_dialog: Option<ResizeDialog>,
     /// Galerie « Nouveau depuis un modèle » ouverte (roadmap P1 #9).
     pub show_template_gallery: bool,
+    /// Bibliothèque d'éléments réutilisables ouverte (Sprint 10.1) ?
+    pub show_asset_library: bool,
     /// Style copié (roadmap P1 #10, pipette de style).
     style_clipboard: Option<StyleClipboard>,
     /// Le pinceau/gomme pixel peint dans le masque du calque actif plutôt
@@ -311,6 +327,9 @@ impl Default for PaintApp {
             recent_colors: Vec::new(),
             custom_palette: crate::i18n::load_custom_palette(),
             keybindings: crate::keybindings::KeyBindings::load(),
+            style_presets: crate::i18n::load_style_presets(),
+            show_style_presets: false,
+            style_preset_name: String::new(),
             show_shortcuts_prefs: false,
             capturing_shortcut: None,
             status: None,
@@ -374,6 +393,7 @@ impl Default for PaintApp {
             view_initialized: false,
             resize_dialog: None,
             show_template_gallery: false,
+            show_asset_library: false,
             style_clipboard: None,
             editing_mask: false,
             hex_field: String::new(),
@@ -419,6 +439,81 @@ impl PaintApp {
         let z = self.doc.next_z;
         self.doc.next_z += 1.0;
         z
+    }
+
+    /// Peuple un document tout juste créé avec un contenu de départ
+    /// (Sprint 10.2) : fond coloré + textes/éléments substituables — plutôt
+    /// qu'un document vide avec juste la bonne taille. Chaque élément reste
+    /// un objet éditable normal (texte, forme…), pas un aplat figé ; chacun
+    /// est annulable individuellement puisqu'on repart d'un historique vide
+    /// (document tout juste créé par `new_document_sized`).
+    pub fn seed_template_content(&mut self, content: TemplateContent) {
+        let (dw, dh) = self.doc.size;
+        let (w, h) = (dw as f32, dh as f32);
+        match content {
+            TemplateContent::InstagramPromo => {
+                self.add_template_rect((0.0, 0.0), (w, h), [30, 41, 59, 255]);
+                self.add_template_text((w * 0.08, h * 0.28), t("Votre titre ici", "Your title here"), h * 0.09, [255, 255, 255, 255]);
+                self.add_template_text((w * 0.08, h * 0.44), t("Sous-titre ou accroche", "Subtitle or tagline"), h * 0.04, [214, 219, 230, 255]);
+                self.add_template_asset(
+                    crate::tools::assets::Asset::Banner,
+                    (w * 0.28, h * 0.75),
+                    w * 0.32,
+                    [234, 88, 12, 255],
+                );
+                self.add_template_text((w * 0.19, h * 0.72), "PROMO", h * 0.035, [255, 255, 255, 255]);
+            }
+            TemplateContent::FacebookBanner => {
+                self.add_template_rect((0.0, 0.0), (w, h), [15, 76, 129, 255]);
+                self.add_template_text((w * 0.06, h * 0.28), t("Nom de la marque", "Brand name"), h * 0.16, [255, 255, 255, 255]);
+                self.add_template_text((w * 0.06, h * 0.58), t("Votre slogan ici", "Your tagline here"), h * 0.07, [212, 226, 240, 255]);
+            }
+        }
+        self.status = Some(t("Modèle chargé avec du contenu à personnaliser.", "Template loaded with content to customize.").into());
+    }
+
+    /// Rectangle plein (fond de gabarit) — mêmes conventions que l'outil Forme.
+    fn add_template_rect(&mut self, min: (f32, f32), max: (f32, f32), color: [u8; 4]) {
+        let mut stroke = crate::tools::shape::build(crate::tools::shape::Shape::Rectangle, min, max, color, 0.0, true, 4);
+        stroke.id = self.next_id;
+        self.next_id += 1;
+        stroke.z = self.bump_z();
+        let layer = self.doc.active_id();
+        self.history.push(&mut self.doc, Command::AddStroke { layer, stroke });
+    }
+
+    /// Élément de la bibliothèque (Sprint 10.1), pour les gabarits riches.
+    fn add_template_asset(&mut self, asset: crate::tools::assets::Asset, center: (f32, f32), size: f32, color: [u8; 4]) {
+        let mut stroke = crate::tools::assets::build(asset, center, size, color, 0.0, true);
+        stroke.id = self.next_id;
+        self.next_id += 1;
+        stroke.z = self.bump_z();
+        let layer = self.doc.active_id();
+        self.history.push(&mut self.doc, Command::AddStroke { layer, stroke });
+    }
+
+    /// Bloc de texte substituable (Sprint 10.2), gras, aligné à gauche.
+    fn add_template_text(&mut self, pos: (f32, f32), text: &str, size: f32, color: [u8; 4]) {
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut item = crate::model::TextItem::new(id, pos, size, color);
+        item.text = text.to_string();
+        item.bold = true;
+        item.z = self.bump_z();
+        let layer = self.doc.active_id();
+        self.history.push(&mut self.doc, Command::AddText { layer, text: item });
+    }
+
+    /// Insère un élément de la bibliothèque (Sprint 10.1) au centre du
+    /// document, éditable ensuite comme n'importe quelle forme (nœuds,
+    /// couleur, dégradé…) — pas une image bitmap figée.
+    pub fn insert_asset(&mut self, asset: crate::tools::assets::Asset) {
+        let (dw, dh) = self.doc.size;
+        let center = (dw as f32 * 0.5, dh as f32 * 0.5);
+        let size = (dw.min(dh) as f32 * 0.35).max(20.0);
+        let stroke = crate::tools::assets::build(asset, center, size, self.brush.color, self.brush.width, self.fill_shapes);
+        self.commit_stroke(stroke);
+        self.status = Some(format!("{} « {} » {}", t("Élément", "Element"), asset.label(), t("ajouté.", "added.")));
     }
 
     fn commit_stroke(&mut self, mut stroke: Stroke) {
@@ -1680,6 +1775,82 @@ impl PaintApp {
 
     /// Copie le style du premier élément sélectionné (couleur/épaisseur/
     /// remplissage, plus police/gras/alignement/contour si c'est un texte).
+    // --- Presets de style nommés (Sprint 10.3) ------------------------------
+
+    /// Enregistre le style de l'élément sélectionné (couleur, épaisseur,
+    /// remplissage, dégradé si présent) sous `name`, persisté immédiatement.
+    /// Écrase un preset existant du même nom plutôt que d'en empiler un
+    /// doublon.
+    pub fn save_style_preset(&mut self, name: String) {
+        if name.trim().is_empty() {
+            self.status = Some(t("Donne un nom au preset.", "Give the preset a name.").into());
+            return;
+        }
+        let l = &self.doc.layers[self.doc.active_layer];
+        let Some(id) = self.selection.iter().next().copied() else {
+            self.status = Some(t("Sélectionne d'abord un élément.", "Select an element first.").into());
+            return;
+        };
+        let Some(s) = l.strokes.iter().find(|s| s.id == id) else {
+            self.status = Some(t("Cet élément n'a pas de style enregistrable.", "This element has no savable style.").into());
+            return;
+        };
+        let preset = crate::model::StylePreset {
+            name: name.trim().to_string(),
+            color: s.color,
+            width: s.base_width,
+            fill: s.fill,
+            gradient: s.gradient.clone(),
+        };
+        self.style_presets.retain(|p| p.name != preset.name);
+        self.style_presets.push(preset);
+        crate::i18n::save_style_presets(&self.style_presets);
+        self.status = Some(t("Preset de style enregistré.", "Style preset saved.").into());
+    }
+
+    pub fn delete_style_preset(&mut self, name: &str) {
+        self.style_presets.retain(|p| p.name != name);
+        crate::i18n::save_style_presets(&self.style_presets);
+    }
+
+    /// Applique un preset de style à tous les éléments sélectionnés (même
+    /// logique que `paste_style`, plus le dégradé s'il y en a un).
+    pub fn apply_style_preset(&mut self, preset: &crate::model::StylePreset) {
+        if self.selection.is_empty() {
+            self.status = Some(t("Sélectionne au moins un élément.", "Select at least one element.").into());
+            return;
+        }
+        let active = self.doc.active_layer;
+        let l = &mut self.doc.layers[active];
+        let mut n = 0;
+        for s in &mut l.strokes {
+            if self.selection.contains(&s.id) {
+                s.color = preset.color;
+                s.fill = preset.fill;
+                if preset.width > 0.0 {
+                    let ratio = preset.width / s.base_width.max(0.01);
+                    for p in &mut s.points {
+                        p.width *= ratio;
+                    }
+                    s.base_width = preset.width;
+                }
+                s.gradient = preset.gradient.clone();
+                n += 1;
+            }
+        }
+        for t in &mut l.texts {
+            if self.selection.contains(&t.id) {
+                t.color = preset.color;
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.history.touch();
+            self.cache.clear();
+            self.status = Some(format!("{} {n} {}", t("Preset appliqué à", "Preset applied to"), t("élément(s).", "element(s).")));
+        }
+    }
+
     pub fn copy_style(&mut self) {
         let l = &self.doc.layers[self.doc.active_layer];
         let id = match self.selection.iter().next() {

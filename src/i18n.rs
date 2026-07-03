@@ -81,6 +81,10 @@ struct Settings {
     /// touche egui (`Key::name()`). Absent d'une entrée = valeur par défaut.
     #[serde(default)]
     shortcuts: std::collections::HashMap<String, String>,
+    /// Presets de style nommés (Sprint 10.3) : couleur/épaisseur/remplissage
+    /// + dégradé optionnel, réutilisables en un clic.
+    #[serde(default)]
+    style_presets: Vec<crate::model::StylePreset>,
 }
 
 fn settings_path() -> Option<PathBuf> {
@@ -175,6 +179,17 @@ pub fn load_shortcuts() -> std::collections::HashMap<String, String> {
 pub fn save_shortcuts(shortcuts: &std::collections::HashMap<String, String>) {
     let mut settings = read_settings();
     settings.shortcuts = shortcuts.clone();
+    write_settings(&settings);
+}
+
+/// Presets de style nommés (Sprint 10.3), même fichier local.
+pub fn load_style_presets() -> Vec<crate::model::StylePreset> {
+    read_settings().style_presets
+}
+
+pub fn save_style_presets(presets: &[crate::model::StylePreset]) {
+    let mut settings = read_settings();
+    settings.style_presets = presets.to_vec();
     write_settings(&settings);
 }
 

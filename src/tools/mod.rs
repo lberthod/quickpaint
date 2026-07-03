@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod boolean;
 pub mod brush;
 pub mod bucket;

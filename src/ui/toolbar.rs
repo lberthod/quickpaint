@@ -202,6 +202,125 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     template_gallery(ctx, app);
     shortcuts_prefs_window(ctx, app);
     batch_export_window(ctx, app);
+    style_presets_window(ctx, app);
+    asset_library_window(ctx, app);
+}
+
+/// Bibliothèque d'éléments réutilisables (Sprint 10.1) : pictogrammes et
+/// formes composées insérés comme traits pleins éditables (pas des images
+/// figées), 100% embarqués dans le binaire.
+fn asset_library_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_asset_library {
+        return;
+    }
+    let mut open = true;
+    let mut picked: Option<crate::tools::assets::Asset> = None;
+    let mut want_close = false;
+    egui::Window::new(t("✨ Bibliothèque d'éléments", "✨ Element library"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(320.0);
+            ui.horizontal_wrapped(|ui| {
+                for asset in crate::tools::assets::Asset::ALL {
+                    ui.vertical(|ui| {
+                        let (rect, resp) = ui.allocate_exact_size(egui::vec2(72.0, 72.0), egui::Sense::click());
+                        let visuals = ui.style().interact(&resp);
+                        ui.painter().rect_filled(rect, 6.0, visuals.bg_fill);
+                        let inner = rect.shrink(12.0);
+                        let col = ui.visuals().text_color();
+                        let stroke = egui::Stroke::new(1.6, col);
+                        let pts: Vec<egui::Pos2> = asset
+                            .points()
+                            .iter()
+                            .map(|(x, y)| egui::pos2(inner.center().x + x * inner.width() * 0.5, inner.center().y + y * inner.height() * 0.5))
+                            .collect();
+                        if asset.closed() {
+                            ui.painter().add(egui::Shape::closed_line(pts, stroke));
+                        } else {
+                            ui.painter().add(egui::Shape::line(pts, stroke));
+                        }
+                        ui.label(asset.label());
+                        if resp.clicked() {
+                            picked = Some(asset);
+                        }
+                    });
+                }
+            });
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                want_close = true;
+            }
+        });
+    if let Some(asset) = picked {
+        app.insert_asset(asset);
+        app.show_asset_library = false;
+    } else if want_close || !open {
+        app.show_asset_library = false;
+    }
+}
+
+/// Panneau des presets de style nommés (Sprint 10.3) : enregistrer le style
+/// de l'élément sélectionné sous un nom, puis l'appliquer/le retirer en un
+/// clic. Persisté localement, aucun compte ni service distant.
+fn style_presets_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_style_presets {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("🎨 Presets de style", "🎨 Style presets"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(300.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut app.style_preset_name).hint_text(t("Nom du preset", "Preset name")));
+                if ui.button(t("Enregistrer", "Save")).clicked() {
+                    let name = std::mem::take(&mut app.style_preset_name);
+                    app.save_style_preset(name);
+                }
+            })
+            .response
+            .on_hover_text(t(
+                "Enregistre le style (couleur, épaisseur, remplissage, dégradé) de l'élément sélectionné",
+                "Saves the style (color, width, fill, gradient) of the selected element",
+            ));
+            ui.separator();
+            if app.style_presets.is_empty() {
+                ui.label(t("Aucun preset enregistré pour l'instant.", "No presets saved yet."));
+            }
+            let mut to_apply: Option<usize> = None;
+            let mut to_delete: Option<usize> = None;
+            for (i, preset) in app.style_presets.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let c = preset.color;
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 3.0, egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]));
+                    ui.label(&preset.name);
+                    if ui.button(t("Appliquer", "Apply")).clicked() {
+                        to_apply = Some(i);
+                    }
+                    if ui.button("🗑").on_hover_text(t("Supprimer", "Delete")).clicked() {
+                        to_delete = Some(i);
+                    }
+                });
+            }
+            if let Some(i) = to_apply {
+                let preset = app.style_presets[i].clone();
+                app.apply_style_preset(&preset);
+            }
+            if let Some(i) = to_delete {
+                let name = app.style_presets[i].name.clone();
+                app.delete_style_preset(&name);
+            }
+        });
+    if !open {
+        app.show_style_presets = false;
+    }
 }
 
 /// Panneau « Exporter en plusieurs tailles » (Sprint 7.3) : coche des
@@ -319,6 +438,7 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
     }
     let mut open = true;
     let mut picked: Option<(u32, u32)> = None;
+    let mut picked_rich: Option<(u32, u32, crate::app::TemplateContent)> = None;
     egui::Window::new(t("Nouveau depuis un modèle", "New from template"))
         .open(&mut open)
         .collapsible(false)
@@ -326,6 +446,20 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             ui.set_min_width(360.0);
+            ui.label(egui::RichText::new(t("Avec contenu de départ", "With starter content")).strong());
+            ui.horizontal_wrapped(|ui| {
+                use crate::app::TemplateContent;
+                for (label, w, h, content) in [
+                    (t("Post promo Instagram", "Instagram promo post"), 1080, 1080, TemplateContent::InstagramPromo),
+                    (t("Bannière Facebook", "Facebook banner"), 1200, 630, TemplateContent::FacebookBanner),
+                ] {
+                    let text = format!("{label}\n{w}×{h}");
+                    if ui.add(egui::Button::new(text).min_size(egui::vec2(150.0, 40.0))).clicked() {
+                        picked_rich = Some((w, h, content));
+                    }
+                }
+            });
+            ui.separator();
             for (cat, items) in templates() {
                 ui.label(egui::RichText::new(cat).strong());
                 ui.horizontal_wrapped(|ui| {
@@ -342,7 +476,11 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
                 app.show_template_gallery = false;
             }
         });
-    if let Some((w, h)) = picked {
+    if let Some((w, h, content)) = picked_rich {
+        app.new_document_sized(w, h);
+        app.seed_template_content(content);
+        app.show_template_gallery = false;
+    } else if let Some((w, h)) = picked {
         app.new_document_sized(w, h);
         app.show_template_gallery = false;
     } else if !open {
@@ -476,6 +614,14 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     "Applies to selected filled shapes (\"Filled\" option)",
                 ));
             });
+            if ui.button(t("🎨 Presets de style…", "🎨 Style presets…")).clicked() {
+                app.show_style_presets = true;
+                ui.close_menu();
+            }
+            if ui.button(t("✨ Bibliothèque d'éléments…", "✨ Element library…")).clicked() {
+                app.show_asset_library = true;
+                ui.close_menu();
+            }
             ui.separator();
             let two_filled_shapes = app.selection.len() == 2
                 && app.doc.layers[app.doc.active_layer]

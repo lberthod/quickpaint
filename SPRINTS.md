@@ -165,24 +165,34 @@ d'arrière-plan) — mais **embarquée et exécutée en local**, aucun appel ré
 Objectif : combler « éléments réutisables » et « templates » de l'audit, en
 restant 100 % embarqué (aucune banque d'images en ligne).
 
-- [ ] **10.1 Bibliothèque de pictos/formes composées** — M, ⭐⭐ (déjà noté
-      backlog ROADMAP #9b) : jeu de pictos SVG basiques (flèches, formes
-      composées, icônes UI courantes) **embarqués dans le binaire**
-      (`include_bytes!`/`rust-embed`), insérables comme groupe de formes
-      éditables (pas une image bitmap figée). Panneau latéral avec recherche
-      texte locale (pas d'indexation réseau).
-- [ ] **10.2 Templates riches (contenu pré-rempli)** — M, ⭐⭐
-      La galerie actuelle ([toolbar.rs](src/ui/toolbar.rs) `templates()`) ne
-      fixe que la taille du document. Étape suivante : quelques modèles avec
-      contenu de départ (placeholders texte + formes déjà composées, ex. « post
-      Instagram promo » avec zone titre/sous-titre/CTA) sérialisés en `.json`
-      natif et embarqués dans le binaire — pas de téléchargement, pas de
-      catalogue en ligne.
-- [ ] **10.3 Presets de dégradés/styles nommés** — S, ⭐
-      Dégradés et styles de texte réutilisables mais non enregistrables
-      aujourd'hui (ROADMAP #11/#10 notent le manque). Ajouter une liste de
-      presets nommés (dégradés, styles de texte) sauvegardés localement,
-      appliqués en un clic — complète 7.1 côté palette de couleurs.
+- [x] **10.1 Bibliothèque de pictos/formes composées** — M, ⭐⭐ (déjà noté
+      backlog ROADMAP #9b)
+      Nouveau module [tools/assets.rs](src/tools/assets.rs) : 6 éléments
+      (cœur, bulle de dialogue, badge/sceau, croix, coche, bannière/ruban),
+      chacun un contour normalisé généré en code (paramétrique ou liste de
+      points) — **aucun fichier SVG à embarquer**, donc aucune dépendance de
+      parsing. Inséré comme un `Stroke` plein éditable (nœuds, couleur,
+      dégradé…) au centre du document via **Édition › ✨ Bibliothèque
+      d'éléments…** ([toolbar.rs](src/ui/toolbar.rs) `asset_library_window`),
+      avec aperçu vectoriel de chaque élément dans le panneau (même géométrie
+      que celle insérée, pas une icône séparée à maintenir). ✅
+- [x] **10.2 Templates riches (contenu pré-rempli)** — M, ⭐⭐
+      2 modèles avec contenu de départ en plus de la galerie taille-seule :
+      **Post promo Instagram** et **Bannière Facebook**
+      (`app.seed_template_content`, [app.rs](src/app.rs)) — fond coloré,
+      titre/sous-titre substituables, élément Bannière (10.1) avec libellé
+      « PROMO » sur le premier. Chaque élément reste un objet normal
+      (texte/forme), individuellement annulable, plutôt que sérialisé à part
+      : plus simple à maintenir en cohérence avec le modèle de document que
+      des fichiers `.json` figés. ✅
+- [x] **10.3 Presets de dégradés/styles nommés** — S, ⭐
+      `crate::model::StylePreset` ([model/stroke.rs](src/model/stroke.rs)) :
+      couleur/épaisseur/remplissage/dégradé capturés depuis l'élément
+      sélectionné, nommés et persistés dans `settings.json` (même mécanisme
+      que la palette 7.1 et les raccourcis 7.2). Panneau **Édition › 🎨
+      Presets de style…** : enregistrer/appliquer/supprimer. Styles de texte
+      nommés (polices/alignement) laissés au backlog — la copie/collage de
+      style (P1 #10) couvre déjà ce cas ponctuellement. ✅
 
 **Jalon 10** : composition rapide façon Canva, contenu et assets 100 %
 embarqués dans l'app, sans jamais interroger un service distant.
