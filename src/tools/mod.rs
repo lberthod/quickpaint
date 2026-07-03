@@ -29,6 +29,10 @@ pub enum ActiveTool {
     /// Tampon de clonage (roadmap P0 #5) : Alt+clic = source, glisser = peint
     /// en échantillonnant la couche raster avec un décalage constant.
     CloneStamp,
+    /// Correcteur (Sprint 8.3) : même geste que le tampon de clonage, mais
+    /// recale la couleur moyenne recopiée sur celle de la zone cible — pour
+    /// effacer un défaut sans coller un patch visible.
+    Healing,
     Line,
     Arrow,
     Rectangle,

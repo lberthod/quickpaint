@@ -73,26 +73,35 @@ palette de marque, export web+print en un clic) sans quitter l'app.
 Objectif : finir le bloc « logique PhotoFiltre » resté en 🟡 dans la matrice
 de [ROADMAP.md](ROADMAP.md) (niveaux/courbes continus, correcteur).
 
-- [ ] **8.1 Réglages continus : niveaux & teinte/saturation** — M, ⭐⭐⭐
-      Les calques d'ajustement actuels ([tools/filter.rs](src/tools/filter.rs))
-      sont des presets discrets. Ajouter deux variantes d'`Adjustment` avec
-      paramètres continus : `Levels { black, gamma, white }` et
-      `HueSaturation { hue, sat, light }`, réglées par sliders dans le panneau
-      de calques, recalculées à chaque frame par le compositeur (déjà prévu
-      pour une passe de plus, voir F3 dans ROADMAP §2). Aucune dépendance
-      externe — arithmétique pixel pure.
-- [ ] **8.2 Courbes (RVB + par canal)** — L, ⭐⭐
-      Widget courbe (points de contrôle + interpolation spline, `egui::Painter`
-      pur) générant une LUT 256 valeurs appliquée par le compositeur, même
-      mécanisme que 8.1. Peut réutiliser la table de correspondance pour les 3
-      canaux séparés ou en tons.
-- [ ] **8.3 Correcteur (healing brush)** — M, ⭐⭐
-      Le tampon de clonage existe (décalage figé, [raster.rs](src/model/raster.rs)
-      `clone_stamp_segment`). Le correcteur diffère par le **mélange** :
-      copier la texture source mais reprojeter la luminance locale de la zone
-      cible (mélange de Poisson simplifié ou moyenne glissante) pour effacer
-      un défaut sans coller un patch visible. Backlog technique déjà noté
-      dans ROADMAP #5.
+- [x] **8.1 Réglages continus : niveaux & teinte/saturation** — M, ⭐⭐⭐
+      `Adjustment` ([tools/filter.rs](src/tools/filter.rs)) remplace le
+      `Filter` discret des calques de réglage : `Preset(Filter)` (les 9
+      d'origine, inchangés) + `Levels { black, white, gamma }` (point
+      noir/blanc + gamma, formule Photoshop) + `HueSaturation { hue, sat,
+      light }` (aller-retour RVB↔HSL par pixel). Sliders dans le panneau de
+      calques ([layers.rs](src/ui/layers.rs)) ; le compositeur applique en
+      direct via `apply_adjustment` ([compositor.rs](src/render/compositor.rs)),
+      même mécanisme F3 qu'avant. Signature de cache dédiée (`hash_key`, FNV)
+      car `Adjustment` porte des `f32` (pas de `Hash` dérivable). ✅
+- [x] **8.2 Courbes** — L→S (réduit), ⭐⭐
+      Plutôt qu'un éditeur à points libres (glisser-déposer, complexe et
+      fragile), **courbe à 3 points ancrés** (ombres/tons moyens/hautes
+      lumières, x = 0/128/255) interpolée linéairement — `Adjustment::Curves`.
+      Couvre le besoin réel (éclaircir les ombres, assombrir les hautes
+      lumières, courbe en S) avec 3 sliders au lieu d'un widget de dessin.
+      Un éditeur à points libres façon Photoshop reste possible en
+      itération future si ce compromis se révèle trop limité à l'usage. ✅
+- [x] **8.3 Correcteur (healing brush)** — M, ⭐⭐
+      `RasterLayer::heal_stamp`/`heal_stamp_segment`
+      ([model/raster.rs](src/model/raster.rs)) : même géométrie que le tampon
+      de clonage, mais calcule la moyenne de couleur source vs. destination
+      (pondérée par couverture × alpha des deux côtés) et décale chaque pixel
+      recopié de cet écart avant de peindre — un mélange de Poisson simplifié
+      (décalage de couleur constant, pas de résolution d'équation complète)
+      qui garde la texture de la source sans coller un patch qui détonne.
+      Nouvel outil `ActiveTool::Healing`, geste partagé avec le tampon de
+      clonage (`handle_clone_stamp(.., heal: bool)`), `RasterOp::Heal` pour
+      l'étiquette d'undo. ✅
 
 **Jalon 8** : retouche photo à niveau PhotoFiltre/Photoshop Elements sur les
 réglages tonals, toujours non destructif.

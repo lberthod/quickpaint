@@ -1851,18 +1851,14 @@ impl PaintApp {
     /// Ajoute un calque d'ajustement (roadmap F3) au-dessus du calque actif :
     /// non destructif, réversible, re-réglable en changeant simplement son
     /// filtre depuis le panneau de calques.
-    pub fn add_adjustment_layer(&mut self, filter: crate::tools::filter::Filter) {
+    pub fn add_adjustment_layer(&mut self, adjustment: crate::tools::filter::Adjustment) {
         let id = self.doc.next_layer_id;
         self.doc.next_layer_id += 1;
-        let layer = crate::model::Layer::new_adjustment(id, format!("{} : {}", t("Réglage", "Adjustment"), filter.label()), filter);
+        let label = adjustment.label();
+        let layer = crate::model::Layer::new_adjustment(id, format!("{} : {label}", t("Réglage", "Adjustment")), adjustment);
         let index = self.doc.active_layer + 1;
         self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
-        self.status = Some(format!(
-            "{} « {} » {}",
-            t("Calque d'ajustement", "Adjustment layer"),
-            filter.label(),
-            t("ajouté.", "added.")
-        ));
+        self.status = Some(format!("{} « {label} » {}", t("Calque d'ajustement", "Adjustment layer"), t("ajouté.", "added.")));
     }
 
     pub fn delete_active_layer(&mut self) {
@@ -2569,7 +2565,7 @@ impl PaintApp {
             h = h.wrapping_mul(31).wrapping_add((l.opacity * 1000.0) as u64);
             h = h.wrapping_mul(31).wrapping_add(l.blend as u64);
             h = h.wrapping_mul(31).wrapping_add(l.clip as u64);
-            h = h.wrapping_mul(31).wrapping_add(l.adjustment.map(|f| f as u64 + 1).unwrap_or(0));
+            h = h.wrapping_mul(31).wrapping_add(l.adjustment.map(|a| a.hash_key() + 1).unwrap_or(0));
         }
         h = h
             .wrapping_mul(31)
@@ -3411,7 +3407,8 @@ impl PaintApp {
                     self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush });
                 }
             }
-            ActiveTool::CloneStamp => self.handle_clone_stamp(ctx, response, view),
+            ActiveTool::CloneStamp => self.handle_clone_stamp(ctx, response, view, false),
+            ActiveTool::Healing => self.handle_clone_stamp(ctx, response, view, true),
             _ => self.handle_draw(ctx, response, view),
         }
     }
@@ -3524,7 +3521,12 @@ impl PaintApp {
     // début du geste), comme dans GIMP/Photoshop : la source suit la
     // destination en parallèle pendant tout le trait.
 
-    fn handle_clone_stamp(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
+    /// Geste partagé par le tampon de clonage et le correcteur (Sprint 8.3) :
+    /// Alt+clic définit la source, glisser peint. Seule la fonction de
+    /// peinture pixel diffère (`heal` bascule vers `heal_stamp*`, qui recale
+    /// la couleur recopiée sur la zone cible au lieu de la recopier telle
+    /// quelle).
+    fn handle_clone_stamp(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform, heal: bool) {
         let alt = ctx.input(|i| i.modifiers.alt);
         if alt {
             // `clicked()` seul rate parfois un clic quasi-immobile interprété
@@ -3541,11 +3543,12 @@ impl PaintApp {
             }
             return;
         }
+        let op = if heal { RasterOp::Heal } else { RasterOp::Clone };
         if response.drag_started() {
             if let (Some(p), Some(src)) = (response.interact_pointer_pos(), self.clone_source) {
                 let d = view.screen_to_doc(p);
                 self.clone_offset = Some((src.0 - d.0, src.1 - d.1));
-                self.paint_clone_point(d);
+                self.paint_clone_point(d, heal);
                 self.raster_stroke_last = Some(d);
             } else if self.clone_source.is_none() {
                 self.status = Some(t("Alt+clic pour définir la source du tampon.", "Alt+click to set the stamp source.").into());
@@ -3555,22 +3558,22 @@ impl PaintApp {
             if let Some(p) = response.interact_pointer_pos() {
                 let d = view.screen_to_doc(p);
                 match self.raster_stroke_last {
-                    Some(last) => self.paint_clone_segment(last, d),
-                    None => self.paint_clone_point(d),
+                    Some(last) => self.paint_clone_segment(last, d, heal),
+                    None => self.paint_clone_point(d, heal),
                 }
                 self.raster_stroke_last = Some(d);
             }
         } else if self.raster_stroke_last.is_some() {
             self.raster_stroke_last = None;
-            self.commit_raster_stroke(RasterOp::Clone);
+            self.commit_raster_stroke(op);
         }
         if response.drag_stopped() {
             self.raster_stroke_last = None;
-            self.commit_raster_stroke(RasterOp::Clone);
+            self.commit_raster_stroke(op);
         }
     }
 
-    fn paint_clone_point(&mut self, d: (f32, f32)) {
+    fn paint_clone_point(&mut self, d: (f32, f32), heal: bool) {
         let radius = self.brush.width * 0.5;
         self.touch_raster_tiles(d.0, d.1, radius);
         let offset = self.clone_offset.unwrap_or((0.0, 0.0));
@@ -3578,12 +3581,16 @@ impl PaintApp {
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
-            layer.raster.clone_stamp(d.0, d.1, radius, hardness, offset, opacity);
+            if heal {
+                layer.raster.heal_stamp(d.0, d.1, radius, hardness, offset, opacity);
+            } else {
+                layer.raster.clone_stamp(d.0, d.1, radius, hardness, offset, opacity);
+            }
         }
         self.history.touch();
     }
 
-    fn paint_clone_segment(&mut self, from: (f32, f32), to: (f32, f32)) {
+    fn paint_clone_segment(&mut self, from: (f32, f32), to: (f32, f32), heal: bool) {
         let radius = self.brush.width * 0.5;
         let dist = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
         let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
@@ -3596,7 +3603,11 @@ impl PaintApp {
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
-            layer.raster.clone_stamp_segment(from, to, radius, hardness, offset, opacity);
+            if heal {
+                layer.raster.heal_stamp_segment(from, to, radius, hardness, offset, opacity);
+            } else {
+                layer.raster.clone_stamp_segment(from, to, radius, hardness, offset, opacity);
+            }
         }
         self.history.touch();
     }

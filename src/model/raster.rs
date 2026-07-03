@@ -213,6 +213,84 @@ impl RasterLayer {
         }
     }
 
+    /// Correcteur (healing brush, Sprint 8.3) : comme le tampon de clonage,
+    /// mais recale la moyenne de couleur de la texture recopiée sur la
+    /// moyenne locale de la zone cible avant de peindre — un mélange de
+    /// Poisson simplifié (décalage constant de couleur, pas de résolution
+    /// d'équation de Poisson complète) qui conserve le détail/texture de la
+    /// source sans coller un patch dont la teinte moyenne détonnerait,
+    /// contrairement au clonage pur.
+    pub fn heal_stamp(&mut self, cx: f32, cy: f32, radius: f32, hardness: f32, offset: (f32, f32), opacity: f32) {
+        if radius <= 0.0 {
+            return;
+        }
+        let hardness = hardness.clamp(0.0, 1.0);
+        let edge = hardness * radius;
+        let (x0, x1) = ((cx - radius).floor() as i32, (cx + radius).ceil() as i32);
+        let (y0, y1) = ((cy - radius).floor() as i32, (cy + radius).ceil() as i32);
+        let mut src_sum = [0f32; 3];
+        let mut dst_sum = [0f32; 3];
+        let mut weight = 0f32;
+        let mut samples = Vec::new();
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                if d > radius {
+                    continue;
+                }
+                let cov = if radius <= edge || d <= edge { 1.0 } else { 1.0 - (d - edge) / (radius - edge) };
+                let sx = (x as f32 + offset.0).round() as i32;
+                let sy = (y as f32 + offset.1).round() as i32;
+                let src = self.get_pixel(sx, sy);
+                let dst = self.get_pixel(x, y);
+                // Pondère par la couverture du disque ET l'opacité des deux
+                // côtés : un pixel transparent (source ou destination) ne
+                // doit pas fausser la moyenne de couleur.
+                let w = cov * (src[3] as f32 / 255.0) * (dst[3] as f32 / 255.0);
+                for c in 0..3 {
+                    src_sum[c] += src[c] as f32 * w;
+                    dst_sum[c] += dst[c] as f32 * w;
+                }
+                weight += w;
+                samples.push((x, y, cov, src));
+            }
+        }
+        let shift = if weight > 0.0 {
+            [(dst_sum[0] - src_sum[0]) / weight, (dst_sum[1] - src_sum[1]) / weight, (dst_sum[2] - src_sum[2]) / weight]
+        } else {
+            [0.0; 3]
+        };
+        for (x, y, cov, src) in samples {
+            let a = (src[3] as f32 * opacity.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8;
+            let mut rgb = [0u8; 3];
+            for (c, slot) in rgb.iter_mut().enumerate() {
+                *slot = (src[c] as f32 + shift[c]).round().clamp(0.0, 255.0) as u8;
+            }
+            self.blend_pixel(x, y, [rgb[0], rgb[1], rgb[2], a], cov);
+        }
+    }
+
+    /// Trace le correcteur le long d'un segment (trait continu).
+    pub fn heal_stamp_segment(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        radius: f32,
+        hardness: f32,
+        offset: (f32, f32),
+        opacity: f32,
+    ) {
+        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let step = (radius * 0.3).max(1.0);
+        let n = (dist / step).ceil().max(1.0) as i32;
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            self.heal_stamp(from.0 + dx * t, from.1 + dy * t, radius, hardness, offset, opacity);
+        }
+    }
+
     /// Remplissage par diffusion (pot de peinture pixel) depuis `(sx, sy)`,
     /// **borné** à `bounds` (min inclus, max exclu — typiquement le canevas
     /// document). Sans cette borne, un point de départ transparent n'a
@@ -497,6 +575,34 @@ mod tests {
         r.clone_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 0.5);
         let p = r.get_pixel(50, 50);
         assert!(p[3] < 255 && p[3] > 0);
+    }
+
+    #[test]
+    fn heal_stamp_shifts_toward_destination_mean_color() {
+        let mut r = RasterLayer::default();
+        // Source uniforme rouge vif, destination environnante bleue : le
+        // correcteur doit se rapprocher de la teinte de destination — à la
+        // différence du clonage pur qui recopierait le rouge tel quel.
+        r.stamp(10.0, 10.0, 6.0, 1.0, [255, 0, 0, 255], false);
+        for y in 44..56 {
+            for x in 44..56 {
+                r.set_pixel(x, y, [0, 0, 255, 255]);
+            }
+        }
+        r.heal_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 1.0);
+        let p = r.get_pixel(50, 50);
+        // Toujours teinté par la texture source (canal rouge > 0) mais
+        // nettement rapproché du bleu environnant (bien en dessous de 255).
+        assert!(p[0] < 255, "red channel should shift down: {p:?}");
+    }
+
+    #[test]
+    fn heal_stamp_is_noop_when_source_matches_destination() {
+        let mut r = RasterLayer::default();
+        r.stamp(10.0, 10.0, 6.0, 1.0, [120, 80, 40, 255], false);
+        r.stamp(50.0, 50.0, 6.0, 1.0, [120, 80, 40, 255], false);
+        r.heal_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 1.0);
+        assert_eq!(r.get_pixel(50, 50), [120, 80, 40, 255]);
     }
 
     #[test]

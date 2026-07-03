@@ -48,6 +48,190 @@ impl Filter {
     }
 }
 
+/// Réglage non destructif d'un calque d'ajustement (Sprint 8.1/8.2), en plus
+/// des 9 presets discrets de [`Filter`] : niveaux et teinte/saturation à
+/// paramètres continus, courbe à 3 points ancrés (ombres/tons
+/// moyens/hautes lumières). Canal composite RVB uniquement (pas de réglage
+/// par canal séparé) — suffisant pour retrouver le cœur PhotoFiltre/Photoshop
+/// sans la complexité d'un éditeur de courbe à points libres.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Adjustment {
+    Preset(Filter),
+    Levels { black: u8, white: u8, gamma: f32 },
+    /// `hue` en degrés (-180..180), `sat`/`light` en écart relatif (-1.0..1.0).
+    HueSaturation { hue: f32, sat: f32, light: f32 },
+    Curves { shadow: u8, mid: u8, highlight: u8 },
+}
+
+impl Adjustment {
+    pub fn label(self) -> String {
+        match self {
+            Adjustment::Preset(f) => f.label().to_string(),
+            Adjustment::Levels { .. } => t("Niveaux", "Levels").to_string(),
+            Adjustment::HueSaturation { .. } => t("Teinte/Saturation", "Hue/Saturation").to_string(),
+            Adjustment::Curves { .. } => t("Courbes", "Curves").to_string(),
+        }
+    }
+
+    pub fn default_levels() -> Self {
+        Adjustment::Levels { black: 0, white: 255, gamma: 1.0 }
+    }
+
+    pub fn default_hue_saturation() -> Self {
+        Adjustment::HueSaturation { hue: 0.0, sat: 0.0, light: 0.0 }
+    }
+
+    pub fn default_curves() -> Self {
+        Adjustment::Curves { shadow: 0, mid: 128, highlight: 255 }
+    }
+
+    /// Signature FNV-1a des paramètres, pour l'invalidation du cache de rendu
+    /// (`Adjustment` porte des `f32`, donc pas de `Hash`/`Eq` dérivable).
+    pub fn hash_key(self) -> u64 {
+        let mut h = 0xcbf29ce484222325u64;
+        let mut mix = |v: u64| {
+            h ^= v;
+            h = h.wrapping_mul(0x100000001b3);
+        };
+        match self {
+            Adjustment::Preset(f) => {
+                mix(1);
+                mix(f as u64);
+            }
+            Adjustment::Levels { black, white, gamma } => {
+                mix(2);
+                mix(black as u64);
+                mix(white as u64);
+                mix(gamma.to_bits() as u64);
+            }
+            Adjustment::HueSaturation { hue, sat, light } => {
+                mix(3);
+                mix(hue.to_bits() as u64);
+                mix(sat.to_bits() as u64);
+                mix(light.to_bits() as u64);
+            }
+            Adjustment::Curves { shadow, mid, highlight } => {
+                mix(4);
+                mix(shadow as u64);
+                mix(mid as u64);
+                mix(highlight as u64);
+            }
+        }
+        h
+    }
+}
+
+/// Applique un réglage d'ajustement en place (canal composite RVB, alpha
+/// inchangé).
+pub fn apply_adjustment(adj: Adjustment, rgba: &mut Vec<u8>, w: u32, h: u32) {
+    match adj {
+        Adjustment::Preset(f) => apply(f, rgba, w, h),
+        Adjustment::Levels { black, white, gamma } => levels(rgba, black, white, gamma),
+        Adjustment::HueSaturation { hue, sat, light } => hue_saturation(rgba, hue, sat, light),
+        Adjustment::Curves { shadow, mid, highlight } => curves(rgba, shadow, mid, highlight),
+    }
+}
+
+/// Niveaux façon Photoshop : point noir/blanc + gamma. `out = ((in-black)/(white-black))^(1/gamma)`.
+fn levels(rgba: &mut [u8], black: u8, white: u8, gamma: f32) {
+    let b = black as f32;
+    let w = (white.max(black.saturating_add(1))) as f32;
+    let inv_gamma = 1.0 / gamma.max(0.01);
+    for px in rgba.chunks_exact_mut(4) {
+        for c in px.iter_mut().take(3) {
+            let v = ((*c as f32 - b) / (w - b)).clamp(0.0, 1.0);
+            *c = (v.powf(inv_gamma) * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Courbe à 3 points ancrés (x = 0/128/255), interpolation linéaire entre eux.
+fn curve_lut(shadow: u8, mid: u8, highlight: u8) -> [u8; 256] {
+    let mut lut = [0u8; 256];
+    let (s, m, h) = (shadow as f32, mid as f32, highlight as f32);
+    for (i, slot) in lut.iter_mut().enumerate() {
+        let x = i as f32;
+        let y = if x <= 128.0 { s + (m - s) * (x / 128.0) } else { m + (h - m) * ((x - 128.0) / 127.0) };
+        *slot = y.round().clamp(0.0, 255.0) as u8;
+    }
+    lut
+}
+
+fn curves(rgba: &mut [u8], shadow: u8, mid: u8, highlight: u8) {
+    let lut = curve_lut(shadow, mid, highlight);
+    for px in rgba.chunks_exact_mut(4) {
+        for c in px.iter_mut().take(3) {
+            *c = lut[*c as usize];
+        }
+    }
+}
+
+/// Teinte/saturation/luminosité via un aller-retour RVB↔HSL par pixel.
+fn hue_saturation(rgba: &mut [u8], hue_deg: f32, sat: f32, light: f32) {
+    for px in rgba.chunks_exact_mut(4) {
+        let (h0, s0, l0) = rgb_to_hsl(px[0], px[1], px[2]);
+        let h = (h0 + hue_deg / 360.0).rem_euclid(1.0);
+        let s = (s0 * (1.0 + sat)).clamp(0.0, 1.0);
+        let l = (l0 + light).clamp(0.0, 1.0);
+        let (r, g, b) = hsl_to_rgb(h, s, l);
+        px[0] = r;
+        px[1] = g;
+        px[2] = b;
+    }
+}
+
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    if (max - min).abs() < 1e-6 {
+        return (0.0, 0.0, l);
+    }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r {
+        ((g - b) / d + if g < b { 6.0 } else { 0.0 }) / 6.0
+    } else if max == g {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    (h, s, l)
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    if s <= 0.0 {
+        let v = (l * 255.0).round().clamp(0.0, 255.0) as u8;
+        return (v, v, v);
+    }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let hue2rgb = |p: f32, q: f32, mut t: f32| {
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            return p + (q - p) * 6.0 * t;
+        }
+        if t < 1.0 / 2.0 {
+            return q;
+        }
+        if t < 2.0 / 3.0 {
+            return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+        }
+        p
+    };
+    let r = hue2rgb(p, q, h + 1.0 / 3.0);
+    let g = hue2rgb(p, q, h);
+    let b = hue2rgb(p, q, h - 1.0 / 3.0);
+    let conv = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    (conv(r), conv(g), conv(b))
+}
+
 /// Applique le filtre en place (ou renvoie un nouveau buffer pour les filtres à
 /// voisinage : flou, netteté).
 pub fn apply(filter: Filter, rgba: &mut Vec<u8>, w: u32, h: u32) {
@@ -241,5 +425,55 @@ mod tests {
         let mut px = vec![120u8; 3 * 3 * 4];
         apply(Filter::Sharpen, &mut px, 3, 3);
         assert!(px.iter().all(|&v| v == 120));
+    }
+
+    #[test]
+    fn levels_identity_is_noop() {
+        let original = vec![10u8, 120, 240, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_levels(), &mut px, 1, 1);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn levels_raises_black_point() {
+        let mut px = vec![10u8, 10, 10, 255];
+        apply_adjustment(Adjustment::Levels { black: 20, white: 255, gamma: 1.0 }, &mut px, 1, 1);
+        // En dessous du point noir : écrêté à 0.
+        assert_eq!(px[0], 0);
+    }
+
+    #[test]
+    fn curves_identity_is_noop() {
+        let original = vec![10u8, 120, 240, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_curves(), &mut px, 1, 1);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn curves_lifted_shadows_brighten_dark_pixels() {
+        let mut px = vec![10u8, 10, 10, 255];
+        apply_adjustment(Adjustment::Curves { shadow: 40, mid: 128, highlight: 255 }, &mut px, 1, 1);
+        assert!(px[0] > 10);
+    }
+
+    #[test]
+    fn hue_saturation_identity_is_noop() {
+        let original = vec![10u8, 120, 240, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_hue_saturation(), &mut px, 1, 1);
+        // Tolérance : l'aller-retour RVB→HSL→RVB peut arrondir de ±1.
+        for c in 0..3 {
+            assert!((px[c] as i32 - original[c] as i32).abs() <= 1, "channel {c}: {} vs {}", px[c], original[c]);
+        }
+    }
+
+    #[test]
+    fn hue_saturation_zero_saturation_grayscales() {
+        let mut px = vec![200u8, 100, 50, 255];
+        apply_adjustment(Adjustment::HueSaturation { hue: 0.0, sat: -1.0, light: 0.0 }, &mut px, 1, 1);
+        assert_eq!(px[0], px[1]);
+        assert_eq!(px[1], px[2]);
     }
 }

@@ -168,20 +168,75 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 )
             });
     });
-    // Calque d'ajustement (F3) : filtre re-réglable à tout moment, sans
-    // jamais toucher aux pixels d'origine — change juste le rendu composé.
-    if let Some(mut filter) = layer.adjustment {
+    // Calque d'ajustement (F3, Sprint 8.1/8.2) : re-réglable à tout moment,
+    // sans jamais toucher aux pixels d'origine — change juste le rendu
+    // composé. Le menu déroulant choisit le *type* (preset discret, niveaux,
+    // teinte/saturation, courbes) ; les paramètres continus s'éditent avec
+    // des sliders juste en dessous.
+    if let Some(mut adj) = layer.adjustment {
+        use crate::tools::filter::{Adjustment, Filter};
         ui.horizontal(|ui| {
             ui.label(t("🎚 Réglage", "🎚 Adjustment"));
-            egui::ComboBox::from_id_salt("adjustment")
-                .selected_text(filter.label())
-                .show_ui(ui, |ui| {
-                    for f in crate::tools::filter::Filter::ALL {
-                        ui.selectable_value(&mut filter, f, f.label());
+            egui::ComboBox::from_id_salt("adjustment").selected_text(adj.label()).show_ui(ui, |ui| {
+                for f in Filter::ALL {
+                    ui.selectable_value(&mut adj, Adjustment::Preset(f), f.label());
+                }
+                ui.separator();
+                ui.selectable_value(&mut adj, Adjustment::default_levels(), t("Niveaux", "Levels"));
+                ui.selectable_value(&mut adj, Adjustment::default_hue_saturation(), t("Teinte/Saturation", "Hue/Saturation"));
+                ui.selectable_value(&mut adj, Adjustment::default_curves(), t("Courbes", "Curves"));
+            });
+        });
+        match &mut adj {
+            Adjustment::Levels { black, white, gamma } => {
+                let mut b = *black as f32;
+                let mut w = *white as f32;
+                ui.horizontal(|ui| {
+                    ui.label(t("Noir", "Black"));
+                    if ui.add(egui::Slider::new(&mut b, 0.0..=254.0)).changed() {
+                        *black = (b.round() as u8).min(white.saturating_sub(1));
+                    }
+                    ui.label(t("Blanc", "White"));
+                    if ui.add(egui::Slider::new(&mut w, 1.0..=255.0)).changed() {
+                        *white = (w.round() as u8).max(black.saturating_add(1));
                     }
                 });
-        });
-        layer.adjustment = Some(filter);
+                ui.horizontal(|ui| {
+                    ui.label(t("Gamma", "Gamma"));
+                    ui.add(egui::Slider::new(gamma, 0.1..=3.0));
+                });
+            }
+            Adjustment::HueSaturation { hue, sat, light } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Teinte", "Hue"));
+                    ui.add(egui::Slider::new(hue, -180.0..=180.0).suffix("°"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Saturation", "Saturation"));
+                    ui.add(egui::Slider::new(sat, -1.0..=1.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Luminosité", "Lightness"));
+                    ui.add(egui::Slider::new(light, -1.0..=1.0));
+                });
+            }
+            Adjustment::Curves { shadow, mid, highlight } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Ombres", "Shadows"));
+                    ui.add(egui::Slider::new(shadow, 0..=255));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Tons moyens", "Midtones"));
+                    ui.add(egui::Slider::new(mid, 0..=255));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Hautes lumières", "Highlights"));
+                    ui.add(egui::Slider::new(highlight, 0..=255));
+                });
+            }
+            Adjustment::Preset(_) => {}
+        }
+        layer.adjustment = Some(adj);
     }
 
     // Masque de calque peint (roadmap P2 #14) : peint en niveaux de gris,

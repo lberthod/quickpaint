@@ -15,6 +15,7 @@ pub enum RasterOp {
     Eraser,
     Bucket,
     Clone,
+    Heal,
 }
 
 /// Surface raster ciblée par une opération de peinture (roadmap P2 #14) :
@@ -152,6 +153,7 @@ impl Command {
             Command::PaintRaster { op: RasterOp::Eraser, .. } => t("Gomme pixel", "Pixel eraser"),
             Command::PaintRaster { op: RasterOp::Bucket, .. } => t("Pot de peinture", "Paint bucket"),
             Command::PaintRaster { op: RasterOp::Clone, .. } => t("Tampon de clonage", "Clone stamp"),
+            Command::PaintRaster { op: RasterOp::Heal, .. } => t("Correcteur", "Healing brush"),
         }
     }
 }

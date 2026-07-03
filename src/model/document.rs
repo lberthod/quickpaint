@@ -85,7 +85,7 @@ pub struct Layer {
     /// seulement le calque juste en dessous si `clip` est actif),
     /// réversible et re-réglable à tout moment (≠ filtre destructif).
     #[serde(default)]
-    pub adjustment: Option<crate::tools::filter::Filter>,
+    pub adjustment: Option<crate::tools::filter::Adjustment>,
     /// Masque de calque peint (roadmap P2 #14) : réutilise le moteur raster
     /// (F1) comme surface peignable en niveaux de gris. Un pixel jamais peint
     /// est **visible** par défaut (comme un masque tout juste créé, blanc) ;
@@ -176,9 +176,9 @@ impl Layer {
     }
 
     /// Calque d'ajustement (roadmap F3) : aucun contenu propre, applique
-    /// `filter` en direct au rendu des calques du dessous.
-    pub fn new_adjustment(id: u64, name: impl Into<String>, filter: crate::tools::filter::Filter) -> Self {
-        Self { adjustment: Some(filter), ..Self::new(id, name) }
+    /// `adjustment` en direct au rendu des calques du dessous.
+    pub fn new_adjustment(id: u64, name: impl Into<String>, adjustment: crate::tools::filter::Adjustment) -> Self {
+        Self { adjustment: Some(adjustment), ..Self::new(id, name) }
     }
 
     /// Encode le raster en PNG base64 si nécessaire (avant sérialisation).

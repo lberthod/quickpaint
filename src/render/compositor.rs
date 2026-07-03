@@ -70,9 +70,9 @@ impl Compositor {
             // applique le filtre en direct à ce qui est déjà composé (tout,
             // ou seulement le calque du dessous si écrêté), réversible tant
             // que le calque existe. Ne devient pas la nouvelle base d'écrêtage.
-            if let Some(filter) = layer.adjustment {
+            if let Some(adjustment) = layer.adjustment {
                 let mask = if layer.clip { clip_base.as_ref() } else { None };
-                apply_adjustment(&mut base, filter, layer.opacity.clamp(0.0, 1.0), mask);
+                apply_adjustment(&mut base, adjustment, layer.opacity.clamp(0.0, 1.0), mask);
                 continue;
             }
             live.insert(layer.id);
@@ -436,7 +436,7 @@ fn blend_pixel(pm: &mut Pixmap, px: i32, py: i32, pw: usize, ph: usize, cov: f32
 /// l'effet aux pixels opaques de la base d'écrêtage (calque écrêté).
 fn apply_adjustment(
     base: &mut Pixmap,
-    filter: crate::tools::filter::Filter,
+    adjustment: crate::tools::filter::Adjustment,
     opacity: f32,
     mask: Option<&Pixmap>,
 ) {
@@ -458,7 +458,7 @@ fn apply_adjustment(
         }
     }
     let original = rgba.clone();
-    crate::tools::filter::apply(filter, &mut rgba, w, h);
+    crate::tools::filter::apply_adjustment(adjustment, &mut rgba, w, h);
 
     let mask_px = mask.map(|m| m.data());
     let base_px = base.data_mut();
@@ -578,7 +578,7 @@ mod tests {
     fn apply_adjustment_inverts_full_opacity() {
         let mut base = Pixmap::new(1, 1).unwrap();
         base.data_mut()[0..4].copy_from_slice(&[10, 120, 240, 255]); // déjà prémultiplié (alpha=255)
-        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 1.0, None);
+        apply_adjustment(&mut base, crate::tools::filter::Adjustment::Preset(crate::tools::filter::Filter::Invert), 1.0, None);
         assert_eq!(base.data(), &[245, 135, 15, 255]);
     }
 
@@ -586,7 +586,7 @@ mod tests {
     fn apply_adjustment_half_opacity_blends_toward_original() {
         let mut base = Pixmap::new(1, 1).unwrap();
         base.data_mut()[0..4].copy_from_slice(&[10, 120, 240, 255]);
-        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 0.5, None);
+        apply_adjustment(&mut base, crate::tools::filter::Adjustment::Preset(crate::tools::filter::Filter::Invert), 0.5, None);
         // Mi-chemin entre 10 et 245 → 127 ou 128 selon l'arrondi.
         let v = base.data()[0];
         assert!((126..=129).contains(&v), "got {v}");
@@ -601,7 +601,7 @@ mod tests {
         let mut base = Pixmap::new(2, 1).unwrap();
         base.data_mut()[0..4].copy_from_slice(&[10, 10, 10, 255]);
         base.data_mut()[4..8].copy_from_slice(&[10, 10, 10, 255]);
-        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 1.0, Some(&mask));
+        apply_adjustment(&mut base, crate::tools::filter::Adjustment::Preset(crate::tools::filter::Filter::Invert), 1.0, Some(&mask));
         let d = base.data();
         assert_eq!(&d[0..4], &[245, 245, 245, 255]); // sous le masque : inversé
         assert_eq!(&d[4..8], &[10, 10, 10, 255]); // hors masque : inchangé
@@ -610,7 +610,7 @@ mod tests {
     #[test]
     fn apply_adjustment_skips_transparent_pixels() {
         let mut base = Pixmap::new(1, 1).unwrap(); // transparent par défaut
-        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 1.0, None);
+        apply_adjustment(&mut base, crate::tools::filter::Adjustment::Preset(crate::tools::filter::Filter::Invert), 1.0, None);
         assert_eq!(base.data(), &[0, 0, 0, 0]);
     }
 

@@ -127,6 +127,14 @@ fn tool_groups() -> Vec<Vec<(ActiveTool, &'static str, &'static str)>> {
                     "⌥+click = set source; drag = paint by copying from the source",
                 ),
             ),
+            (
+                ActiveTool::Healing,
+                t("Correcteur", "Healing brush"),
+                t(
+                    "⌥+clic = définir la source ; glisser = recopie la texture en s'adaptant à la couleur environnante",
+                    "⌥+click = set source; drag = copies texture while blending toward the surrounding color",
+                ),
+            ),
         ],
         vec![
             (
@@ -524,7 +532,19 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             ui.menu_button(t("🎚 Ajouter un calque d'ajustement", "🎚 Add adjustment layer"), |ui| {
                 for f in crate::tools::filter::Filter::ALL {
                     if ui.button(f.label()).clicked() {
-                        app.add_adjustment_layer(f);
+                        app.add_adjustment_layer(crate::tools::filter::Adjustment::Preset(f));
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+                use crate::tools::filter::Adjustment;
+                for (label, make) in [
+                    (t("Niveaux…", "Levels…"), Adjustment::default_levels as fn() -> Adjustment),
+                    (t("Teinte/Saturation…", "Hue/Saturation…"), Adjustment::default_hue_saturation),
+                    (t("Courbes…", "Curves…"), Adjustment::default_curves),
+                ] {
+                    if ui.button(label).clicked() {
+                        app.add_adjustment_layer(make());
                         ui.close_menu();
                     }
                 }
@@ -793,6 +813,13 @@ fn draw_icon(p: &egui::Painter, rect: egui::Rect, tool: ActiveTool, col: Color32
             p.line_segment([at(0.78, 0.16), at(0.78, 0.3)], st);
             p.line_segment([at(0.71, 0.23), at(0.85, 0.23)], st);
         }
+        ActiveTool::Healing => {
+            // Pansement (rectangle arrondi) + étincelle = correction douce.
+            p.rect_stroke(egui::Rect::from_min_max(at(0.2, 0.36), at(0.66, 0.72)), 6.0, st);
+            p.line_segment([at(0.78, 0.16), at(0.78, 0.32)], st);
+            p.line_segment([at(0.7, 0.24), at(0.86, 0.24)], st);
+            p.circle_filled(at(0.78, 0.24), 0.05 * b.width(), col);
+        }
         ActiveTool::Bucket => {
             let pts = vec![at(0.28, 0.32), at(0.72, 0.32), at(0.62, 0.82), at(0.38, 0.82)];
             p.add(Shape::closed_line(pts, st));
@@ -993,13 +1020,16 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
                     "Only erases the touched portion of the stroke (splits it)",
                 ));
         }
-        if matches!(app.active_tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::CloneStamp) {
+        if matches!(
+            app.active_tool,
+            ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::CloneStamp | ActiveTool::Healing
+        ) {
             ui.separator();
             ui.label(t("Dureté :", "Hardness:"));
             ui.add(egui::Slider::new(&mut app.pixel_hardness, 0.0..=1.0))
                 .on_hover_text(t("0 = bord dégradé (aérographe), 1 = bord net", "0 = soft edge (airbrush), 1 = hard edge"));
         }
-        if app.active_tool == ActiveTool::CloneStamp {
+        if matches!(app.active_tool, ActiveTool::CloneStamp | ActiveTool::Healing) {
             ui.separator();
             let label = if app.clone_source.is_some() {
                 t("Source définie ✓", "Source set ✓")

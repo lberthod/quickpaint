@@ -13,6 +13,7 @@ pub fn show(ui: &mut Ui, app: &PaintApp) {
         ActiveTool::PixelBrush => (t("🖌▦ Pinceau pixel", "🖌▦ Pixel brush"), app.brush.width),
         ActiveTool::PixelEraser => (t("🩹▦ Gomme pixel", "🩹▦ Pixel eraser"), app.eraser.width),
         ActiveTool::CloneStamp => (t("👣 Tampon de clonage", "👣 Clone stamp"), app.brush.width),
+        ActiveTool::Healing => (t("🩹✨ Correcteur", "🩹✨ Healing brush"), app.brush.width),
         ActiveTool::Line => (t("📏 Ligne", "📏 Line"), app.brush.width),
         ActiveTool::Arrow => (t("➹ Flèche", "➹ Arrow"), app.brush.width),
         ActiveTool::Rectangle => (t("▭ Rectangle", "▭ Rectangle"), app.brush.width),
