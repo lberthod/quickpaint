@@ -38,6 +38,8 @@ pub fn build(
 ) -> Stroke {
     let mut stroke = Stroke::new(color, width, Tool::Brush);
     stroke.fill = fill && shape.closed();
+    // Angles nets : pas de lissage Catmull-Rom sur une géométrie déjà exacte.
+    stroke.smooth = false;
     let cx = (start.0 + end.0) * 0.5;
     let cy = (start.1 + end.1) * 0.5;
     let rx = (end.0 - start.0).abs() * 0.5;

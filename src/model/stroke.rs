@@ -79,6 +79,17 @@ pub struct Stroke {
     /// poignées de Bézier après coup (double-clic).
     #[serde(default)]
     pub anchors: Option<crate::tools::pen::PenPath>,
+    /// `true` (défaut) = lissage Catmull-Rom au rendu (pinceau à main levée).
+    /// `false` pour les formes géométriques (rectangle/ellipse/polygone/
+    /// étoile/ligne/flèche) dont les sommets doivent rester des angles nets —
+    /// le lissage les arrondissait sinon (bug constaté : un rectangle tracé
+    /// à l'outil Forme ressortait avec des coins arrondis).
+    #[serde(default = "default_smooth")]
+    pub smooth: bool,
+}
+
+fn default_smooth() -> bool {
+    true
 }
 
 impl Stroke {
@@ -93,6 +104,7 @@ impl Stroke {
             z: 0.0,
             gradient: None,
             anchors: None,
+            smooth: true,
         }
     }
 

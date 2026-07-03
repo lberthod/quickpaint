@@ -85,7 +85,7 @@ pub fn build(stroke: &Stroke) -> Mesh {
         return build_fill(stroke);
     }
     let translucent = stroke.color[3] < 255;
-    let samples = resample(&stroke.points);
+    let samples = if stroke.smooth { resample(&stroke.points) } else { raw_samples(&stroke.points) };
     if translucent {
         build_strip(&samples)
     } else {
@@ -201,6 +201,13 @@ fn build_fill(stroke: &Stroke) -> Mesh {
 
 fn seg_dir(a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
     normalize((b.0 - a.0, b.1 - a.1))
+}
+
+/// Convertit les points bruts en échantillons sans lissage (`Stroke.smooth =
+/// false`) : géométrie déjà exacte (formes, chemins de plume échantillonnés),
+/// les angles doivent rester nets.
+fn raw_samples(pts: &[StrokePoint]) -> Vec<Sample> {
+    pts.iter().map(|p| Sample { pos: p.pos, half: (p.width * 0.5).max(0.5) }).collect()
 }
 
 /// Rééchantillonne le trait par splines Catmull-Rom. Interpole position et

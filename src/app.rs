@@ -2212,6 +2212,10 @@ impl PaintApp {
         let pts = crate::tools::pen::sample(&self.pen, closed);
         let mut stroke = Stroke::new(self.brush.color, self.brush.width, Tool::Brush);
         stroke.fill = closed && self.fill_shapes;
+        // Le chemin est déjà échantillonné (courbes de Bézier + angles nets
+        // aux sommets anguleux) : un second lissage Catmull-Rom au rendu
+        // arrondirait les angles voulus.
+        stroke.smooth = false;
         for p in &pts {
             stroke.points.push(crate::model::StrokePoint { pos: *p, width: self.brush.width });
         }
