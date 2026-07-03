@@ -1,14 +1,38 @@
 //! Outil plume (roadmap #9) : chemin de Bézier cubique éditable pendant le
 //! tracé. À la validation, on échantillonne en polyligne → `Stroke` standard
 //! (donc rendu, sélection, déplacement, remplissage, export gratuits).
+//!
+//! Roadmap P2 #12 (F2, « rien n'est jamais figé ») : les ancres sont
+//! conservées sur le `Stroke` (`PenPath`) au lieu d'être jetées après
+//! l'échantillonnage, pour qu'un double-clic ultérieur les fasse réapparaître
+//! et les rende à nouveau déplaçables.
+
+use serde::{Deserialize, Serialize};
 
 /// Un sommet d'ancrage et ses deux poignées (coords document).
 /// Sommet anguleux : `h_in == h_out == pos`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Anchor {
     pub pos: (f32, f32),
     pub h_in: (f32, f32),
     pub h_out: (f32, f32),
+}
+
+/// Chemin de plume persisté sur un `Stroke` (roadmap P2 #12). `points` reste
+/// la source de vérité pour le rendu/hit-test/export ; `PenPath` n'est utile
+/// que pour ré-ouvrir l'édition des poignées.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PenPath {
+    pub anchors: Vec<Anchor>,
+    pub closed: bool,
+}
+
+impl PenPath {
+    /// Ré-échantillonne en points document (met à jour `Stroke::points` après
+    /// une édition de nœud).
+    pub fn sample(&self) -> Vec<(f32, f32)> {
+        sample(&self.anchors, self.closed)
+    }
 }
 
 impl Anchor {

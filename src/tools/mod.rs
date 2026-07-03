@@ -1,8 +1,10 @@
+pub mod boolean;
 pub mod brush;
 pub mod bucket;
 pub mod eraser;
 pub mod filter;
 pub mod eyedropper;
+pub mod guides;
 pub mod hit;
 pub mod pen;
 pub mod shape;
@@ -17,6 +19,14 @@ pub enum ActiveTool {
     Select,
     Brush,
     Eraser,
+    /// Pinceau pixel (roadmap F1) : peint dans la couche raster du calque
+    /// actif, avec dureté/feathering — à la différence du pinceau vectoriel.
+    PixelBrush,
+    /// Gomme pixel (roadmap F1) : retire de l'alpha dans la couche raster.
+    PixelEraser,
+    /// Tampon de clonage (roadmap P0 #5) : Alt+clic = source, glisser = peint
+    /// en échantillonnant la couche raster avec un décalage constant.
+    CloneStamp,
     Line,
     Arrow,
     Rectangle,

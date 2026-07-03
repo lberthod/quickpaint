@@ -7,14 +7,38 @@ use crate::export::ExportFormat;
 use crate::tools::{ActiveTool, SelectMode};
 use egui::{Align, Color32, Layout, Sense, Ui, Vec2};
 
-/// Tailles de document prédéfinies (label, largeur, hauteur).
-const CANVAS_PRESETS: &[(&str, u32, u32)] = &[
-    ("Carré 1080×1080", 1080, 1080),
-    ("HD 1280×720", 1280, 720),
-    ("Full HD 1920×1080", 1920, 1080),
-    ("Portrait 1080×1350", 1080, 1350),
-    ("A4 ~ 794×1123", 794, 1123),
-    ("Défaut 1280×800", 1280, 800),
+/// Modèles de document (roadmap P1 #9), groupés par catégorie — utilisés à
+/// la fois pour changer la taille du document courant (menu Vue, garde le
+/// contenu) et pour créer un nouveau document à cette taille (Fichier ▸
+/// Nouveau depuis un modèle, galerie).
+const TEMPLATES: &[(&str, &[(&str, u32, u32)])] = &[
+    (
+        "Réseaux sociaux",
+        &[
+            ("Post carré (Instagram)", 1080, 1080),
+            ("Story / Reel", 1080, 1920),
+            ("Post portrait", 1080, 1350),
+            ("Bannière Facebook", 1200, 630),
+            ("Miniature YouTube", 1280, 720),
+            ("Bannière YouTube", 2560, 1440),
+        ],
+    ),
+    (
+        "Impression",
+        &[
+            ("Affiche A4", 1748, 2480),
+            ("Carte de visite", 1050, 600),
+            ("Carte postale", 1748, 1240),
+        ],
+    ),
+    (
+        "Écran",
+        &[
+            ("Présentation 16:9", 1920, 1080),
+            ("HD 1280×720", 1280, 720),
+            ("Document par défaut", 1280, 800),
+        ],
+    ),
 ];
 
 /// Couleurs d'accès rapide (palette tactile).
@@ -45,6 +69,23 @@ const TOOL_GROUPS: &[&[(ActiveTool, &str, &str)]] = &[
         (ActiveTool::Eyedropper, "Pipette (I)", "Prélève une couleur du dessin"),
     ],
     &[
+        (
+            ActiveTool::PixelBrush,
+            "Pinceau pixel",
+            "Peint des pixels (dureté réglable) dans le calque actif — comme GIMP/Photoshop",
+        ),
+        (
+            ActiveTool::PixelEraser,
+            "Gomme pixel",
+            "Efface des pixels (retire de l'alpha) dans le calque actif",
+        ),
+        (
+            ActiveTool::CloneStamp,
+            "Tampon de clonage",
+            "⌥+clic = définir la source ; glisser = peindre en recopiant depuis la source",
+        ),
+    ],
+    &[
         (ActiveTool::Line, "Ligne (L)", "Segment droit · Maj = horizontale/verticale"),
         (ActiveTool::Arrow, "Flèche (A)", "Segment avec pointe · idéal pour annoter"),
         (ActiveTool::Rectangle, "Rectangle (R)", "Rectangle · Maj = carré · option Rempli"),
@@ -63,6 +104,47 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     ui.separator();
     tools_row(ui, app);
     options_row(ui, app);
+    template_gallery(ctx, app);
+}
+
+/// Galerie « Nouveau depuis un modèle » (roadmap P1 #9) : formats prédéfinis
+/// groupés par catégorie, façon Canva. Clic = nouveau document vierge à
+/// cette taille (contenu actuel perdu, comme « Nouveau »).
+fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_template_gallery {
+        return;
+    }
+    let mut open = true;
+    let mut picked: Option<(u32, u32)> = None;
+    egui::Window::new("🗂 Nouveau depuis un modèle")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(360.0);
+            for (cat, items) in TEMPLATES {
+                ui.label(egui::RichText::new(*cat).strong());
+                ui.horizontal_wrapped(|ui| {
+                    for (label, w, h) in *items {
+                        let text = format!("{label}\n{w}×{h}");
+                        if ui.add(egui::Button::new(text).min_size(egui::vec2(150.0, 40.0))).clicked() {
+                            picked = Some((*w, *h));
+                        }
+                    }
+                });
+                ui.separator();
+            }
+            if ui.button("Annuler").clicked() {
+                app.show_template_gallery = false;
+            }
+        });
+    if let Some((w, h)) = picked {
+        app.new_document_sized(w, h);
+        app.show_template_gallery = false;
+    } else if !open {
+        app.show_template_gallery = false;
+    }
 }
 
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
@@ -70,6 +152,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
         ui.menu_button("Fichier", |ui| {
             if ui.button("📄 Nouveau (⌘N)").clicked() {
                 app.new_document();
+                ui.close_menu();
+            }
+            if ui.button("🗂 Nouveau depuis un modèle…").clicked() {
+                app.show_template_gallery = true;
                 ui.close_menu();
             }
             if ui.button("📂 Ouvrir… (⌘O)").clicked() {
@@ -143,6 +229,62 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 ui.close_menu();
             }
             ui.separator();
+            if ui.add_enabled(has_sel, egui::Button::new("🎨 Copier le style (⌥⌘C)")).clicked() {
+                app.copy_style();
+                ui.close_menu();
+            }
+            if ui.add_enabled(has_sel, egui::Button::new("🎨 Coller le style (⌥⌘V)")).clicked() {
+                app.paste_style();
+                ui.close_menu();
+            }
+            ui.separator();
+            ui.add_enabled_ui(has_sel, |ui| {
+                ui.menu_button("🌈 Dégradé", |ui| {
+                    if ui.button("Linéaire").clicked() {
+                        app.apply_gradient(crate::model::GradientKind::Linear);
+                        ui.close_menu();
+                    }
+                    if ui.button("Radial").clicked() {
+                        app.apply_gradient(crate::model::GradientKind::Radial);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Retirer le dégradé").clicked() {
+                        app.remove_gradient();
+                        ui.close_menu();
+                    }
+                })
+                .response
+                .on_hover_text("S'applique aux formes pleines (option « Rempli ») sélectionnées");
+            });
+            ui.separator();
+            let two_filled_shapes = app.selection.len() == 2
+                && app.doc.layers[app.doc.active_layer]
+                    .strokes
+                    .iter()
+                    .filter(|s| app.selection.contains(&s.id) && s.fill)
+                    .count()
+                    == 2;
+            ui.add_enabled_ui(two_filled_shapes, |ui| {
+                ui.menu_button("🔷 Booléens", |ui| {
+                    use crate::tools::boolean::BooleanKind;
+                    if ui.button("Union").clicked() {
+                        app.boolean_op(BooleanKind::Union);
+                        ui.close_menu();
+                    }
+                    if ui.button("Soustraction").clicked() {
+                        app.boolean_op(BooleanKind::Subtract);
+                        ui.close_menu();
+                    }
+                    if ui.button("Intersection").clicked() {
+                        app.boolean_op(BooleanKind::Intersect);
+                        ui.close_menu();
+                    }
+                })
+                .response
+                .on_hover_text("Sélectionne exactement 2 formes pleines (option « Rempli »)");
+            });
+            ui.separator();
             ui.menu_button("Disposition", |ui| {
                 use crate::app::ZMove;
                 if ui.button("Premier plan (⌘⇧])").clicked() {
@@ -173,6 +315,16 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.add_layer();
                 ui.close_menu();
             }
+            ui.menu_button("🎚 Ajouter un calque d'ajustement", |ui| {
+                for f in crate::tools::filter::Filter::ALL {
+                    if ui.button(f.label()).clicked() {
+                        app.add_adjustment_layer(f);
+                        ui.close_menu();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Non destructif : réversible, re-réglable (change le filtre à tout moment)");
             if ui.button("⧉ Dupliquer").clicked() {
                 app.duplicate_layer();
                 ui.close_menu();
@@ -195,6 +347,30 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.ungroup_active();
                 ui.close_menu();
             }
+        });
+
+        ui.menu_button("Image", |ui| {
+            if ui.button("⤢ Redimensionner l'image…").clicked() {
+                app.open_resize_dialog(false);
+                ui.close_menu();
+            }
+            if ui.button("⛶ Taille du canevas…").clicked() {
+                app.open_resize_dialog(true);
+                ui.close_menu();
+            }
+            ui.separator();
+            ui.menu_button("Taille du document", |ui| {
+                for (cat, items) in TEMPLATES {
+                    ui.menu_button(*cat, |ui| {
+                        for (label, w, h) in *items {
+                            if ui.button(format!("{label} ({w}×{h})")).clicked() {
+                                app.set_canvas_size(*w, *h);
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                }
+            });
         });
 
         ui.menu_button("Aligner", |ui| {
@@ -245,14 +421,6 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             ui.add(
                 egui::DragValue::new(&mut app.grid_size).speed(1.0).range(5.0..=200.0).prefix("pas "),
             );
-            ui.separator();
-            ui.label("Taille du document :");
-            for (label, w, h) in CANVAS_PRESETS {
-                if ui.button(*label).clicked() {
-                    app.set_canvas_size(*w, *h);
-                    ui.close_menu();
-                }
-            }
         });
 
         ui.menu_button("Filtres", |ui| {
@@ -369,6 +537,29 @@ fn draw_icon(p: &egui::Painter, rect: egui::Rect, tool: ActiveTool, col: Color32
             p.add(Shape::closed_line(pts, st));
             p.line_segment([at(0.45, 0.82), at(0.82, 0.46)], st);
         }
+        ActiveTool::PixelBrush => {
+            p.line_segment([at(0.2, 0.85), at(0.66, 0.34)], st);
+            p.circle_filled(at(0.72, 0.27), 0.13 * b.width(), col);
+            // Petit damier : signale le pixel (par opposition au trait vectoriel).
+            let s = 0.09 * b.width();
+            p.rect_filled(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s)), 0.0, col);
+            p.rect_stroke(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s * 2.0)), 0.0, st);
+        }
+        ActiveTool::PixelEraser => {
+            let pts = vec![at(0.18, 0.6), at(0.55, 0.24), at(0.82, 0.46), at(0.45, 0.82)];
+            p.add(Shape::closed_line(pts, st));
+            p.line_segment([at(0.45, 0.82), at(0.82, 0.46)], st);
+            let s = 0.09 * b.width();
+            p.rect_filled(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s)), 0.0, col);
+            p.rect_stroke(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s * 2.0)), 0.0, st);
+        }
+        ActiveTool::CloneStamp => {
+            // Tampon (rectangle arrondi stylisé) + petite croix = point source.
+            p.rect_stroke(egui::Rect::from_min_max(at(0.22, 0.34), at(0.68, 0.74)), 3.0, st);
+            p.line_segment([at(0.3, 0.74), at(0.6, 0.9)], st);
+            p.line_segment([at(0.78, 0.16), at(0.78, 0.3)], st);
+            p.line_segment([at(0.71, 0.23), at(0.85, 0.23)], st);
+        }
         ActiveTool::Bucket => {
             let pts = vec![at(0.28, 0.32), at(0.72, 0.32), at(0.62, 0.82), at(0.38, 0.82)];
             p.add(Shape::closed_line(pts, st));
@@ -445,6 +636,9 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     }
 
     ui.separator();
+    changed |= font_family_picker(ui, app);
+
+    ui.separator();
     ui.label("Aligner :");
     for a in TextAlign::ALL {
         if ui.selectable_value(&mut app.text_align, a, a.label()).changed() {
@@ -481,6 +675,42 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     }
 }
 
+/// Sélecteur de police système (roadmap P1 #7) : combo avec recherche —
+/// une police n'est chargée dans egui qu'au moment où elle est choisie
+/// (`ensure_loaded`), pas au survol de la liste.
+fn font_family_picker(ui: &mut Ui, app: &mut PaintApp) -> bool {
+    let mut changed = false;
+    ui.label("Police système :");
+    // Le filtre vit **hors** du popup du ComboBox : un TextEdit imbriqué
+    // dans une popup transitoire egui perd le focus / referme le popup au
+    // clic (comportement fragile constaté), donc on garde un champ toujours
+    // visible dans la barre d'options — le popup ne fait qu'afficher la
+    // liste déjà filtrée.
+    ui.add(egui::TextEdit::singleline(&mut app.font_search).hint_text("Filtrer…").desired_width(100.0));
+    let current = app.text_font_family.clone().unwrap_or_else(|| "(intégrée)".into());
+    egui::ComboBox::from_id_salt("sys_font").selected_text(current).width(170.0).show_ui(ui, |ui| {
+        if ui.selectable_label(app.text_font_family.is_none(), "(intégrée : Sans/Mono)").clicked() {
+            app.text_font_family = None;
+            changed = true;
+        }
+        let query = app.font_search.to_lowercase();
+        let names = app.font_manager.family_names();
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            for name in names.iter().filter(|n| query.is_empty() || n.to_lowercase().contains(&query)).take(200) {
+                let selected = app.text_font_family.as_deref() == Some(name.as_str());
+                if ui.selectable_label(selected, name).clicked() {
+                    app.font_manager.ensure_loaded(ui.ctx(), name);
+                    app.text_font_family = Some(name.clone());
+                    changed = true;
+                }
+            }
+        });
+    })
+    .response
+    .on_hover_text(format!("{} polices détectées sur ce Mac", app.font_manager.face_count()));
+    changed
+}
+
 fn options_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
         // Outil Sélection : choix du mode (rectangle / lasso / baguette).
@@ -498,11 +728,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             }
             ui.separator();
             ui.label("Couleur :");
-            let c = app.brush.color;
-            let mut col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
-            if ui.color_edit_button_srgba(&mut col).changed() {
-                app.brush.color = col.to_srgba_unmultiplied();
-            }
+            brush_color_edit(ui, app);
             return;
         }
         // Outil Texte : taille + style riche (police, gras, alignement, contour).
@@ -512,7 +738,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         }
         ui.label("Taille :");
         let (size, range) = match app.active_tool {
-            ActiveTool::Eraser => (&mut app.eraser.width, 4.0..=80.0),
+            ActiveTool::Eraser | ActiveTool::PixelEraser => (&mut app.eraser.width, 4.0..=80.0),
             ActiveTool::Text => (&mut app.text_size, 8.0..=200.0),
             _ => (&mut app.brush.width, 1.0..=40.0),
         };
@@ -528,17 +754,24 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             ui.selectable_value(&mut app.eraser_partial, true, "Partielle")
                 .on_hover_text("N'efface que la portion de trait touchée (découpe)");
         }
+        if matches!(app.active_tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::CloneStamp) {
+            ui.separator();
+            ui.label("Dureté :");
+            ui.add(egui::Slider::new(&mut app.pixel_hardness, 0.0..=1.0))
+                .on_hover_text("0 = bord dégradé (aérographe), 1 = bord net");
+        }
+        if app.active_tool == ActiveTool::CloneStamp {
+            ui.separator();
+            let label = if app.clone_source.is_some() { "Source définie ✓" } else { "⌥+clic pour définir la source" };
+            ui.label(label);
+        }
         if matches!(app.active_tool, ActiveTool::Polygon | ActiveTool::Star) {
             ui.add(egui::DragValue::new(&mut app.poly_sides).range(3..=16).prefix("côtés "));
         }
         ui.separator();
 
         ui.label("Couleur :");
-        let c = app.brush.color;
-        let mut col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
-        if ui.color_edit_button_srgba(&mut col).changed() {
-            app.brush.color = col.to_srgba_unmultiplied();
-        }
+        brush_color_edit(ui, app);
 
         ui.label("Opacité :");
         let mut alpha = app.brush.color[3];
@@ -594,6 +827,54 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
     });
 }
 
+/// Couleur du pinceau : pastille (picker HSV egui) + saisie hexadécimale
+/// `#RGB` / `#RRGGBB` / `#RRGGBBAA` (roadmap P0 #6).
+fn brush_color_edit(ui: &mut Ui, app: &mut PaintApp) {
+    let c = app.brush.color;
+    let mut col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
+    if ui.color_edit_button_srgba(&mut col).changed() {
+        app.brush.color = col.to_srgba_unmultiplied();
+    }
+    let resp = ui.add(
+        egui::TextEdit::singleline(&mut app.hex_field)
+            .desired_width(78.0)
+            .font(egui::TextStyle::Monospace)
+            .hint_text("#RRGGBB"),
+    );
+    if resp.changed() {
+        if let Some(rgba) = parse_hex_color(&app.hex_field) {
+            app.brush.color = rgba;
+        }
+    }
+    // Hors saisie, le champ reflète la couleur courante (normalisé).
+    if !resp.has_focus() {
+        let c = app.brush.color;
+        app.hex_field = if c[3] == 255 {
+            format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])
+        } else {
+            format!("#{:02X}{:02X}{:02X}{:02X}", c[0], c[1], c[2], c[3])
+        };
+    }
+}
+
+/// Analyse `#RGB`, `#RRGGBB` ou `#RRGGBBAA` (dièse optionnel, casse libre).
+fn parse_hex_color(s: &str) -> Option<[u8; 4]> {
+    let s = s.trim().trim_start_matches('#');
+    if !s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
+    match s.len() {
+        3 => {
+            let nib = |i: usize| u8::from_str_radix(&s[i..i + 1], 16).ok().map(|v| v * 17);
+            Some([nib(0)?, nib(1)?, nib(2)?, 255])
+        }
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        _ => None,
+    }
+}
+
 /// Petite pastille de couleur cliquable.
 fn swatch(ui: &mut Ui, rgb: [u8; 3]) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
@@ -607,4 +888,24 @@ fn swatch(ui: &mut Ui, rgb: [u8; 3]) -> egui::Response {
     };
     ui.painter().rect_stroke(rect, rounding, stroke);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hex_color;
+
+    #[test]
+    fn parses_common_hex_forms() {
+        assert_eq!(parse_hex_color("#FF8000"), Some([255, 128, 0, 255]));
+        assert_eq!(parse_hex_color("ff8000"), Some([255, 128, 0, 255]));
+        assert_eq!(parse_hex_color("#F80"), Some([255, 136, 0, 255]));
+        assert_eq!(parse_hex_color("#FF800080"), Some([255, 128, 0, 128]));
+    }
+
+    #[test]
+    fn rejects_invalid_hex() {
+        assert_eq!(parse_hex_color("#GG0000"), None);
+        assert_eq!(parse_hex_color("#FF80"), None);
+        assert_eq!(parse_hex_color(""), None);
+    }
 }

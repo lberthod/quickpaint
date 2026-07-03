@@ -12,9 +12,16 @@ use std::sync::Arc;
 /// passes sont dessinées dans l'ordre (contour d'abord, remplissage en dernier).
 pub type Pass = ((f32, f32), [u8; 4]);
 
-/// Famille egui correspondant à la police du texte.
-pub fn family(font: TextFont) -> egui::FontFamily {
-    match font {
+/// Famille egui correspondant à la police du texte : une police système
+/// (roadmap P1 #7) prime sur les deux polices intégrées (Sans/Mono) si
+/// définie — à charge de l'appelant de l'avoir enregistrée au préalable
+/// auprès d'egui (`fonts::FontManager::ensure_loaded`), sinon egui retombe
+/// silencieusement sur la police par défaut (aucun crash).
+pub fn family(t: &TextItem) -> egui::FontFamily {
+    if let Some(name) = &t.font_family {
+        return egui::FontFamily::Name(name.as_str().into());
+    }
+    match t.font {
         TextFont::Proportional => egui::FontFamily::Proportional,
         TextFont::Monospace => egui::FontFamily::Monospace,
     }
@@ -27,7 +34,7 @@ pub fn family(font: TextFont) -> egui::FontFamily {
 /// bloc, puis re-layout borné à cette largeur avec le `halign` voulu — ainsi le
 /// `pos` reste le bord gauche du bloc (ancrage stable pour la sélection).
 pub fn layout(ctx: &egui::Context, t: &TextItem, px_per_doc: f32) -> Arc<egui::Galley> {
-    let font_id = egui::FontId::new((t.size * px_per_doc).max(1.0), family(t.font));
+    let font_id = egui::FontId::new((t.size * px_per_doc).max(1.0), family(t));
     let text = if t.text.is_empty() { " ".to_string() } else { t.text.clone() };
 
     let halign = match t.align {

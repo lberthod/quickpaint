@@ -13,8 +13,8 @@ use crate::model::{BlendMode, Document, ImageItem, Stroke, Tool};
 use crate::render::ribbon;
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
 use tiny_skia::{
-    BlendMode as SkBlend, FillRule, FilterQuality, Paint, PathBuilder, Pixmap, PixmapPaint,
-    Transform,
+    BlendMode as SkBlend, Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint,
+    PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient, Shader, SpreadMode, Transform,
 };
 
 #[derive(Default)]
@@ -61,11 +61,23 @@ impl Compositor {
             if !layer.visible || layer.opacity <= 0.0 {
                 continue;
             }
+            // Calque d'ajustement (F3) : pas de contenu propre à rastériser —
+            // applique le filtre en direct à ce qui est déjà composé (tout,
+            // ou seulement le calque du dessous si écrêté), réversible tant
+            // que le calque existe. Ne devient pas la nouvelle base d'écrêtage.
+            if let Some(filter) = layer.adjustment {
+                let mask = if layer.clip { clip_base.as_ref() } else { None };
+                apply_adjustment(&mut base, filter, layer.opacity.clamp(0.0, 1.0), mask);
+                continue;
+            }
             live.insert(layer.id);
             let hash = layer_hash(layer, skip_text);
             let stale = self.layers.get(&layer.id).map(|(h, _)| *h != hash).unwrap_or(true);
             if stale {
                 let mut lp = Pixmap::new(w, h)?;
+                // Contenu peint (pinceau/gomme pixel, F1) : rendu en premier,
+                // sous les éléments vectoriels du calque.
+                raster_content(&mut lp, &layer.raster);
                 for r in layer.z_order() {
                     match r {
                         crate::model::ElemRef::Stroke(i) => raster_stroke(&mut lp, &layer.strokes[i]),
@@ -77,6 +89,9 @@ impl Compositor {
                             }
                         }
                     }
+                }
+                if let Some(mask) = &layer.mask {
+                    apply_mask(&mut lp, mask);
                 }
                 self.layers.insert(layer.id, (hash, lp));
             }
@@ -132,12 +147,25 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
     mix(l.visible as u64);
     mix(l.opacity.to_bits() as u64);
     mix(l.blend as u64);
+    mix(l.raster.content_hash());
+    mix(l.mask.as_ref().map(|m| m.content_hash()).unwrap_or(0));
     for s in &l.strokes {
         mix(s.id);
         mix(s.z.to_bits());
         mix(u32::from_le_bytes(s.color) as u64);
         mix(s.fill as u64);
         mix(s.base_width.to_bits() as u64);
+        if let Some(g) = &s.gradient {
+            mix(g.kind as u64 + 1);
+            mix(g.from.0.to_bits() as u64);
+            mix(g.from.1.to_bits() as u64);
+            mix(g.to.0.to_bits() as u64);
+            mix(g.to.1.to_bits() as u64);
+            for (pos, c) in &g.stops {
+                mix(pos.to_bits() as u64);
+                mix(u32::from_le_bytes(*c) as u64);
+            }
+        }
         for p in &s.points {
             mix(p.pos.0.to_bits() as u64);
             mix(p.pos.1.to_bits() as u64);
@@ -206,6 +234,27 @@ fn clip_alpha(pm: &mut Pixmap, base: &Pixmap) {
     }
 }
 
+/// Applique un masque de calque (roadmap P2 #14) : multiplie chaque canal
+/// (déjà prémultiplié) par la couverture du masque à ce pixel — même
+/// technique que `clip_alpha`, mais la source de la couverture est un
+/// masque peint (blanc = visible, noir = masqué) plutôt que l'alpha d'un
+/// autre calque.
+fn apply_mask(pm: &mut Pixmap, mask: &crate::model::RasterLayer) {
+    let w = pm.width();
+    let px = pm.data_mut();
+    for i in (0..px.len()).step_by(4) {
+        let idx = (i / 4) as u32;
+        let (x, y) = (idx % w, idx / w);
+        let f = mask.mask_coverage(x as i32, y as i32) as u32;
+        if f == 255 {
+            continue;
+        }
+        for c in 0..4 {
+            px[i + c] = ((px[i + c] as u32 * f + 127) / 255) as u8;
+        }
+    }
+}
+
 fn map_blend(b: BlendMode) -> SkBlend {
     match b {
         BlendMode::Normal => SkBlend::SourceOver,
@@ -238,11 +287,40 @@ fn raster_stroke(pm: &mut Pixmap, stroke: &Stroke) {
         pb.close();
     }
     let Some(path) = pb.finish() else { return };
-    let [r, g, b, alpha] = stroke.color;
     let mut paint = Paint::default();
-    paint.set_color_rgba8(r, g, b, alpha);
     paint.anti_alias = true;
+    match stroke.fill.then(|| stroke.gradient.as_ref()).flatten().and_then(gradient_shader) {
+        Some(shader) => paint.shader = shader,
+        None => {
+            let [r, g, b, alpha] = stroke.color;
+            paint.set_color_rgba8(r, g, b, alpha);
+        }
+    }
     pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+}
+
+/// Construit le shader tiny-skia d'un dégradé (roadmap P2 #11). `None` si
+/// tiny-skia juge la géométrie dégénérée (points confondus, etc.) — l'appelant
+/// retombe alors sur la couleur unie du trait.
+fn gradient_shader(g: &crate::model::Gradient) -> Option<Shader<'static>> {
+    let stops: Vec<GradientStop> = g
+        .stops
+        .iter()
+        .map(|(pos, [r, gc, b, a])| {
+            GradientStop::new(*pos, Color::from_rgba8(*r, *gc, *b, *a))
+        })
+        .collect();
+    let from = Point::from_xy(g.from.0, g.from.1);
+    let to = Point::from_xy(g.to.0, g.to.1);
+    match g.kind {
+        crate::model::GradientKind::Linear => {
+            LinearGradient::new(from, to, stops, SpreadMode::Pad, Transform::identity())
+        }
+        crate::model::GradientKind::Radial => {
+            let radius = ((to.x - from.x).powi(2) + (to.y - from.y).powi(2)).sqrt();
+            RadialGradient::new(from, from, radius, stops, SpreadMode::Pad, Transform::identity())
+        }
+    }
 }
 
 /// Rastérise un texte via l'atlas de polices egui (couverture) → blit teinté,
@@ -344,6 +422,87 @@ fn blend_pixel(pm: &mut Pixmap, px: i32, py: i32, pw: usize, ph: usize, cov: f32
     }
 }
 
+/// Applique un filtre en direct à `base` (calque d'ajustement, F3) :
+/// dé-prémultiplie, passe par le même code que le filtre destructif
+/// ([`crate::tools::filter::apply`]), puis re-prémultiplie en mélangeant
+/// avec l'original selon `opacity` (calque d'ajustement partiellement
+/// opaque = mélange original/filtré, comme Photoshop). `mask` restreint
+/// l'effet aux pixels opaques de la base d'écrêtage (calque écrêté).
+fn apply_adjustment(
+    base: &mut Pixmap,
+    filter: crate::tools::filter::Filter,
+    opacity: f32,
+    mask: Option<&Pixmap>,
+) {
+    let (w, h) = (base.width(), base.height());
+    if w == 0 || h == 0 || opacity <= 0.0 {
+        return;
+    }
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for px in base.pixels() {
+        let a = px.alpha();
+        if a == 0 {
+            rgba.extend_from_slice(&[0, 0, 0, 0]);
+        } else {
+            let unpremul = |c: u8| ((c as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8;
+            rgba.push(unpremul(px.red()));
+            rgba.push(unpremul(px.green()));
+            rgba.push(unpremul(px.blue()));
+            rgba.push(a);
+        }
+    }
+    let original = rgba.clone();
+    crate::tools::filter::apply(filter, &mut rgba, w, h);
+
+    let mask_px = mask.map(|m| m.data());
+    let base_px = base.data_mut();
+    for i in 0..(w * h) as usize {
+        if let Some(mpx) = mask_px {
+            if mpx[i * 4 + 3] == 0 {
+                continue; // hors du masque d'écrêtage : inchangé
+            }
+        }
+        let mut out = [0u8; 4];
+        for c in 0..4 {
+            let o = original[i * 4 + c] as f32;
+            let f = rgba[i * 4 + c] as f32;
+            out[c] = (o + (f - o) * opacity).round().clamp(0.0, 255.0) as u8;
+        }
+        let a = out[3] as u32;
+        let premul = |c: u8| ((c as u32 * a + 127) / 255) as u8;
+        base_px[i * 4] = premul(out[0]);
+        base_px[i * 4 + 1] = premul(out[1]);
+        base_px[i * 4 + 2] = premul(out[2]);
+        base_px[i * 4 + 3] = out[3];
+    }
+}
+
+/// Blitte le contenu peint (pinceau/gomme pixel, F1) tel quel (1 px document
+/// = 1 px raster, pas d'échelle) à son origine.
+fn raster_content(pm: &mut Pixmap, raster: &crate::model::RasterLayer) {
+    let Some((ox, oy, w, h, rgba)) = raster.flatten() else { return };
+    if w == 0 || h == 0 {
+        return;
+    }
+    let mut premul = Vec::with_capacity(rgba.len());
+    for c in rgba.chunks_exact(4) {
+        let a = c[3] as u16;
+        premul.push((c[0] as u16 * a / 255) as u8);
+        premul.push((c[1] as u16 * a / 255) as u8);
+        premul.push((c[2] as u16 * a / 255) as u8);
+        premul.push(c[3]);
+    }
+    let Some(src) = Pixmap::from_vec(premul, tiny_skia::IntSize::from_wh(w, h).unwrap()) else { return };
+    pm.draw_pixmap(
+        ox,
+        oy,
+        src.as_ref(),
+        &PixmapPaint { opacity: 1.0, blend_mode: SkBlend::SourceOver, quality: FilterQuality::Nearest },
+        Transform::identity(),
+        None,
+    );
+}
+
 /// Blitte une image (mise à l'échelle vers sa taille document).
 fn raster_image(pm: &mut Pixmap, im: &ImageItem) {
     if im.w == 0 || im.h == 0 || im.rgba.len() < (im.w * im.h * 4) as usize {
@@ -407,5 +566,104 @@ mod tests {
         // px0 conservé (base opaque), px1 effacé (base transparente).
         assert_eq!(&d[0..4], &[200, 200, 200, 255]);
         assert_eq!(&d[4..8], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn apply_adjustment_inverts_full_opacity() {
+        let mut base = Pixmap::new(1, 1).unwrap();
+        base.data_mut()[0..4].copy_from_slice(&[10, 120, 240, 255]); // déjà prémultiplié (alpha=255)
+        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 1.0, None);
+        assert_eq!(base.data(), &[245, 135, 15, 255]);
+    }
+
+    #[test]
+    fn apply_adjustment_half_opacity_blends_toward_original() {
+        let mut base = Pixmap::new(1, 1).unwrap();
+        base.data_mut()[0..4].copy_from_slice(&[10, 120, 240, 255]);
+        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 0.5, None);
+        // Mi-chemin entre 10 et 245 → 127 ou 128 selon l'arrondi.
+        let v = base.data()[0];
+        assert!((126..=129).contains(&v), "got {v}");
+    }
+
+    #[test]
+    fn apply_adjustment_respects_clip_mask() {
+        // 2×1 : masque opaque à gauche, transparent à droite.
+        let mut mask = Pixmap::new(2, 1).unwrap();
+        mask.data_mut()[0..4].copy_from_slice(&[255, 255, 255, 255]);
+        mask.data_mut()[4..8].copy_from_slice(&[0, 0, 0, 0]);
+        let mut base = Pixmap::new(2, 1).unwrap();
+        base.data_mut()[0..4].copy_from_slice(&[10, 10, 10, 255]);
+        base.data_mut()[4..8].copy_from_slice(&[10, 10, 10, 255]);
+        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 1.0, Some(&mask));
+        let d = base.data();
+        assert_eq!(&d[0..4], &[245, 245, 245, 255]); // sous le masque : inversé
+        assert_eq!(&d[4..8], &[10, 10, 10, 255]); // hors masque : inchangé
+    }
+
+    #[test]
+    fn apply_adjustment_skips_transparent_pixels() {
+        let mut base = Pixmap::new(1, 1).unwrap(); // transparent par défaut
+        apply_adjustment(&mut base, crate::tools::filter::Filter::Invert, 1.0, None);
+        assert_eq!(base.data(), &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn apply_mask_hides_painted_black_keeps_unpainted_visible() {
+        // 2×1 : px0 masqué (peint noir), px1 jamais peint → reste visible.
+        let mut mask = crate::model::RasterLayer::default();
+        mask.set_pixel(0, 0, [0, 0, 0, 255]);
+        let mut pm = Pixmap::new(2, 1).unwrap();
+        {
+            let d = pm.data_mut();
+            d[0..4].copy_from_slice(&[200, 200, 200, 255]);
+            d[4..8].copy_from_slice(&[200, 200, 200, 255]);
+        }
+        apply_mask(&mut pm, &mask);
+        let d = pm.data();
+        assert_eq!(&d[0..4], &[0, 0, 0, 0]); // masqué
+        assert_eq!(&d[4..8], &[200, 200, 200, 255]); // intact
+    }
+
+    #[test]
+    fn gradient_shader_builds_for_linear_and_radial() {
+        let g = crate::model::Gradient::two_stop(
+            crate::model::GradientKind::Linear,
+            ((0.0, 0.0), (100.0, 50.0)),
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+        );
+        assert!(gradient_shader(&g).is_some());
+
+        let g = crate::model::Gradient::two_stop(
+            crate::model::GradientKind::Radial,
+            ((0.0, 0.0), (100.0, 50.0)),
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+        );
+        assert!(gradient_shader(&g).is_some());
+    }
+
+    #[test]
+    fn raster_stroke_with_gradient_fills_without_panicking() {
+        // Un carré plein avec dégradé linéaire ne doit pas paniquer et doit
+        // colorer des pixels (pas de rectangle transparent).
+        let mut s = crate::model::Stroke::new([255, 0, 0, 255], 4.0, crate::model::Tool::Brush);
+        s.fill = true;
+        s.points = vec![
+            crate::model::StrokePoint { pos: (10.0, 10.0), width: 4.0 },
+            crate::model::StrokePoint { pos: (90.0, 10.0), width: 4.0 },
+            crate::model::StrokePoint { pos: (90.0, 90.0), width: 4.0 },
+            crate::model::StrokePoint { pos: (10.0, 90.0), width: 4.0 },
+        ];
+        s.gradient = Some(crate::model::Gradient::two_stop(
+            crate::model::GradientKind::Linear,
+            ((10.0, 10.0), (90.0, 90.0)),
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+        ));
+        let mut pm = Pixmap::new(100, 100).unwrap();
+        raster_stroke(&mut pm, &s);
+        assert!(pm.pixels().iter().any(|p| p.alpha() > 0));
     }
 }

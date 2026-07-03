@@ -100,7 +100,11 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 String::new()
             };
             let clip = if layer.clip { "⤵ " } else { "" };
-            let label = format!("{}{} ({}){}", clip, layer.name, layer.strokes.len(), dim);
+            let label = if layer.adjustment.is_some() {
+                format!("{}🎚 {}{}", clip, layer.name, dim)
+            } else {
+                format!("{}{} ({}){}", clip, layer.name, layer.strokes.len(), dim)
+            };
             if ui.selectable_label(is_active, label).clicked() {
                 select = Some(idx);
             }
@@ -143,7 +147,40 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // Indisponible pour le calque du bas (rien en dessous).
     ui.add_enabled_ui(active > 0, |ui| {
         ui.checkbox(&mut layer.clip, "⤵ Écrêter sur le calque du dessous")
-            .on_hover_text("Le calque n'apparaît qu'à travers l'opacité du calque inférieur");
+            .on_hover_text(if layer.adjustment.is_some() {
+                "N'ajuste que le calque juste en dessous (au lieu de tout ce qui est en dessous)"
+            } else {
+                "Le calque n'apparaît qu'à travers l'opacité du calque inférieur"
+            });
+    });
+    // Calque d'ajustement (F3) : filtre re-réglable à tout moment, sans
+    // jamais toucher aux pixels d'origine — change juste le rendu composé.
+    if let Some(mut filter) = layer.adjustment {
+        ui.horizontal(|ui| {
+            ui.label("🎚 Réglage");
+            egui::ComboBox::from_id_salt("adjustment")
+                .selected_text(filter.label())
+                .show_ui(ui, |ui| {
+                    for f in crate::tools::filter::Filter::ALL {
+                        ui.selectable_value(&mut filter, f, f.label());
+                    }
+                });
+        });
+        layer.adjustment = Some(filter);
+    }
+
+    // Masque de calque peint (roadmap P2 #14) : peint en niveaux de gris,
+    // multiplie l'alpha du calque au rendu. Réutilise le pinceau/gomme pixel
+    // existants une fois « Éditer le masque » activé.
+    let has_mask = layer.mask.is_some();
+    ui.horizontal(|ui| {
+        if ui.button(if has_mask { "🎭 Retirer le masque" } else { "🎭 Ajouter un masque" }).clicked() {
+            app.toggle_active_layer_mask();
+        }
+        if has_mask {
+            ui.checkbox(&mut app.editing_mask, "Éditer le masque")
+                .on_hover_text("Le pinceau/gomme pixel peint le masque (blanc = visible, noir = masqué) au lieu du calque");
+        }
     });
 
     // --- Liste des éléments du calque actif (voir / sélectionner) -----------

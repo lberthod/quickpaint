@@ -1,7 +1,11 @@
-//! Filtres image (backlog) : appliqués aux pixels RGBA d'une image sélectionnée.
+//! Filtres image : appliqués soit destructivement aux pixels d'une image
+//! sélectionnée (backlog), soit en direct au compositing via un **calque
+//! d'ajustement non destructif** (roadmap F3, cf. `render::compositor`).
 //! Purs et testables ; l'intégration (undo, ré-encodage PNG) est dans `app`.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Filter {
     Brighter,
     Darker,

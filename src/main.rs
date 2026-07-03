@@ -7,6 +7,7 @@
 
 mod app;
 mod export;
+mod fonts;
 mod history;
 mod icon;
 mod input;

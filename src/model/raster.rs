@@ -1,0 +1,571 @@
+//! Calque raster tuilé (roadmap F1 — fondation empruntée à GIMP/Photoshop).
+//!
+//! Les pixels peints (pinceau/gomme pixel, et bientôt pot de peinture réel /
+//! tampon de clonage) vivent dans des **tuiles 256×256** allouées à la
+//! demande : un calque raster vide ne consomme aucune mémoire, et un coup de
+//! pinceau ne touche que les quelques tuiles qu'il traverse. C'est ce
+//! découpage qui permet un undo par tuile (on ne clone que ce qui a changé)
+//! et, plus tard, un rendu par dirty-rects au lieu de tout re-rastériser.
+//!
+//! Persistance : pas de sérialisation tuile par tuile (complexité inutile à
+//! ce stade) — le contenu est aplati en un PNG borné à sa boîte englobante,
+//! exactement comme `ImageItem`. Le tuilage reste un détail d'implémentation
+//! interne à l'édition.
+
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+
+/// Côté d'une tuile, en pixels document.
+pub const TILE: i32 = 256;
+
+/// Coordonnées d'une tuile (indices de grille, pas des pixels).
+pub type TileKey = (i32, i32);
+
+/// Une tuile de pixels RGBA8 non prémultipliés.
+#[derive(Clone)]
+pub struct Tile {
+    pub px: Box<[u8]>,
+}
+
+impl Tile {
+    fn blank() -> Self {
+        Self { px: vec![0u8; (TILE * TILE * 4) as usize].into_boxed_slice() }
+    }
+}
+
+impl std::fmt::Debug for Tile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tile").field("bytes", &self.px.len()).finish()
+    }
+}
+
+/// Contenu peint d'un calque, organisé en tuiles éparses.
+#[derive(Clone, Debug, Default)]
+pub struct RasterLayer {
+    pub tiles: HashMap<TileKey, Tile>,
+}
+
+impl RasterLayer {
+    pub fn is_empty(&self) -> bool {
+        self.tiles.is_empty()
+    }
+
+    fn tile_of(x: i32, y: i32) -> TileKey {
+        (x.div_euclid(TILE), y.div_euclid(TILE))
+    }
+
+    pub fn get_pixel(&self, x: i32, y: i32) -> [u8; 4] {
+        let key = Self::tile_of(x, y);
+        let Some(t) = self.tiles.get(&key) else { return [0, 0, 0, 0] };
+        let (lx, ly) = (x.rem_euclid(TILE) as usize, y.rem_euclid(TILE) as usize);
+        let i = (ly * TILE as usize + lx) * 4;
+        [t.px[i], t.px[i + 1], t.px[i + 2], t.px[i + 3]]
+    }
+
+    pub fn set_pixel(&mut self, x: i32, y: i32, rgba: [u8; 4]) {
+        let key = Self::tile_of(x, y);
+        let t = self.tiles.entry(key).or_insert_with(Tile::blank);
+        let (lx, ly) = (x.rem_euclid(TILE) as usize, y.rem_euclid(TILE) as usize);
+        let i = (ly * TILE as usize + lx) * 4;
+        t.px[i..i + 4].copy_from_slice(&rgba);
+    }
+
+    /// Composite source-over d'un pixel, pondéré par une couverture 0..=1
+    /// (anti-aliasing du pinceau).
+    fn blend_pixel(&mut self, x: i32, y: i32, rgba: [u8; 4], coverage: f32) {
+        if coverage <= 0.0 {
+            return;
+        }
+        let cov = coverage.min(1.0);
+        let dst = self.get_pixel(x, y);
+        let sa = (rgba[3] as f32 / 255.0) * cov;
+        let ia = 1.0 - sa;
+        let out = [
+            (rgba[0] as f32 * sa + dst[0] as f32 * ia).round() as u8,
+            (rgba[1] as f32 * sa + dst[1] as f32 * ia).round() as u8,
+            (rgba[2] as f32 * sa + dst[2] as f32 * ia).round() as u8,
+            ((sa + (dst[3] as f32 / 255.0) * ia) * 255.0).round() as u8,
+        ];
+        self.set_pixel(x, y, out);
+    }
+
+    /// Liste (dédupliquée) des tuiles recoupées par un disque — sert à ne
+    /// snapshotter, pour l'undo, que les tuiles réellement touchées.
+    pub fn tiles_touched(cx: f32, cy: f32, r: f32) -> Vec<TileKey> {
+        let r = r.max(0.5);
+        let (x0, y0) = ((cx - r).floor() as i32, (cy - r).floor() as i32);
+        let (x1, y1) = ((cx + r).ceil() as i32, (cy + r).ceil() as i32);
+        let (k0x, k0y) = Self::tile_of(x0, y0);
+        let (k1x, k1y) = Self::tile_of(x1, y1);
+        let mut v = Vec::new();
+        for ty in k0y..=k1y {
+            for tx in k0x..=k1x {
+                v.push((tx, ty));
+            }
+        }
+        v
+    }
+
+    /// Dépose un disque doux (feathering) : plein jusqu'à `hardness * radius`,
+    /// dégradé linéaire de couverture ensuite. `erase = true` retire de
+    /// l'alpha existant au lieu d'en déposer (gomme pixel).
+    pub fn stamp(&mut self, cx: f32, cy: f32, radius: f32, hardness: f32, rgba: [u8; 4], erase: bool) {
+        if radius <= 0.0 {
+            return;
+        }
+        let hardness = hardness.clamp(0.0, 1.0);
+        let edge = hardness * radius;
+        let (x0, x1) = ((cx - radius).floor() as i32, (cx + radius).ceil() as i32);
+        let (y0, y1) = ((cy - radius).floor() as i32, (cy + radius).ceil() as i32);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                if d > radius {
+                    continue;
+                }
+                let cov = if radius <= edge || d <= edge { 1.0 } else { 1.0 - (d - edge) / (radius - edge) };
+                if erase {
+                    let dst = self.get_pixel(x, y);
+                    if dst[3] == 0 {
+                        continue;
+                    }
+                    let strength = cov * (rgba[3] as f32 / 255.0);
+                    let na = (dst[3] as f32 * (1.0 - strength)).round().clamp(0.0, 255.0) as u8;
+                    self.set_pixel(x, y, [dst[0], dst[1], dst[2], na]);
+                } else {
+                    self.blend_pixel(x, y, rgba, cov);
+                }
+            }
+        }
+    }
+
+    /// Trace un tampon échantillonné le long d'un segment (trait continu).
+    pub fn stroke_segment(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        radius: f32,
+        hardness: f32,
+        rgba: [u8; 4],
+        erase: bool,
+    ) {
+        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let step = (radius * 0.3).max(1.0);
+        let n = (dist / step).ceil().max(1.0) as i32;
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            self.stamp(from.0 + dx * t, from.1 + dy * t, radius, hardness, rgba, erase);
+        }
+    }
+
+    /// Tampon de clonage : dépose un disque doux en échantillonnant chaque
+    /// pixel depuis `(x + offset.0, y + offset.1)` — la source est figée en
+    /// un instantané avant d'écrire quoi que ce soit, pour ne pas décaler le
+    /// motif recopié si source et destination se chevauchent pendant ce même
+    /// tampon. `opacity` (0..=1) module l'alpha des pixels source recopiés.
+    pub fn clone_stamp(&mut self, cx: f32, cy: f32, radius: f32, hardness: f32, offset: (f32, f32), opacity: f32) {
+        if radius <= 0.0 {
+            return;
+        }
+        let hardness = hardness.clamp(0.0, 1.0);
+        let edge = hardness * radius;
+        let (x0, x1) = ((cx - radius).floor() as i32, (cx + radius).ceil() as i32);
+        let (y0, y1) = ((cy - radius).floor() as i32, (cy + radius).ceil() as i32);
+        let mut samples = Vec::new();
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                if d > radius {
+                    continue;
+                }
+                let cov = if radius <= edge || d <= edge { 1.0 } else { 1.0 - (d - edge) / (radius - edge) };
+                let sx = (x as f32 + offset.0).round() as i32;
+                let sy = (y as f32 + offset.1).round() as i32;
+                samples.push((x, y, cov, self.get_pixel(sx, sy)));
+            }
+        }
+        for (x, y, cov, src) in samples {
+            let a = (src[3] as f32 * opacity.clamp(0.0, 1.0)).round().clamp(0.0, 255.0) as u8;
+            self.blend_pixel(x, y, [src[0], src[1], src[2], a], cov);
+        }
+    }
+
+    /// Trace le tampon de clonage le long d'un segment (trait continu).
+    pub fn clone_stamp_segment(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        radius: f32,
+        hardness: f32,
+        offset: (f32, f32),
+        opacity: f32,
+    ) {
+        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let step = (radius * 0.3).max(1.0);
+        let n = (dist / step).ceil().max(1.0) as i32;
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            self.clone_stamp(from.0 + dx * t, from.1 + dy * t, radius, hardness, offset, opacity);
+        }
+    }
+
+    /// Remplissage par diffusion (pot de peinture pixel) depuis `(sx, sy)`,
+    /// **borné** à `bounds` (min inclus, max exclu — typiquement le canevas
+    /// document). Sans cette borne, un point de départ transparent n'a
+    /// aucune limite naturelle sur un calque tuilé infini : le remplissage
+    /// partirait à l'infini (chaque tuile jamais peinte renvoie du
+    /// transparent, donc "proche" de la cible) et ferait exploser la
+    /// mémoire — c'est un vrai piège du modèle tuilé épars, pas un détail.
+    /// Non utilisé par l'outil Pot de peinture actuel : celui-ci détecte la
+    /// zone à remplir sur la **composition visuelle** (tous calques/traits
+    /// confondus, via une capture d'écran) puis écrit directement les pixels
+    /// gagnés dans la couche raster (cf. `app::do_bucket_fill`), plutôt que
+    /// de propager depuis la seule couleur déjà présente dans *cette* couche
+    /// raster. Réservé à un futur mode « remplir dans ce calque seulement ».
+    #[allow(dead_code)]
+    pub fn flood_fill(&mut self, sx: i32, sy: i32, rgba: [u8; 4], tol: i32, bounds: ((i32, i32), (i32, i32))) {
+        let (min, max) = bounds;
+        if sx < min.0 || sy < min.1 || sx >= max.0 || sy >= max.1 {
+            return;
+        }
+        let target = self.get_pixel(sx, sy);
+        if target == rgba {
+            return;
+        }
+        let close = |p: [u8; 4]| {
+            (p[0] as i32 - target[0] as i32).abs() <= tol
+                && (p[1] as i32 - target[1] as i32).abs() <= tol
+                && (p[2] as i32 - target[2] as i32).abs() <= tol
+                && (p[3] as i32 - target[3] as i32).abs() <= tol
+        };
+        let in_bounds = |x: i32, y: i32| x >= min.0 && y >= min.1 && x < max.0 && y < max.1;
+        let mut seen: HashSet<(i32, i32)> = HashSet::new();
+        let mut stack = vec![(sx, sy)];
+        seen.insert((sx, sy));
+        while let Some((x, y)) = stack.pop() {
+            self.set_pixel(x, y, rgba);
+            for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                if !in_bounds(nx, ny) || seen.contains(&(nx, ny)) {
+                    continue;
+                }
+                if close(self.get_pixel(nx, ny)) {
+                    seen.insert((nx, ny));
+                    stack.push((nx, ny));
+                }
+            }
+        }
+    }
+
+    /// Couverture d'un pixel utilisé comme **masque de calque** (roadmap P2
+    /// #14) : un pixel jamais peint est visible par défaut (255, comme un
+    /// masque neuf, blanc) ; un pixel peint utilise son canal rouge comme
+    /// niveau de gris (noir peint = masqué, blanc peint = visible), selon la
+    /// convention Photoshop/GIMP. L'alpha du trait de pinceau n'intervient
+    /// que pour mélanger avec la valeur précédente (déjà géré par `stamp`).
+    pub fn mask_coverage(&self, x: i32, y: i32) -> u8 {
+        let p = self.get_pixel(x, y);
+        if p[3] == 0 {
+            255
+        } else {
+            p[0]
+        }
+    }
+
+    /// Boîte englobante (coords pixel, demi-ouverte) des tuiles non vides.
+    pub fn bounds(&self) -> Option<((i32, i32), (i32, i32))> {
+        if self.tiles.is_empty() {
+            return None;
+        }
+        let mut min = (i32::MAX, i32::MAX);
+        let mut max = (i32::MIN, i32::MIN);
+        for &(tx, ty) in self.tiles.keys() {
+            min.0 = min.0.min(tx * TILE);
+            min.1 = min.1.min(ty * TILE);
+            max.0 = max.0.max((tx + 1) * TILE);
+            max.1 = max.1.max((ty + 1) * TILE);
+        }
+        Some((min, max))
+    }
+
+    /// Aplatit en un buffer RGBA dense : `(origine_x, origine_y, largeur, hauteur, pixels)`.
+    pub fn flatten(&self) -> Option<(i32, i32, u32, u32, Vec<u8>)> {
+        let (min, max) = self.bounds()?;
+        let (w, h) = ((max.0 - min.0) as u32, (max.1 - min.1) as u32);
+        let mut out = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let p = self.get_pixel(min.0 + x, min.1 + y);
+                let i = ((y as u32 * w + x as u32) * 4) as usize;
+                out[i..i + 4].copy_from_slice(&p);
+            }
+        }
+        Some((min.0, min.1, w, h, out))
+    }
+
+    /// Copie translatée (roadmap #4 : ancrage lors du changement de taille du
+    /// canevas). Ré-échantillonne via `flatten`/`from_flat` : coûteux mais
+    /// c'est une action ponctuelle déclenchée par l'utilisateur, pas une
+    /// opération par frame.
+    pub fn translated(&self, dx: i32, dy: i32) -> Self {
+        let Some((ox, oy, w, h, rgba)) = self.flatten() else { return Self::default() };
+        Self::from_flat(ox + dx, oy + dy, w, h, &rgba)
+    }
+
+    /// Copie mise à l'échelle (roadmap #4 : redimensionner l'image).
+    pub fn scaled(&self, sx: f32, sy: f32) -> Self {
+        let Some((ox, oy, w, h, rgba)) = self.flatten() else { return Self::default() };
+        if w == 0 || h == 0 {
+            return Self::default();
+        }
+        let (nw, nh) = ((w as f32 * sx).round().max(1.0) as u32, (h as f32 * sy).round().max(1.0) as u32);
+        let Some(img) = image::RgbaImage::from_raw(w, h, rgba) else { return Self::default() };
+        let resized = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+        let (nox, noy) = ((ox as f32 * sx).round() as i32, (oy as f32 * sy).round() as i32);
+        Self::from_flat(nox, noy, nw, nh, resized.as_raw())
+    }
+
+    /// Reconstruit depuis un buffer RGBA dense placé à `(ox, oy)`.
+    pub fn from_flat(ox: i32, oy: i32, w: u32, h: u32, rgba: &[u8]) -> Self {
+        let mut r = RasterLayer::default();
+        if rgba.len() < (w * h * 4) as usize {
+            return r;
+        }
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let i = ((y as u32 * w + x as u32) * 4) as usize;
+                let px = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
+                if px[3] != 0 {
+                    r.set_pixel(ox + x, oy + y, px);
+                }
+            }
+        }
+        r
+    }
+
+    /// Hash de contenu bon marché (cache d'invalidation du compositeur) :
+    /// nombre de tuiles + échantillon de leurs pixels, pas une somme exacte.
+    pub fn content_hash(&self) -> u64 {
+        let mut h = 0xcbf29ce484222325u64;
+        let mut mix = |v: u64| {
+            h ^= v;
+            h = h.wrapping_mul(0x100000001b3);
+        };
+        mix(self.tiles.len() as u64);
+        let mut keys: Vec<&TileKey> = self.tiles.keys().collect();
+        keys.sort_unstable();
+        for k in keys {
+            mix(k.0 as u64);
+            mix(k.1 as u64);
+            let t = &self.tiles[k];
+            for i in (0..t.px.len()).step_by(97) {
+                mix(t.px[i] as u64);
+            }
+        }
+        h
+    }
+}
+
+/// Fragment de PNG persisté (companion des champs `raster_png`/`raster_origin`
+/// de `Layer`, cf. `model::document`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RasterEncoded {
+    pub png_b64: String,
+    pub origin: (i32, i32),
+}
+
+pub fn encode(layer: &RasterLayer) -> RasterEncoded {
+    let Some((ox, oy, w, h, rgba)) = layer.flatten() else {
+        return RasterEncoded::default();
+    };
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use image::ImageEncoder;
+    let mut buf = Vec::new();
+    if image::codecs::png::PngEncoder::new(&mut buf)
+        .write_image(&rgba, w, h, image::ExtendedColorType::Rgba8)
+        .is_err()
+    {
+        return RasterEncoded::default();
+    }
+    RasterEncoded { png_b64: STANDARD.encode(buf), origin: (ox, oy) }
+}
+
+pub fn decode(enc: &RasterEncoded) -> RasterLayer {
+    if enc.png_b64.is_empty() {
+        return RasterLayer::default();
+    }
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let Ok(bytes) = STANDARD.decode(&enc.png_b64) else { return RasterLayer::default() };
+    let Ok(img) = image::load_from_memory(&bytes) else { return RasterLayer::default() };
+    let img = img.to_rgba8();
+    let (w, h) = (img.width(), img.height());
+    RasterLayer::from_flat(enc.origin.0, enc.origin.1, w, h, img.as_raw())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mask_coverage_defaults_to_fully_visible() {
+        let r = RasterLayer::default();
+        assert_eq!(r.mask_coverage(5, 5), 255);
+    }
+
+    #[test]
+    fn mask_coverage_uses_red_channel_once_painted() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(5, 5, [40, 0, 0, 255]);
+        assert_eq!(r.mask_coverage(5, 5), 40);
+        // Voisin jamais peint : reste visible malgré la tuile allouée.
+        assert_eq!(r.mask_coverage(6, 5), 255);
+    }
+
+    #[test]
+    fn empty_layer_has_no_tiles_and_no_bounds() {
+        let r = RasterLayer::default();
+        assert!(r.is_empty());
+        assert!(r.bounds().is_none());
+    }
+
+    #[test]
+    fn set_pixel_allocates_only_touched_tile() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(10, 10, [255, 0, 0, 255]);
+        assert_eq!(r.tiles.len(), 1);
+        assert_eq!(r.get_pixel(10, 10), [255, 0, 0, 255]);
+        // Pixel voisin non peint : transparent.
+        assert_eq!(r.get_pixel(11, 11), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn set_pixel_spans_tile_boundary() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(TILE - 1, 0, [1, 2, 3, 255]);
+        r.set_pixel(TILE, 0, [4, 5, 6, 255]);
+        assert_eq!(r.tiles.len(), 2);
+        assert_eq!(r.get_pixel(TILE - 1, 0), [1, 2, 3, 255]);
+        assert_eq!(r.get_pixel(TILE, 0), [4, 5, 6, 255]);
+    }
+
+    #[test]
+    fn negative_coords_use_correct_tile() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(-1, -1, [9, 9, 9, 255]);
+        assert_eq!(r.get_pixel(-1, -1), [9, 9, 9, 255]);
+        assert_eq!(r.tiles.keys().next(), Some(&(-1, -1)));
+    }
+
+    #[test]
+    fn stamp_opaque_center_full_coverage() {
+        let mut r = RasterLayer::default();
+        r.stamp(50.0, 50.0, 10.0, 1.0, [10, 20, 30, 255], false);
+        assert_eq!(r.get_pixel(50, 50), [10, 20, 30, 255]);
+        // Hors du disque : intact.
+        assert_eq!(r.get_pixel(80, 80), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn stamp_erase_reduces_alpha_only() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(50, 50, [200, 100, 50, 255]);
+        r.stamp(50.0, 50.0, 5.0, 1.0, [0, 0, 0, 255], true);
+        let p = r.get_pixel(50, 50);
+        assert_eq!(&p[0..3], &[200, 100, 50]); // couleur inchangée
+        assert!(p[3] < 10); // alpha quasi nulle
+    }
+
+    #[test]
+    fn clone_stamp_copies_from_offset_source() {
+        let mut r = RasterLayer::default();
+        // Source : disque plein vert à (10,10).
+        r.stamp(10.0, 10.0, 6.0, 1.0, [0, 200, 0, 255], false);
+        // Peint à (50,50) avec un décalage de +40 en x : source = (50-40,50)=(10,50)?
+        // Ici offset = source - dest fixé côté appelant ; le tampon échantillonne à
+        // (x+offset.0, y+offset.1). Avec offset=(-40,-40), (50,50) lit (10,10).
+        r.clone_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 1.0);
+        assert_eq!(r.get_pixel(50, 50), [0, 200, 0, 255]);
+    }
+
+    #[test]
+    fn clone_stamp_partial_opacity_reduces_alpha() {
+        let mut r = RasterLayer::default();
+        r.stamp(10.0, 10.0, 6.0, 1.0, [100, 100, 100, 255], false);
+        r.clone_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 0.5);
+        let p = r.get_pixel(50, 50);
+        assert!(p[3] < 255 && p[3] > 0);
+    }
+
+    #[test]
+    fn flood_fill_stops_at_color_boundary() {
+        let mut r = RasterLayer::default();
+        // Barrière verticale opaque noire en x=5, sur toute la hauteur bornée.
+        for y in 0..10 {
+            r.set_pixel(5, y, [0, 0, 0, 255]);
+        }
+        r.flood_fill(0, 0, [255, 0, 0, 255], 10, ((0, 0), (10, 10)));
+        assert_eq!(r.get_pixel(0, 0), [255, 0, 0, 255]);
+        assert_eq!(r.get_pixel(4, 4), [255, 0, 0, 255]);
+        assert_eq!(r.get_pixel(5, 4), [0, 0, 0, 255]); // barrière intacte
+        assert_eq!(r.get_pixel(6, 4), [0, 0, 0, 0]); // autre côté non atteint
+    }
+
+    /// Régression : sur un calque tuilé infini, un remplissage depuis un
+    /// pixel transparent SANS borne partirait à l'infini (chaque tuile
+    /// jamais peinte est transparente, donc "proche" de la cible) — d'où
+    /// l'obligation d'un rectangle `bounds`. Vérifie qu'il ne déborde pas.
+    #[test]
+    fn flood_fill_never_paints_outside_bounds() {
+        let mut r = RasterLayer::default();
+        r.flood_fill(2, 2, [1, 2, 3, 255], 5, ((0, 0), (5, 5)));
+        assert_eq!(r.get_pixel(2, 2), [1, 2, 3, 255]);
+        assert_eq!(r.get_pixel(0, 0), [1, 2, 3, 255]);
+        assert_eq!(r.get_pixel(4, 4), [1, 2, 3, 255]);
+        // Juste hors des bornes : jamais touché.
+        assert_eq!(r.get_pixel(5, 2), [0, 0, 0, 0]);
+        assert_eq!(r.get_pixel(-1, 2), [0, 0, 0, 0]);
+        // Aucune tuile allouée hors de la zone couverte par les bornes.
+        for &(tx, ty) in r.tiles.keys() {
+            assert_eq!((tx, ty), (0, 0));
+        }
+    }
+
+    #[test]
+    fn flood_fill_outside_bounds_is_noop() {
+        let mut r = RasterLayer::default();
+        r.flood_fill(100, 100, [1, 2, 3, 255], 5, ((0, 0), (5, 5)));
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn flatten_and_from_flat_roundtrip() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(300, 5, [1, 2, 3, 255]);
+        r.set_pixel(10, 400, [4, 5, 6, 255]);
+        let (ox, oy, w, h, rgba) = r.flatten().unwrap();
+        let r2 = RasterLayer::from_flat(ox, oy, w, h, &rgba);
+        assert_eq!(r2.get_pixel(300, 5), [1, 2, 3, 255]);
+        assert_eq!(r2.get_pixel(10, 400), [4, 5, 6, 255]);
+    }
+
+    #[test]
+    fn content_hash_changes_after_paint() {
+        let mut r = RasterLayer::default();
+        let h0 = r.content_hash();
+        r.set_pixel(1, 1, [255, 255, 255, 255]);
+        assert_ne!(h0, r.content_hash());
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        let mut r = RasterLayer::default();
+        r.set_pixel(20, 20, [7, 8, 9, 200]);
+        let enc = encode(&r);
+        assert!(!enc.png_b64.is_empty());
+        let r2 = decode(&enc);
+        assert_eq!(r2.get_pixel(20, 20), [7, 8, 9, 200]);
+    }
+}

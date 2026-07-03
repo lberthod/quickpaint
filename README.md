@@ -13,19 +13,28 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
 
 ## Features
 
-- **Drawing**: brush (width simulated from stroke speed, Catmull-Rom smoothing),
-  **object** or **partial** eraser, paint bucket, color picker.
+- **Drawing**: vector brush (width simulated from stroke speed, Catmull-Rom
+  smoothing), plus a tiled **raster engine** (F1) with pixel **brush**,
+  **eraser**, **clone stamp** (⌥+click = source), and a real flood-fill
+  **paint bucket** — all with per-tile undo.
 - **Shapes**: line, arrow, rectangle, ellipse, polygon, star
-  (outline or filled, Shift constraint).
-- **Pen** (Bézier curves) and **rich text** (proportional / monospace font,
-  faux-bold, left/center/right alignment, outline).
+  (outline or filled, Shift constraint), with **linear/radial gradient fills**.
+- **Pen** (Bézier curves) with **node editing after the fact** — double-click a
+  pen path to reopen and reshape its anchors/handles — and **path booleans**
+  (union / subtract / intersect) on selected filled shapes.
+- **Rich text**: system fonts (lazy-loaded), faux-bold, left/center/right
+  alignment, outline.
 - **Selection**: click, **rectangle (marquee)**, **lasso**, **magic wand**
-  (by color); move, **resize**, **rotate**, duplicate, align / distribute,
-  **z-order** (bring to front / send to back).
+  (by color); move, **resize**, **rotate**, duplicate, align / distribute
+  (with **smart guides**/snapping), **z-order**, **copy/paste style**.
 - **Layers**: visibility, opacity, **blend modes** (multiply, screen…),
-  reordering, **groups**, merge / flatten.
+  reordering, **groups**, merge / flatten, **clipping masks**, **painted layer
+  masks**, non-destructive **adjustment layers** (brightness/contrast/
+  saturation/sharpen/invert/grayscale).
 - **Images**: import + **paste (⌘V)**, move, **crop** (free or ratio-constrained
   1:1 / 4:3 / 16:9 / A4), filters (brightness, grayscale, blur).
+- **Templates**: built-in gallery of common Canva-like formats (social posts,
+  presentation, print…) plus custom-sized documents.
 - **View**: touch zoom/pan, grid + snapping, **rulers**, fixed document size.
 - **History**: non-linear (panel + jump straight to any state).
 - **Export**: **PNG, JPEG, WebP, PDF**, vector **SVG**; **project save** as `.json`.

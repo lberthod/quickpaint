@@ -4,10 +4,11 @@
 //! outils et rendu. La boucle `update` suit la séquence de la section 6 :
 //! lire les évènements → mettre à jour le trait → UI → rendre.
 
-use crate::history::{Command, History};
+use crate::history::{Command, History, RasterOp, RasterTarget};
 use crate::input::GestureCapture;
 use crate::model::{Document, Stroke, Tool};
 use crate::render::canvas::{self, ActiveStroke, StrokeCache, ViewTransform};
+use crate::tools::guides::GuideLine;
 use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser, SelectMode};
 use crate::ui::{footer, layers, toolbar};
 use egui::{Color32, Margin, Pos2, Rect, Sense, Vec2};
@@ -55,6 +56,28 @@ impl ClipBoard {
     }
 }
 
+/// Style copié depuis un élément (roadmap P1 #10, pipette de style) : couleur
+/// + épaisseur/remplissage partagés par traits et formes, plus les attributs
+/// de texte si la source était un texte (`None` sinon — un collage sur un
+/// texte gardera alors sa police actuelle).
+#[derive(Clone)]
+struct StyleClipboard {
+    color: [u8; 4],
+    width: f32,
+    fill: bool,
+    text: Option<TextStyleClip>,
+}
+
+#[derive(Clone)]
+struct TextStyleClip {
+    font: crate::model::text::TextFont,
+    font_family: Option<String>,
+    bold: bool,
+    align: crate::model::text::TextAlign,
+    outline_w: f32,
+    outline_color: [u8; 4],
+}
+
 /// Transformation interactive de la sélection (échelle ou rotation).
 enum XformKind {
     Scale { anchor: (f32, f32) },           // coin opposé fixe
@@ -67,6 +90,27 @@ struct TransformDrag {
     sx: f32,
     sy: f32,
     angle: f32,
+}
+
+/// Dialogue « Redimensionner l'image » / « Taille du canevas » (roadmap P0 #4).
+pub struct ResizeDialog {
+    /// `false` = redimensionner l'image (le contenu est mis à l'échelle),
+    /// `true` = taille du canevas (le contenu est décalé selon l'ancre).
+    pub canvas_mode: bool,
+    pub w: u32,
+    pub h: u32,
+    /// Conserver les proportions (mode image).
+    pub keep_ratio: bool,
+    /// Ancre 9 positions (mode canevas) : colonne 0..=2, ligne 0..=2.
+    pub anchor: (u8, u8),
+}
+
+/// Nœud ciblé par un glissé pendant l'édition de plume après coup (P2 #12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PenNodeTarget {
+    Anchor(usize),
+    HandleIn(usize),
+    HandleOut(usize),
 }
 
 pub struct PaintApp {
@@ -110,6 +154,10 @@ pub struct PaintApp {
     pub selection: HashSet<u64>,
     move_origin: Option<(f32, f32)>,
     move_delta: (f32, f32),
+    /// Guides actifs pendant le déplacement en cours (roadmap P1 #8) : lignes
+    /// magenta affichées quand un bord/centre de la sélection s'accroche à un
+    /// bord/centre d'un autre élément (ou du canevas).
+    active_guides: Vec<GuideLine>,
     // Sélection par région (Sprint 1) : sous-mode + tracés en cours (coords doc).
     pub select_mode: SelectMode,
     /// Rectangle de sélection en cours (coin de départ, coin courant).
@@ -128,6 +176,12 @@ pub struct PaintApp {
     pub crop_ratio: Option<f32>,
     // Plume (roadmap #9) : ancres du chemin en cours.
     pen: Vec<crate::tools::pen::Anchor>,
+    // Édition de nœuds après coup (roadmap P2 #12) : id du trait rouvert +
+    // copie de travail de son chemin (mutée en direct pendant le glissé).
+    editing_pen: Option<(u64, crate::tools::pen::PenPath)>,
+    pen_drag: Option<PenNodeTarget>,
+    /// Chemin avant le geste en cours (pour l'entrée d'annulation).
+    pen_edit_before: Option<crate::tools::pen::PenPath>,
     // Grille / magnétisme (roadmap #10).
     pub show_grid: bool,
     pub snap_enabled: bool,
@@ -139,6 +193,12 @@ pub struct PaintApp {
     // Style de texte courant (Sprint 3) : appliqué aux nouveaux textes, et au
     // texte édité/sélectionné lorsqu'on modifie ces réglages.
     pub text_font: crate::model::text::TextFont,
+    /// Police système sélectionnée (roadmap P1 #7) ; prioritaire sur
+    /// `text_font` si présente. `None` = polices intégrées Sans/Mono.
+    pub text_font_family: Option<String>,
+    /// Filtre de recherche du sélecteur de polices système (UI seulement).
+    pub font_search: String,
+    pub font_manager: crate::fonts::FontManager,
     pub text_bold: bool,
     pub text_align: crate::model::text::TextAlign,
     pub text_outline_w: f32,
@@ -154,6 +214,28 @@ pub struct PaintApp {
     // Document à taille fixe (roadmap #3).
     last_doc_rect: Rect,
     view_initialized: bool,
+    /// Dialogue de redimensionnement image / canevas (roadmap P0 #4).
+    pub resize_dialog: Option<ResizeDialog>,
+    /// Galerie « Nouveau depuis un modèle » ouverte (roadmap P1 #9).
+    pub show_template_gallery: bool,
+    /// Style copié (roadmap P1 #10, pipette de style).
+    style_clipboard: Option<StyleClipboard>,
+    /// Le pinceau/gomme pixel peint dans le masque du calque actif plutôt
+    /// que dans son contenu (roadmap P2 #14).
+    pub editing_mask: bool,
+    /// Saisie hexadécimale de la couleur courante (roadmap P0 #6).
+    pub hex_field: String,
+    // Pinceau / gomme pixel (roadmap F1) : dureté du tampon (0 = dégradé
+    // complet, 1 = bord net) + état du geste en cours.
+    pub pixel_hardness: f32,
+    raster_stroke_last: Option<(f32, f32)>,
+    /// Tuiles touchées pendant le geste en cours, snapshotées **avant**
+    /// modification (undo par tuile, cf. `history::Command::PaintRaster`).
+    raster_touch: std::collections::HashMap<crate::model::raster::TileKey, Option<crate::model::raster::Tile>>,
+    // Tampon de clonage (roadmap P0 #5) : point source (Alt+clic) et décalage
+    // figé au début du geste courant (source suit la destination en parallèle).
+    pub clone_source: Option<(f32, f32)>,
+    clone_offset: Option<(f32, f32)>,
 }
 
 impl Default for PaintApp {
@@ -184,6 +266,9 @@ impl Default for PaintApp {
             eraser_partial: false,
             erase_path: Vec::new(),
             pen: Vec::new(),
+            editing_pen: None,
+            pen_drag: None,
+            pen_edit_before: None,
             show_grid: false,
             snap_enabled: false,
             grid_size: 25.0,
@@ -191,6 +276,7 @@ impl Default for PaintApp {
             selection: HashSet::new(),
             move_origin: None,
             move_delta: (0.0, 0.0),
+            active_guides: Vec::new(),
             select_mode: SelectMode::Rect,
             marquee: None,
             lasso: Vec::new(),
@@ -202,6 +288,9 @@ impl Default for PaintApp {
             crop_ratio: None,
             text_size: 28.0,
             text_font: crate::model::text::TextFont::Proportional,
+            text_font_family: None,
+            font_search: String::new(),
+            font_manager: crate::fonts::FontManager::new(),
             text_bold: false,
             text_align: crate::model::text::TextAlign::Left,
             text_outline_w: 0.0,
@@ -214,6 +303,16 @@ impl Default for PaintApp {
             last_canvas_rect: Rect::ZERO,
             last_doc_rect: Rect::ZERO,
             view_initialized: false,
+            resize_dialog: None,
+            show_template_gallery: false,
+            style_clipboard: None,
+            editing_mask: false,
+            hex_field: String::new(),
+            pixel_hardness: 0.8,
+            raster_stroke_last: None,
+            raster_touch: std::collections::HashMap::new(),
+            clone_source: None,
+            clone_offset: None,
         }
     }
 }
@@ -226,15 +325,24 @@ impl PaintApp {
 
     pub fn clear_active_layer(&mut self) {
         let layer = self.doc.active_id();
-        let previous = self.doc.layers[self.doc.active_layer].strokes.clone();
-        if !previous.is_empty() {
-            self.history.push(&mut self.doc, Command::Clear { layer, previous });
+        let active = &self.doc.layers[self.doc.active_layer];
+        let previous = active.strokes.clone();
+        let previous_raster = active.raster.clone();
+        if !previous.is_empty() || !previous_raster.is_empty() {
+            self.history.push(&mut self.doc, Command::Clear { layer, previous, previous_raster });
         }
     }
 
     pub fn new_document(&mut self) {
         self.apply_loaded(Document::new(self.doc.size));
         self.status = Some("Nouveau document.".into());
+    }
+
+    /// Nouveau document vierge à une taille donnée (roadmap P1 #9, galerie
+    /// de modèles) — contrairement à `set_canvas_size`, repart de zéro.
+    pub fn new_document_sized(&mut self, w: u32, h: u32) {
+        self.apply_loaded(Document::new((w.max(1), h.max(1))));
+        self.status = Some(format!("Nouveau document {w}×{h}."));
     }
 
     /// Profondeur monotone pour qu'un nouvel élément passe au-dessus des autres.
@@ -426,10 +534,38 @@ impl PaintApp {
         let (dx, dy) = self.move_delta;
         self.move_origin = None;
         self.move_delta = (0.0, 0.0);
+        self.active_guides.clear();
         if dx.abs() < 0.5 && dy.abs() < 0.5 {
             return;
         }
         self.push_move(dx, dy);
+    }
+
+    /// Calcule le déplacement brut (curseur − origine) puis l'accroche aux
+    /// bords/centres des autres éléments ou du canevas si assez proche
+    /// (roadmap P1 #8, guides intelligents). Met à jour `move_delta` et
+    /// `active_guides` (lignes magenta affichées pendant le glissé).
+    fn apply_move_with_snap(&mut self, origin: (f32, f32), current: (f32, f32)) {
+        let raw = (current.0 - origin.0, current.1 - origin.1);
+        let elems = self.selected_elements_bounds();
+        if elems.is_empty() {
+            self.move_delta = raw;
+            self.active_guides.clear();
+            return;
+        }
+        let mn = (
+            elems.iter().map(|(_, (mn, _))| mn.0).fold(f32::INFINITY, f32::min),
+            elems.iter().map(|(_, (mn, _))| mn.1).fold(f32::INFINITY, f32::min),
+        );
+        let mx = (
+            elems.iter().map(|(_, (_, mx))| mx.0).fold(f32::NEG_INFINITY, f32::max),
+            elems.iter().map(|(_, (_, mx))| mx.1).fold(f32::NEG_INFINITY, f32::max),
+        );
+        let threshold = 6.0 / self.zoom.max(0.01);
+        let targets = self.guide_targets();
+        let (snapped, guides) = crate::tools::guides::snap((mn, mx), &targets, threshold, raw);
+        self.move_delta = snapped;
+        self.active_guides = guides;
     }
 
     /// Enregistre un déplacement (dx, dy) de la sélection comme commande.
@@ -767,6 +903,7 @@ impl PaintApp {
         let color = [self.brush.color[0], self.brush.color[1], self.brush.color[2], 255];
         if let Some(t) = self.doc.layers[active].texts.iter_mut().find(|t| t.id == id) {
             t.font = self.text_font;
+            t.font_family = self.text_font_family.clone();
             t.bold = self.text_bold;
             t.align = self.text_align;
             t.outline_w = self.text_outline_w;
@@ -893,6 +1030,7 @@ impl PaintApp {
             let mut item = crate::model::TextItem::new(id, d, self.text_size, color);
             item.z = self.bump_z();
             item.font = self.text_font;
+            item.font_family = self.text_font_family.clone();
             item.bold = self.text_bold;
             item.align = self.text_align;
             item.outline_w = self.text_outline_w;
@@ -909,6 +1047,15 @@ impl PaintApp {
         let Some(id) = self.editing_text.take() else { return };
         for layer in &mut self.doc.layers {
             layer.texts.retain(|t| !(t.id == id && t.text.trim().is_empty()));
+        }
+        // Le texte qui vient d'être saisi reste la cible des réglages de
+        // style (police, gras…) tant qu'aucune autre sélection n'est faite :
+        // sinon, cliquer sur un widget qui vole le focus (ex. un champ de
+        // recherche dans la barre d'options) termine silencieusement
+        // l'édition, et le prochain réglage changé ne s'applique à rien.
+        if self.doc.layers[self.doc.active_layer].texts.iter().any(|t| t.id == id) {
+            self.selection.clear();
+            self.selection.insert(id);
         }
     }
 
@@ -1097,6 +1244,35 @@ impl PaintApp {
         v
     }
 
+    /// Boîtes des éléments **non** sélectionnés du calque actif, plus les
+    /// bords/centre du canevas — cibles d'accrochage des guides intelligents
+    /// (roadmap P1 #8).
+    fn guide_targets(&self) -> Vec<((f32, f32), (f32, f32))> {
+        let l = &self.doc.layers[self.doc.active_layer];
+        let sel = &self.selection;
+        let mut v = Vec::new();
+        for s in &l.strokes {
+            if !sel.contains(&s.id) {
+                if let Some(b) = hit::bounds_of(std::iter::once(s)) {
+                    v.push(b);
+                }
+            }
+        }
+        for t in &l.texts {
+            if !sel.contains(&t.id) {
+                v.push(t.approx_bounds());
+            }
+        }
+        for im in &l.images {
+            if !sel.contains(&im.id) {
+                v.push(im.bounds());
+            }
+        }
+        let (w, h) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
+        v.push(((0.0, 0.0), (w, h)));
+        v
+    }
+
     pub fn align(&mut self, mode: AlignMode) {
         let elems = self.selected_elements_bounds();
         if elems.len() < 2 {
@@ -1275,6 +1451,7 @@ impl PaintApp {
         }
         self.image_textures.clear();
         self.selection.clear();
+        self.editing_pen = None;
     }
 
     pub fn redo(&mut self) {
@@ -1283,6 +1460,7 @@ impl PaintApp {
         }
         self.image_textures.clear();
         self.selection.clear();
+        self.editing_pen = None;
     }
 
     /// Saut direct dans la frise d'historique (panneau d'historique).
@@ -1326,6 +1504,189 @@ impl PaintApp {
     pub fn cut_selection(&mut self) {
         self.copy_selection();
         self.delete_selection();
+    }
+
+    // --- Dégradés de remplissage (roadmap P2 #11, fait partie de F2) --------
+
+    /// Applique un dégradé (couleur courante → blanc) aux formes pleines
+    /// sélectionnées, dimensionné sur la boîte englobante de chaque forme
+    /// (pas de la sélection entière — chaque forme garde son propre dégradé).
+    pub fn apply_gradient(&mut self, kind: crate::model::GradientKind) {
+        let active = self.doc.active_layer;
+        let sel = self.selection.clone();
+        let color_a = self.brush.color;
+        let color_b = [255, 255, 255, color_a[3]];
+        let l = &mut self.doc.layers[active];
+        let mut n = 0;
+        for s in &mut l.strokes {
+            if sel.contains(&s.id) && s.fill {
+                if let Some(bounds) = crate::tools::hit::bounds_of(std::iter::once(&*s)) {
+                    s.gradient = Some(crate::model::Gradient::two_stop(kind, bounds, color_a, color_b));
+                    n += 1;
+                }
+            }
+        }
+        if n > 0 {
+            self.history.touch();
+            self.cache.clear();
+            self.status = Some(format!("Dégradé appliqué à {n} forme(s)."));
+        } else {
+            self.status = Some("Sélectionne au moins une forme pleine (Rempli).".into());
+        }
+    }
+
+    pub fn remove_gradient(&mut self) {
+        let active = self.doc.active_layer;
+        let sel = &self.selection;
+        let l = &mut self.doc.layers[active];
+        let mut n = 0;
+        for s in &mut l.strokes {
+            if sel.contains(&s.id) && s.gradient.take().is_some() {
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.history.touch();
+            self.cache.clear();
+            self.status = Some(format!("Dégradé retiré de {n} forme(s)."));
+        }
+    }
+
+    // --- Booléens de chemins (roadmap P2 #13) --------------------------------
+
+    /// Union/soustraction/intersection des deux formes pleines sélectionnées.
+    /// `subject` = trait le plus profond (z le plus petit), `clip` = l'autre —
+    /// pertinent pour la soustraction (« retire clip de subject »).
+    pub fn boolean_op(&mut self, kind: crate::tools::boolean::BooleanKind) {
+        if self.selection.len() != 2 {
+            self.status = Some("Sélectionne exactement 2 formes pleines.".into());
+            return;
+        }
+        let active = self.doc.active_layer;
+        let layer_id = self.doc.active_id();
+        let l = &self.doc.layers[active];
+        let mut picked: Vec<(usize, &Stroke)> = l
+            .strokes
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| self.selection.contains(&s.id) && s.fill)
+            .collect();
+        if picked.len() != 2 {
+            self.status = Some("Sélectionne exactement 2 formes pleines (option « Rempli »).".into());
+            return;
+        }
+        picked.sort_by(|a, b| a.1.z.partial_cmp(&b.1.z).unwrap());
+        let (idx_a, subject) = picked[0];
+        let (idx_b, clip) = picked[1];
+        let result = crate::tools::boolean::apply(subject, clip, kind);
+        let removed = vec![(idx_a, subject.clone()), (idx_b, clip.clone())];
+        let z = subject.z;
+        let mut added: Vec<Stroke> = Vec::new();
+        if let Some(polys) = result {
+            for pts in polys {
+                let mut s = crate::tools::boolean::stroke_from_points(subject, pts);
+                s.id = self.next_id;
+                self.next_id += 1;
+                s.z = z;
+                added.push(s);
+            }
+        }
+        let new_ids: Vec<u64> = added.iter().map(|s| s.id).collect();
+        self.history.push(&mut self.doc, Command::SplitStrokes { layer: layer_id, removed, added });
+        self.selection = new_ids.into_iter().collect();
+        self.cache.clear();
+        self.status = Some(match self.selection.is_empty() {
+            true => format!("{} : résultat vide.", kind.label()),
+            false => format!("{} appliquée.", kind.label()),
+        });
+    }
+
+    // --- Pipette de style (roadmap P1 #10) -----------------------------------
+
+    /// Copie le style du premier élément sélectionné (couleur/épaisseur/
+    /// remplissage, plus police/gras/alignement/contour si c'est un texte).
+    pub fn copy_style(&mut self) {
+        let l = &self.doc.layers[self.doc.active_layer];
+        let id = match self.selection.iter().next() {
+            Some(id) => *id,
+            None => {
+                self.status = Some("Sélectionne d'abord un élément.".into());
+                return;
+            }
+        };
+        if let Some(s) = l.strokes.iter().find(|s| s.id == id) {
+            self.style_clipboard =
+                Some(StyleClipboard { color: s.color, width: s.base_width, fill: s.fill, text: None });
+            self.status = Some("Style copié.".into());
+        } else if let Some(t) = l.texts.iter().find(|t| t.id == id) {
+            self.style_clipboard = Some(StyleClipboard {
+                color: t.color,
+                width: 0.0,
+                fill: false,
+                text: Some(TextStyleClip {
+                    font: t.font,
+                    font_family: t.font_family.clone(),
+                    bold: t.bold,
+                    align: t.align,
+                    outline_w: t.outline_w,
+                    outline_color: t.outline_color,
+                }),
+            });
+            self.status = Some("Style copié.".into());
+        } else {
+            self.status = Some("Cet élément n'a pas de style copiable.".into());
+        }
+    }
+
+    /// Applique le style copié à tous les éléments sélectionnés, chacun
+    /// selon son propre type (un trait garde sa forme, seul le style change).
+    pub fn paste_style(&mut self) {
+        let Some(style) = self.style_clipboard.clone() else {
+            self.status = Some("Copie d'abord un style (⌥⌘C).".into());
+            return;
+        };
+        if self.selection.is_empty() {
+            self.status = Some("Sélectionne au moins un élément.".into());
+            return;
+        }
+        let active = self.doc.active_layer;
+        let l = &mut self.doc.layers[active];
+        let mut n = 0;
+        for s in &mut l.strokes {
+            if self.selection.contains(&s.id) {
+                s.color = style.color;
+                s.fill = style.fill;
+                if style.width > 0.0 {
+                    let ratio = style.width / s.base_width.max(0.01);
+                    for p in &mut s.points {
+                        p.width *= ratio;
+                    }
+                    s.base_width = style.width;
+                }
+                n += 1;
+            }
+        }
+        for t in &mut l.texts {
+            if self.selection.contains(&t.id) {
+                t.color = style.color;
+                if let Some(ts) = &style.text {
+                    t.font = ts.font;
+                    t.font_family = ts.font_family.clone();
+                    t.bold = ts.bold;
+                    t.align = ts.align;
+                    t.outline_w = ts.outline_w;
+                    t.outline_color = ts.outline_color;
+                }
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.history.touch();
+            self.cache.clear();
+            self.status = Some(format!("Style appliqué à {n} élément(s)."));
+        } else {
+            self.status = Some("Aucun trait ni texte dans la sélection.".into());
+        }
     }
 
     /// Colle le presse-papiers interne (décalé) sur le calque actif.
@@ -1406,6 +1767,18 @@ impl PaintApp {
         let layer = crate::model::Layer::new(id, format!("Calque {n}"));
         let index = self.doc.layers.len();
         self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
+    }
+
+    /// Ajoute un calque d'ajustement (roadmap F3) au-dessus du calque actif :
+    /// non destructif, réversible, re-réglable en changeant simplement son
+    /// filtre depuis le panneau de calques.
+    pub fn add_adjustment_layer(&mut self, filter: crate::tools::filter::Filter) {
+        let id = self.doc.next_layer_id;
+        self.doc.next_layer_id += 1;
+        let layer = crate::model::Layer::new_adjustment(id, format!("Réglage : {}", filter.label()), filter);
+        let index = self.doc.active_layer + 1;
+        self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
+        self.status = Some(format!("Calque d'ajustement « {} » ajouté.", filter.label()));
     }
 
     pub fn delete_active_layer(&mut self) {
@@ -1528,23 +1901,172 @@ impl PaintApp {
         self.pan = Vec2::new((cr.width() - w) * 0.5, (cr.height() - h) * 0.5);
     }
 
-    /// Change la taille du document (presets) en conservant les traits.
+    /// Change la taille du document (presets) : canevas centré, sans déformer
+    /// le contenu. Annulable.
     pub fn set_canvas_size(&mut self, w: u32, h: u32) {
-        self.doc.size = (w.max(1), h.max(1));
+        self.resize_canvas(w, h, (1, 1));
+    }
+
+    /// Ouvre le dialogue « Redimensionner l'image » (`canvas_mode = false`) ou
+    /// « Taille du canevas » (`canvas_mode = true`), pré-rempli avec la taille
+    /// actuelle.
+    pub fn open_resize_dialog(&mut self, canvas_mode: bool) {
+        self.resize_dialog = Some(ResizeDialog {
+            canvas_mode,
+            w: self.doc.size.0,
+            h: self.doc.size.1,
+            keep_ratio: true,
+            anchor: (1, 1),
+        });
+    }
+
+    /// Pousse un remplacement complet du document dans l'historique (annulable)
+    /// et invalide tous les caches de rendu.
+    fn push_doc_snapshot(&mut self, after: Document, label: &'static str) {
+        let before = Box::new(self.doc.clone());
+        self.history.push(&mut self.doc, Command::SetDoc { before, after: Box::new(after), label });
+        self.cache.clear();
+        self.image_textures.clear();
+        self.selection.clear();
         self.fit_view();
-        self.status = Some(format!("Document : {w}×{h}"));
+    }
+
+    /// Redimensionne l'image (façon PhotoFiltre) : le document ET son contenu
+    /// sont mis à l'échelle. Non destructif pour les images (leur bitmap source
+    /// est conservé, seule la taille affichée change).
+    pub fn resize_document(&mut self, w: u32, h: u32) {
+        let (w, h) = (w.max(1), h.max(1));
+        let (ow, oh) = self.doc.size;
+        if (w, h) == (ow, oh) {
+            return;
+        }
+        let mut after = self.doc.clone();
+        after.scale_content(w as f32 / ow as f32, h as f32 / oh as f32);
+        after.size = (w, h);
+        self.push_doc_snapshot(after, "Redimensionner l'image");
+        self.status = Some(format!("Image redimensionnée : {w}×{h}"));
+    }
+
+    /// Change la taille du canevas sans mettre le contenu à l'échelle :
+    /// l'ancre (colonne, ligne ∈ 0..=2) fixe le côté du document conservé.
+    pub fn resize_canvas(&mut self, w: u32, h: u32, anchor: (u8, u8)) {
+        let (w, h) = (w.max(1), h.max(1));
+        let (ow, oh) = self.doc.size;
+        if (w, h) == (ow, oh) {
+            return;
+        }
+        let dx = (w as f32 - ow as f32) * anchor.0.min(2) as f32 / 2.0;
+        let dy = (h as f32 - oh as f32) * anchor.1.min(2) as f32 / 2.0;
+        let mut after = self.doc.clone();
+        after.translate_content(dx, dy);
+        after.size = (w, h);
+        self.push_doc_snapshot(after, "Taille du canevas");
+        self.status = Some(format!("Canevas : {w}×{h}"));
+    }
+
+    /// Fenêtre modale du redimensionnement (rendue à chaque frame si ouverte).
+    fn show_resize_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut d) = self.resize_dialog.take() else { return };
+        let (ow, oh) = self.doc.size;
+        let title = if d.canvas_mode { "Taille du canevas" } else { "Redimensionner l'image" };
+        let mut open = true;
+        let mut apply = false;
+        let mut cancel = false;
+        egui::Window::new(title)
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!("Taille actuelle : {ow}×{oh}"));
+                ui.horizontal(|ui| {
+                    ui.label("Largeur :");
+                    let rw = ui.add(egui::DragValue::new(&mut d.w).range(1..=16384).suffix(" px"));
+                    ui.label("Hauteur :");
+                    let rh = ui.add(egui::DragValue::new(&mut d.h).range(1..=16384).suffix(" px"));
+                    // Proportions liées (mode image) : le champ modifié pilote l'autre.
+                    if !d.canvas_mode && d.keep_ratio && oh > 0 && ow > 0 {
+                        if rw.changed() {
+                            d.h = ((d.w as f64 * oh as f64 / ow as f64).round() as u32).max(1);
+                        } else if rh.changed() {
+                            d.w = ((d.h as f64 * ow as f64 / oh as f64).round() as u32).max(1);
+                        }
+                    }
+                });
+                if d.canvas_mode {
+                    ui.label("Ancrage du contenu :");
+                    // Grille 3×3 : la case cochée est le côté où reste le contenu.
+                    for row in 0..3u8 {
+                        ui.horizontal(|ui| {
+                            for col in 0..3u8 {
+                                let sel = d.anchor == (col, row);
+                                if ui.selectable_label(sel, if sel { "◉" } else { "○" }).clicked() {
+                                    d.anchor = (col, row);
+                                }
+                            }
+                        });
+                    }
+                } else {
+                    ui.checkbox(&mut d.keep_ratio, "Conserver les proportions");
+                    ui.horizontal(|ui| {
+                        ui.label("Échelle :");
+                        for pct in [25u32, 50, 200] {
+                            if ui.button(format!("{pct} %")).clicked() {
+                                d.w = (ow.saturating_mul(pct) / 100).max(1);
+                                d.h = (oh.saturating_mul(pct) / 100).max(1);
+                            }
+                        }
+                    });
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Annuler").clicked() {
+                        cancel = true;
+                    }
+                    if ui.button("Appliquer").clicked() {
+                        apply = true;
+                    }
+                });
+            });
+        if apply {
+            if d.canvas_mode {
+                self.resize_canvas(d.w, d.h, d.anchor);
+            } else {
+                self.resize_document(d.w, d.h);
+            }
+        } else if open && !cancel {
+            self.resize_dialog = Some(d); // toujours ouvert
+        }
     }
 
     // --- Projet : sauvegarde / ouverture (idée 6) ---------------------------
 
-    /// Encode (paresseusement) le PNG de toutes les images avant un export
-    /// nécessitant les données encodées (projet, SVG).
+    /// Encode (paresseusement) le PNG de toutes les images et du raster peint
+    /// avant un export nécessitant les données encodées (projet, SVG).
     fn encode_all_images(&mut self) {
         for layer in &mut self.doc.layers {
             for im in &mut layer.images {
                 im.ensure_encoded();
             }
+            layer.ensure_raster_encoded();
+            layer.ensure_mask_encoded();
         }
+    }
+
+    /// Ajoute/retire le masque de calque peint (roadmap P2 #14) et bascule
+    /// directement en mode édition de masque quand on vient d'en créer un.
+    pub fn toggle_active_layer_mask(&mut self) {
+        let active = self.doc.active_layer;
+        let layer = &mut self.doc.layers[active];
+        if layer.mask.is_some() {
+            layer.remove_mask();
+            self.editing_mask = false;
+        } else {
+            layer.add_mask();
+            self.editing_mask = true;
+        }
+        self.history.touch();
+        self.cache.clear();
     }
 
     pub fn save_project(&mut self) {
@@ -1568,6 +2090,8 @@ impl PaintApp {
             for im in &mut layer.images {
                 im.decode();
             }
+            layer.decode_raster();
+            layer.decode_mask();
         }
         self.doc = doc;
         self.history = History::new();
@@ -1691,8 +2215,155 @@ impl PaintApp {
         for p in &pts {
             stroke.points.push(crate::model::StrokePoint { pos: *p, width: self.brush.width });
         }
-        self.pen.clear();
+        // Conserve les ancres (roadmap P2 #12) : un double-clic ultérieur
+        // avec l'outil Sélection rouvre l'édition des poignées.
+        stroke.anchors = Some(crate::tools::pen::PenPath { anchors: std::mem::take(&mut self.pen), closed });
         self.commit_stroke(stroke);
+    }
+
+    // --- Édition de nœuds après coup (roadmap P2 #12, F2) -------------------
+
+    /// Double-clic sur un trait de plume : rouvre ses ancres/poignées.
+    /// `false` si le trait ciblé n'a pas d'ancres (ex. formes, pinceau libre).
+    fn try_start_pen_edit(&mut self, id: u64) -> bool {
+        let l = &self.doc.layers[self.doc.active_layer];
+        let Some(s) = l.strokes.iter().find(|s| s.id == id) else { return false };
+        let Some(path) = &s.anchors else { return false };
+        self.editing_pen = Some((id, path.clone()));
+        self.selection.clear();
+        self.selection.insert(id);
+        self.status = Some("Édition du chemin : glisse une ancre/poignée ; Échap ou double-clic ailleurs pour terminer.".into());
+        true
+    }
+
+    fn hit_test_pen_node(&self, d: (f32, f32)) -> Option<PenNodeTarget> {
+        let (_, path) = self.editing_pen.as_ref()?;
+        let thresh = 8.0 / self.zoom.max(0.01);
+        let mut best: Option<(f32, PenNodeTarget)> = None;
+        let consider = |pos: (f32, f32), target: PenNodeTarget, best: &mut Option<(f32, PenNodeTarget)>| {
+            let dd = ((pos.0 - d.0).powi(2) + (pos.1 - d.1).powi(2)).sqrt();
+            if dd <= thresh && best.map(|(bd, _)| dd < bd).unwrap_or(true) {
+                *best = Some((dd, target));
+            }
+        };
+        for (i, a) in path.anchors.iter().enumerate() {
+            consider(a.pos, PenNodeTarget::Anchor(i), &mut best);
+            if a.h_in != a.pos {
+                consider(a.h_in, PenNodeTarget::HandleIn(i), &mut best);
+            }
+            if a.h_out != a.pos {
+                consider(a.h_out, PenNodeTarget::HandleOut(i), &mut best);
+            }
+        }
+        best.map(|(_, t)| t)
+    }
+
+    /// Déplace le nœud ciblé dans la copie de travail, puis ré-échantillonne
+    /// immédiatement le trait pour un aperçu live (même geste que la peinture
+    /// raster : mutation directe + `history.touch()`, undo à la fin du geste).
+    fn apply_pen_drag(&mut self, target: PenNodeTarget, d: (f32, f32)) {
+        let Some((id, path)) = &mut self.editing_pen else { return };
+        match target {
+            PenNodeTarget::Anchor(i) => {
+                if let Some(a) = path.anchors.get_mut(i) {
+                    let delta = (d.0 - a.pos.0, d.1 - a.pos.1);
+                    a.pos = d;
+                    a.h_in = (a.h_in.0 + delta.0, a.h_in.1 + delta.1);
+                    a.h_out = (a.h_out.0 + delta.0, a.h_out.1 + delta.1);
+                }
+            }
+            PenNodeTarget::HandleIn(i) => {
+                if let Some(a) = path.anchors.get_mut(i) {
+                    a.h_in = d;
+                }
+            }
+            PenNodeTarget::HandleOut(i) => {
+                if let Some(a) = path.anchors.get_mut(i) {
+                    a.h_out = d;
+                }
+            }
+        }
+        let id = *id;
+        let pts = path.sample();
+        let active = self.doc.active_layer;
+        if let Some(s) = self.doc.layers[active].strokes.iter_mut().find(|s| s.id == id) {
+            let w = s.base_width;
+            s.points = pts.into_iter().map(|pos| crate::model::StrokePoint { pos, width: w }).collect();
+        }
+        self.cache.invalidate(std::iter::once(&id));
+        self.history.touch();
+    }
+
+    /// Fin du glissé d'un nœud : pousse une commande d'undo (avant/après).
+    fn commit_pen_edit(&mut self, id: u64) {
+        let Some(before_path) = self.pen_edit_before.take() else { return };
+        let Some((_, after_path)) = &self.editing_pen else { return };
+        let after_path = after_path.clone();
+        let active = self.doc.active_layer;
+        let layer = self.doc.active_id();
+        let Some(s) = self.doc.layers[active].strokes.iter().find(|s| s.id == id) else { return };
+        let width = s.base_width;
+        let after_points = s.points.clone();
+        let before_points: Vec<_> = before_path
+            .sample()
+            .into_iter()
+            .map(|pos| crate::model::StrokePoint { pos, width })
+            .collect();
+        if before_points.len() == after_points.len()
+            && before_points.iter().zip(&after_points).all(|(a, b)| a.pos == b.pos)
+        {
+            return; // pas de déplacement net (clic sans glissé réel)
+        }
+        self.history.push(
+            &mut self.doc,
+            Command::EditPenPath { layer, id, before_path, before_points, after_path, after_points },
+        );
+    }
+
+    /// Gère le glissé des ancres/poignées tant qu'un chemin est en édition
+    /// (roadmap P2 #12) ; appelé en priorité par l'outil Sélection.
+    fn handle_pen_node_edit(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
+        let Some((id, _)) = self.editing_pen else { return };
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.editing_pen = None;
+            self.pen_drag = None;
+            self.status = Some("Édition du chemin terminée.".into());
+            return;
+        }
+        if response.drag_started() {
+            // `interact_pointer_pos()` peut déjà refléter une position avancée
+            // dans le glissé (plusieurs évènements souris fusionnés avant la
+            // première frame où `drag_started()` devient vrai) : on teste donc
+            // le nœud visé à partir du point de pression réel, pas de la
+            // position courante du pointeur.
+            let press = ctx.input(|i| i.pointer.press_origin());
+            if let Some(p) = press {
+                let d = view.screen_to_doc(p);
+                self.pen_drag = self.hit_test_pen_node(d);
+                if self.pen_drag.is_some() {
+                    self.pen_edit_before = self.editing_pen.as_ref().map(|(_, p)| p.clone());
+                }
+            }
+        }
+        if response.dragged() {
+            if let (Some(target), Some(p)) = (self.pen_drag, response.interact_pointer_pos()) {
+                let d = self.snap(view.screen_to_doc(p));
+                self.apply_pen_drag(target, d);
+            }
+        }
+        if response.drag_stopped() && self.pen_drag.take().is_some() {
+            self.commit_pen_edit(id);
+        }
+        // Double-clic hors de tout nœud : referme l'édition.
+        if response.double_clicked() && self.pen_drag.is_none() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                if self.hit_test_pen_node(d).is_none() {
+                    self.editing_pen = None;
+                    self.status = Some("Édition du chemin terminée.".into());
+                }
+            }
+        }
     }
 
     fn current_view(&self) -> ViewTransform {
@@ -1716,7 +2387,13 @@ impl PaintApp {
     fn needs_composite(&self) -> bool {
         self.doc.layers.iter().any(|l| {
             l.visible
-                && (l.blend != crate::model::BlendMode::Normal || l.opacity < 0.999 || l.clip)
+                && (l.blend != crate::model::BlendMode::Normal
+                    || l.opacity < 0.999
+                    || l.clip
+                    || !l.raster.is_empty()
+                    || l.adjustment.is_some()
+                    || l.mask.is_some()
+                    || l.strokes.iter().any(|s| s.gradient.is_some()))
         })
     }
 
@@ -1729,6 +2406,7 @@ impl PaintApp {
             h = h.wrapping_mul(31).wrapping_add((l.opacity * 1000.0) as u64);
             h = h.wrapping_mul(31).wrapping_add(l.blend as u64);
             h = h.wrapping_mul(31).wrapping_add(l.clip as u64);
+            h = h.wrapping_mul(31).wrapping_add(l.adjustment.map(|f| f as u64 + 1).unwrap_or(0));
         }
         h = h
             .wrapping_mul(31)
@@ -1771,30 +2449,67 @@ impl PaintApp {
         }
 
         let mask = crate::tools::bucket::flood(&region, rw, rh, cx as usize, cy as usize, 36);
-        let count = mask.iter().filter(|&&m| m).count();
-        if count == 0 {
+        if !mask.iter().any(|&m| m) {
             return;
         }
-        // Buffer de sortie : couleur de remplissage là où c'est rempli.
+
+        // Convertit le masque (résolution écran physique) en pixels document,
+        // un par un dans l'espace document plutôt qu'écran : au zoom réel, un
+        // pixel document peut couvrir plusieurs pixels écran (ou l'inverse) —
+        // itérer côté document évite trous (zoom arrière) et travail redondant
+        // (zoom avant), sans dépendre de la résolution de la capture d'écran.
+        let view = self.current_view();
+        let dp0 = view.screen_to_doc(r.min);
+        let dp1 = view.screen_to_doc(egui::pos2(r.min.x + rw as f32 / ppp, r.min.y + rh as f32 / ppp));
+        let (doc_w, doc_h) = (self.doc.size.0 as i32, self.doc.size.1 as i32);
+        let dx0 = (dp0.0.floor() as i32).max(0);
+        let dy0 = (dp0.1.floor() as i32).max(0);
+        let dx1 = (dp1.0.ceil() as i32).min(doc_w);
+        let dy1 = (dp1.1.ceil() as i32).min(doc_h);
+
         let fill = self.brush.color;
-        let mut out = vec![0u8; rw * rh * 4];
-        for (k, &m) in mask.iter().enumerate() {
-            if m {
-                out[k * 4..k * 4 + 4].copy_from_slice(&[fill[0], fill[1], fill[2], 255]);
+        let layer_id = self.doc.active_id();
+        let mut hit: Vec<(i32, i32)> = Vec::new();
+        for dy in dy0..dy1 {
+            for dx in dx0..dx1 {
+                let sp = view.doc_to_screen((dx as f32 + 0.5, dy as f32 + 0.5));
+                let sx = ((sp.x * ppp).round() as i64) - x0 as i64;
+                let sy = ((sp.y * ppp).round() as i64) - y0 as i64;
+                if sx < 0 || sy < 0 || sx as usize >= rw || sy as usize >= rh {
+                    continue;
+                }
+                if mask[sy as usize * rw + sx as usize] {
+                    hit.push((dx, dy));
+                }
             }
         }
+        if hit.is_empty() {
+            return;
+        }
 
-        // Place l'image en coords document (la région correspond à un sous-rect).
-        let view = self.current_view();
-        let pos = view.screen_to_doc(r.min);
-        let size = ((rw as f32 / ppp) / self.zoom, (rh as f32 / ppp) / self.zoom);
-        let id = self.next_id;
-        self.next_id += 1;
-        let mut item = crate::model::ImageItem::from_rgba(id, pos, rw as u32, rh as u32, out);
-        item.size = size;
-        item.z = self.bump_z();
-        let layer = self.doc.active_id();
-        self.history.push(&mut self.doc, Command::AddImage { layer, image: item });
+        let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
+        let mut before: std::collections::HashMap<crate::model::raster::TileKey, Option<crate::model::raster::Tile>> =
+            Default::default();
+        for &(dx, dy) in &hit {
+            for key in crate::model::RasterLayer::tiles_touched(dx as f32, dy as f32, 0.5) {
+                before.entry(key).or_insert_with(|| layer.raster.tiles.get(&key).cloned());
+            }
+        }
+        let count = hit.len();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            for (dx, dy) in hit {
+                layer.raster.set_pixel(dx, dy, [fill[0], fill[1], fill[2], 255]);
+            }
+        }
+        let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
+        let tiles: Vec<_> = before
+            .into_iter()
+            .map(|(key, b)| (key, b, layer.raster.tiles.get(&key).cloned()))
+            .collect();
+        self.history.push(
+            &mut self.doc,
+            Command::PaintRaster { layer: layer_id, op: RasterOp::Bucket, target: RasterTarget::Content, tiles },
+        );
         self.status = Some(format!("Zone remplie ({count} px)."));
     }
 
@@ -1819,8 +2534,13 @@ impl PaintApp {
             if cmd && i.key_pressed(egui::Key::D) {
                 self.duplicate_selection();
             }
-            if cmd && i.key_pressed(egui::Key::C) {
+            if cmd && i.modifiers.alt && i.key_pressed(egui::Key::C) {
+                self.copy_style();
+            } else if cmd && i.key_pressed(egui::Key::C) {
                 self.copy_selection();
+            }
+            if cmd && i.modifiers.alt && i.key_pressed(egui::Key::V) {
+                self.paste_style();
             }
             if cmd && i.key_pressed(egui::Key::X) {
                 self.cut_selection();
@@ -1841,7 +2561,7 @@ impl PaintApp {
             if cmd && i.key_pressed(egui::Key::E) {
                 want_export = true;
             }
-            if cmd && i.key_pressed(egui::Key::V) {
+            if cmd && !i.modifiers.alt && i.key_pressed(egui::Key::V) {
                 want_paste = true;
             }
             // Ordre de superposition : ⌘] avancer / ⌘⇧] premier plan, ⌘[ reculer / ⌘⇧[ arrière.
@@ -1970,10 +2690,7 @@ impl PaintApp {
         egui::Area::new(egui::Id::new(("text_edit", id)))
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                let font = egui::FontId::new(
-                    t.size.clamp(12.0, 48.0),
-                    crate::render::text::family(t.font),
-                );
+                let font = egui::FontId::new(t.size.clamp(12.0, 48.0), crate::render::text::family(t));
                 let resp = ui.add(
                     egui::TextEdit::multiline(&mut t.text)
                         .desired_width(260.0)
@@ -2113,6 +2830,33 @@ impl PaintApp {
                     painter.line_segment([c, hp], egui::Stroke::new(1.0, Color32::from_gray(150)));
                     painter.circle_filled(hp, 3.0, Color32::WHITE);
                     painter.circle_stroke(hp, 3.0, egui::Stroke::new(1.0, blue));
+                }
+            }
+        }
+    }
+
+    /// Édition de nœuds après coup (roadmap P2 #12) : ancres/poignées d'un
+    /// trait de plume déjà posé, rouvertes par double-clic — même style
+    /// visuel que le tracé en cours (`paint_pen`), en orange pour distinguer
+    /// « en édition » de « en train de tracer ».
+    fn paint_pen_edit(&self, painter: &egui::Painter, view: &ViewTransform) {
+        let Some((_, path)) = &self.editing_pen else { return };
+        let orange = Color32::from_rgb(230, 140, 20);
+        let pts = path.sample();
+        let screen: Vec<egui::Pos2> = pts.iter().map(|p| view.doc_to_screen(*p)).collect();
+        if screen.len() >= 2 {
+            painter.add(egui::Shape::line(screen, egui::Stroke::new(1.5, orange)));
+        }
+        for a in &path.anchors {
+            let c = view.doc_to_screen(a.pos);
+            painter.rect_filled(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, orange);
+            painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, egui::Stroke::new(1.0, Color32::WHITE));
+            for h in [a.h_in, a.h_out] {
+                if h != a.pos {
+                    let hp = view.doc_to_screen(h);
+                    painter.line_segment([c, hp], egui::Stroke::new(1.0, Color32::from_gray(150)));
+                    painter.circle_filled(hp, 3.5, Color32::WHITE);
+                    painter.circle_stroke(hp, 3.5, egui::Stroke::new(1.0, orange));
                 }
             }
         }
@@ -2277,6 +3021,22 @@ impl PaintApp {
         match self.active_tool {
             ActiveTool::Select => {
                 let shift = ctx.input(|i| i.modifiers.shift);
+                // Édition de nœuds (roadmap P2 #12) : prioritaire tant qu'un
+                // chemin de plume est rouvert.
+                if self.editing_pen.is_some() {
+                    self.handle_pen_node_edit(ctx, response, view);
+                    return;
+                }
+                if response.double_clicked() {
+                    if let Some(p) = response.interact_pointer_pos() {
+                        let d = view.screen_to_doc(p);
+                        if let Some(id) = self.topmost_at(d) {
+                            if self.try_start_pen_edit(id) {
+                                return;
+                            }
+                        }
+                    }
+                }
                 // Mode recadrage : le glissé définit la zone à conserver.
                 if self.crop_mode {
                     if response.drag_started() {
@@ -2350,7 +3110,7 @@ impl PaintApp {
                         } else if !self.lasso.is_empty() {
                             self.lasso.push(d);
                         } else if let Some(o) = self.move_origin {
-                            self.move_delta = (d.0 - o.0, d.1 - o.1);
+                            self.apply_move_with_snap(o, d);
                         }
                     }
                 }
@@ -2467,8 +3227,226 @@ impl PaintApp {
                     }
                 }
             }
+            ActiveTool::PixelBrush | ActiveTool::PixelEraser => {
+                let erase = self.active_tool == ActiveTool::PixelEraser;
+                if response.drag_started() {
+                    if let Some(p) = response.interact_pointer_pos() {
+                        let d = view.screen_to_doc(p);
+                        self.raster_touch.clear();
+                        self.paint_raster_point(d, erase);
+                        self.raster_stroke_last = Some(d);
+                    }
+                }
+                if response.dragged() {
+                    if let Some(p) = response.interact_pointer_pos() {
+                        let d = view.screen_to_doc(p);
+                        match self.raster_stroke_last {
+                            Some(last) => self.paint_raster_segment(last, d, erase),
+                            None => self.paint_raster_point(d, erase),
+                        }
+                        self.raster_stroke_last = Some(d);
+                    }
+                } else if self.raster_stroke_last.is_some() {
+                    // Le geste s'est arrêté sans `drag_stopped` propre (perte
+                    // de focus de la fenêtre, clic intercepté par l'OS…) :
+                    // on referme quand même le trait, sinon la peinture déjà
+                    // appliquée au document resterait sans entrée d'annulation.
+                    self.raster_stroke_last = None;
+                    self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush });
+                }
+                if response.drag_stopped() {
+                    self.raster_stroke_last = None;
+                    self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush });
+                }
+            }
+            ActiveTool::CloneStamp => self.handle_clone_stamp(ctx, response, view),
             _ => self.handle_draw(ctx, response, view),
         }
+    }
+
+    // --- Pinceau / gomme pixel (roadmap F1, ciblage masque en P2 #14) -------
+
+    /// Vue immuable de la surface raster ciblée par le geste en cours :
+    /// le contenu du calque, ou son masque si `editing_mask` est actif.
+    fn active_raster<'a>(layer: &'a crate::model::Layer, mask: bool) -> Option<&'a crate::model::RasterLayer> {
+        if mask {
+            layer.mask.as_ref()
+        } else {
+            Some(&layer.raster)
+        }
+    }
+
+    /// Vue mutable — crée le masque à la volée si nécessaire (premier trait).
+    fn active_raster_mut(layer: &mut crate::model::Layer, mask: bool) -> &mut crate::model::RasterLayer {
+        if mask {
+            layer.mask.get_or_insert_with(Default::default)
+        } else {
+            &mut layer.raster
+        }
+    }
+
+    /// Snapshotte (une seule fois par geste) l'état "avant" des tuiles
+    /// recoupées par un tampon, pour l'undo par tuile.
+    fn touch_raster_tiles(&mut self, cx: f32, cy: f32, radius: f32) {
+        let layer_id = self.doc.active_id();
+        let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
+        let existing = Self::active_raster(layer, self.editing_mask);
+        for key in crate::model::RasterLayer::tiles_touched(cx, cy, radius) {
+            self.raster_touch
+                .entry(key)
+                .or_insert_with(|| existing.and_then(|r| r.tiles.get(&key).cloned()));
+        }
+    }
+
+    fn pixel_radius(&self, erase: bool) -> f32 {
+        (if erase { self.eraser.width } else { self.brush.width }) * 0.5
+    }
+
+    fn paint_raster_point(&mut self, d: (f32, f32), erase: bool) {
+        let radius = self.pixel_radius(erase);
+        self.touch_raster_tiles(d.0, d.1, radius);
+        let color = self.brush.color;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            Self::active_raster_mut(layer, self.editing_mask).stamp(d.0, d.1, radius, hardness, color, erase);
+        }
+        self.history.touch();
+    }
+
+    fn paint_raster_segment(&mut self, from: (f32, f32), to: (f32, f32), erase: bool) {
+        let radius = self.pixel_radius(erase);
+        // Échantillonne le long du segment pour toucher toutes les tuiles
+        // traversées (pas seulement les deux bouts).
+        let dist = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
+        let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius);
+        }
+        let color = self.brush.color;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            Self::active_raster_mut(layer, self.editing_mask)
+                .stroke_segment(from, to, radius, hardness, color, erase);
+        }
+        self.history.touch();
+    }
+
+    /// Fin du geste : pousse UNE commande d'undo couvrant toutes les tuiles
+    /// touchées (comme Photoshop/GIMP — un trait = un cran d'annulation).
+    fn commit_raster_stroke(&mut self, op: RasterOp) {
+        if self.raster_touch.is_empty() {
+            return;
+        }
+        let layer_id = self.doc.active_id();
+        let target = if self.editing_mask { RasterTarget::Mask } else { RasterTarget::Content };
+        let before = std::mem::take(&mut self.raster_touch);
+        let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
+        let current = Self::active_raster(layer, self.editing_mask);
+        let mut tiles = Vec::with_capacity(before.len());
+        let mut changed = false;
+        for (key, b) in before {
+            let a = current.and_then(|r| r.tiles.get(&key).cloned());
+            let same = match (&a, &b) {
+                (Some(x), Some(y)) => x.px == y.px,
+                (None, None) => true,
+                _ => false,
+            };
+            if !same {
+                changed = true;
+            }
+            tiles.push((key, b, a));
+        }
+        if !changed {
+            return;
+        }
+        self.history.push(&mut self.doc, Command::PaintRaster { layer: layer_id, op, target, tiles });
+    }
+
+    // --- Tampon de clonage (roadmap P0 #5) ----------------------------------
+    //
+    // Alt+clic définit le point source ; le glissé peint en échantillonnant
+    // depuis ce point avec un **décalage constant** (calculé une fois au
+    // début du geste), comme dans GIMP/Photoshop : la source suit la
+    // destination en parallèle pendant tout le trait.
+
+    fn handle_clone_stamp(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
+        let alt = ctx.input(|i| i.modifiers.alt);
+        if alt {
+            // `clicked()` seul rate parfois un clic quasi-immobile interprété
+            // comme un micro-glissé par egui (jitter d'un pilote/tablette ou
+            // d'un clic automatisé) : `drag_started()` couvre ce cas aussi.
+            let pos = if response.clicked() || response.drag_started() {
+                response.interact_pointer_pos()
+            } else {
+                None
+            };
+            if let Some(p) = pos {
+                self.clone_source = Some(view.screen_to_doc(p));
+                self.status = Some("Source du tampon définie (glisser pour peindre).".into());
+            }
+            return;
+        }
+        if response.drag_started() {
+            if let (Some(p), Some(src)) = (response.interact_pointer_pos(), self.clone_source) {
+                let d = view.screen_to_doc(p);
+                self.clone_offset = Some((src.0 - d.0, src.1 - d.1));
+                self.paint_clone_point(d);
+                self.raster_stroke_last = Some(d);
+            } else if self.clone_source.is_none() {
+                self.status = Some("Alt+clic pour définir la source du tampon.".into());
+            }
+        }
+        if response.dragged() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                match self.raster_stroke_last {
+                    Some(last) => self.paint_clone_segment(last, d),
+                    None => self.paint_clone_point(d),
+                }
+                self.raster_stroke_last = Some(d);
+            }
+        } else if self.raster_stroke_last.is_some() {
+            self.raster_stroke_last = None;
+            self.commit_raster_stroke(RasterOp::Clone);
+        }
+        if response.drag_stopped() {
+            self.raster_stroke_last = None;
+            self.commit_raster_stroke(RasterOp::Clone);
+        }
+    }
+
+    fn paint_clone_point(&mut self, d: (f32, f32)) {
+        let radius = self.brush.width * 0.5;
+        self.touch_raster_tiles(d.0, d.1, radius);
+        let offset = self.clone_offset.unwrap_or((0.0, 0.0));
+        let opacity = self.brush.color[3] as f32 / 255.0;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.clone_stamp(d.0, d.1, radius, hardness, offset, opacity);
+        }
+        self.history.touch();
+    }
+
+    fn paint_clone_segment(&mut self, from: (f32, f32), to: (f32, f32)) {
+        let radius = self.brush.width * 0.5;
+        let dist = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
+        let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius);
+        }
+        let offset = self.clone_offset.unwrap_or((0.0, 0.0));
+        let opacity = self.brush.color[3] as f32 / 255.0;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.clone_stamp_segment(from, to, radius, hardness, offset, opacity);
+        }
+        self.history.touch();
     }
 
     fn handle_draw(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
@@ -2521,6 +3499,7 @@ impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_screenshot(ctx);
         self.handle_shortcuts(ctx);
+        self.show_resize_dialog(ctx);
         // Quitter l'édition de texte si on change d'outil.
         if self.active_tool != ActiveTool::Text && self.editing_text.is_some() {
             self.finish_text_editing();
@@ -2679,6 +3658,24 @@ impl eframe::App for PaintApp {
                         }
                     }
                 }
+                // Guides intelligents (roadmap P1 #8) : lignes magenta pleine
+                // largeur/hauteur là où la sélection accroche un bord/centre
+                // d'un autre élément ou du canevas.
+                let guide_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 0, 200));
+                for g in &self.active_guides {
+                    match *g {
+                        GuideLine::Vertical(x) => {
+                            let top = view.doc_to_screen((x, 0.0));
+                            let bot = view.doc_to_screen((x, self.doc.size.1 as f32));
+                            content.line_segment([top, bot], guide_stroke);
+                        }
+                        GuideLine::Horizontal(y) => {
+                            let l = view.doc_to_screen((0.0, y));
+                            let r = view.doc_to_screen((self.doc.size.0 as f32, y));
+                            content.line_segment([l, r], guide_stroke);
+                        }
+                    }
+                }
             }
             if let Some(stroke) = self.capture.current() {
                 // Opaque → rendu incrémental (fluide) ; translucide → passe
@@ -2697,6 +3694,7 @@ impl eframe::App for PaintApp {
             painter.rect_stroke(doc_rect, 0.0, egui::Stroke::new(1.0, Color32::from_gray(120)));
             self.paint_selection(&painter, &view, moving);
             self.paint_pen(&content, &view, &response);
+            self.paint_pen_edit(&content, &view);
             self.paint_crop(&painter, &view);
             self.paint_marquee(&painter, &view);
             self.paint_cursor(&painter, &response);

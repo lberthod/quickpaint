@@ -58,9 +58,13 @@ pub struct TextItem {
     /// Profondeur de superposition (plus grand = au-dessus).
     #[serde(default)]
     pub z: f64,
-    /// Police (Sprint 3).
+    /// Police intégrée egui (Sprint 3) : utilisée si `font_family` est `None`.
     #[serde(default)]
     pub font: TextFont,
+    /// Police système (roadmap P1 #7), par nom de famille — prioritaire sur
+    /// `font` si présente. `None` = comportement historique (Sans/Mono).
+    #[serde(default)]
+    pub font_family: Option<String>,
     /// Graisse simulée (faux-bold) — double dépôt décalé au rendu.
     #[serde(default)]
     pub bold: bool,
@@ -90,6 +94,7 @@ impl TextItem {
             rot: 0.0,
             z: 0.0,
             font: TextFont::default(),
+            font_family: None,
             bold: false,
             align: TextAlign::default(),
             outline_w: 0.0,

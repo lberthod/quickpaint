@@ -4,7 +4,25 @@
 //! **id stable** (pas par index) : suppression / réordonnancement ne corrompent
 //! plus la pile. Une commande sur un calque disparu devient un no-op.
 
+use crate::model::raster::{Tile, TileKey};
 use crate::model::{Document, ImageItem, Layer, Stroke, TextItem};
+
+/// Nature d'une opération de peinture raster (F1), pour l'étiquette d'undo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RasterOp {
+    Brush,
+    Eraser,
+    Bucket,
+    Clone,
+}
+
+/// Surface raster ciblée par une opération de peinture (roadmap P2 #14) :
+/// le contenu peint du calque, ou son masque de visibilité.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RasterTarget {
+    Content,
+    Mask,
+}
 
 #[derive(Clone, Debug)]
 pub enum Command {
@@ -21,7 +39,7 @@ pub enum Command {
     MoveEach { layer: u64, moves: Vec<(u64, (f32, f32))> },
     /// Changement de profondeur (z-order) : (id, avant, après).
     SetZMany { layer: u64, changes: Vec<(u64, f64, f64)> },
-    Clear { layer: u64, previous: Vec<Stroke> },
+    Clear { layer: u64, previous: Vec<Stroke>, previous_raster: crate::model::RasterLayer },
     /// Ajout d'un texte (roadmap #2).
     AddText { layer: u64, text: TextItem },
     /// Suppression de textes (index pour réinsertion).
@@ -53,6 +71,33 @@ pub enum Command {
         sx: f32,
         sy: f32,
     },
+    /// Un coup de pinceau/gomme pixel (roadmap F1) : undo par tuile — seules
+    /// les tuiles touchées par le geste sont clonées (avant, après).
+    PaintRaster {
+        layer: u64,
+        op: RasterOp,
+        target: RasterTarget,
+        tiles: Vec<(TileKey, Option<Tile>, Option<Tile>)>,
+    },
+    /// Remplacement complet du document (redimensionnement image / canevas).
+    /// Snapshot avant/après, comme `SetLayers` : robuste (pas d'inverse
+    /// flottant approximatif), au prix d'un clone du document.
+    SetDoc {
+        before: Box<Document>,
+        after: Box<Document>,
+        label: &'static str,
+    },
+    /// Édition de nœuds après coup d'un trait de plume (roadmap P2 #12) :
+    /// snapshot avant/après des ancres **et** des points échantillonnés (pour
+    /// ne pas ré-échantillonner à l'undo — robuste, comme `SetDoc`).
+    EditPenPath {
+        layer: u64,
+        id: u64,
+        before_path: crate::tools::pen::PenPath,
+        before_points: Vec<crate::model::StrokePoint>,
+        after_path: crate::tools::pen::PenPath,
+        after_points: Vec<crate::model::StrokePoint>,
+    },
     /// Rotation d'une sélection autour d'un pivot (réversible).
     Rotate {
         layer: u64,
@@ -74,6 +119,8 @@ impl Command {
                 | Command::MoveEach { .. }
                 | Command::Scale { .. }
                 | Command::Rotate { .. }
+                | Command::SetDoc { .. }
+                | Command::EditPenPath { .. }
         )
     }
 
@@ -98,6 +145,12 @@ impl Command {
             Command::AddLayer { .. } => "Ajouter calque",
             Command::RemoveLayer { .. } => "Suppr. calque",
             Command::SetLayers { .. } => "Fusion / aplatir",
+            Command::SetDoc { label, .. } => label,
+            Command::EditPenPath { .. } => "Éditer le chemin",
+            Command::PaintRaster { op: RasterOp::Brush, .. } => "Pinceau pixel",
+            Command::PaintRaster { op: RasterOp::Eraser, .. } => "Gomme pixel",
+            Command::PaintRaster { op: RasterOp::Bucket, .. } => "Pot de peinture",
+            Command::PaintRaster { op: RasterOp::Clone, .. } => "Tampon de clonage",
         }
     }
 }
@@ -382,6 +435,7 @@ fn apply(doc: &mut Document, cmd: &Command) {
         Command::Clear { layer, .. } => {
             if let Some(l) = layer_mut(doc, *layer) {
                 l.strokes.clear();
+                l.raster = crate::model::RasterLayer::default();
             }
         }
         Command::AddText { layer, text } => {
@@ -446,6 +500,31 @@ fn apply(doc: &mut Document, cmd: &Command) {
             doc.layers = after.clone();
             doc.active_layer = (*after_active).min(doc.layers.len().saturating_sub(1));
         }
+        Command::SetDoc { after, .. } => {
+            *doc = (**after).clone();
+        }
+        Command::EditPenPath { layer, id, after_path, after_points, .. } => {
+            if let Some(l) = layer_mut(doc, *layer) {
+                if let Some(s) = l.strokes.iter_mut().find(|s| s.id == *id) {
+                    s.anchors = Some(after_path.clone());
+                    s.points = after_points.clone();
+                }
+            }
+        }
+        Command::PaintRaster { layer, target, tiles, .. } => {
+            if let Some(l) = layer_mut(doc, *layer) {
+                let raster = match target {
+                    RasterTarget::Content => &mut l.raster,
+                    RasterTarget::Mask => l.mask.get_or_insert_with(Default::default),
+                };
+                for (key, _, after) in tiles {
+                    match after {
+                        Some(t) => raster.tiles.insert(*key, t.clone()),
+                        None => raster.tiles.remove(key),
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -499,9 +578,10 @@ fn revert(doc: &mut Document, cmd: &Command) {
                 }
             }
         }
-        Command::Clear { layer, previous } => {
+        Command::Clear { layer, previous, previous_raster } => {
             if let Some(l) = layer_mut(doc, *layer) {
                 l.strokes = previous.clone();
+                l.raster = previous_raster.clone();
             }
         }
         Command::AddText { layer, text } => {
@@ -565,6 +645,31 @@ fn revert(doc: &mut Document, cmd: &Command) {
             doc.layers = before.clone();
             doc.active_layer = (*before_active).min(doc.layers.len().saturating_sub(1));
         }
+        Command::SetDoc { before, .. } => {
+            *doc = (**before).clone();
+        }
+        Command::EditPenPath { layer, id, before_path, before_points, .. } => {
+            if let Some(l) = layer_mut(doc, *layer) {
+                if let Some(s) = l.strokes.iter_mut().find(|s| s.id == *id) {
+                    s.anchors = Some(before_path.clone());
+                    s.points = before_points.clone();
+                }
+            }
+        }
+        Command::PaintRaster { layer, target, tiles, .. } => {
+            if let Some(l) = layer_mut(doc, *layer) {
+                let raster = match target {
+                    RasterTarget::Content => &mut l.raster,
+                    RasterTarget::Mask => l.mask.get_or_insert_with(Default::default),
+                };
+                for (key, before, _) in tiles {
+                    match before {
+                        Some(t) => raster.tiles.insert(*key, t.clone()),
+                        None => raster.tiles.remove(key),
+                    };
+                }
+            }
+        }
     }
 }
 
@@ -604,6 +709,124 @@ mod tests {
         assert_eq!(doc.layers[0].strokes.len(), 2);
         h.undo(&mut doc);
         assert_eq!(doc.layers[0].strokes.len(), 3);
+    }
+
+    #[test]
+    fn set_doc_undo_restores_size_and_content() {
+        let mut doc = Document::new((100, 100));
+        let id = doc.active_id();
+        let mut h = History::new();
+        h.push(&mut doc, Command::AddStroke { layer: id, stroke: s() });
+        // Redimensionnement ×2 : snapshot avant/après.
+        let before = Box::new(doc.clone());
+        let mut after = doc.clone();
+        after.scale_content(2.0, 2.0);
+        after.size = (200, 200);
+        h.push(&mut doc, Command::SetDoc { before, after: Box::new(after), label: "Redimensionner" });
+        assert_eq!(doc.size, (200, 200));
+        h.undo(&mut doc);
+        assert_eq!(doc.size, (100, 100));
+        assert_eq!(doc.layers[0].strokes.len(), 1);
+        h.redo(&mut doc);
+        assert_eq!(doc.size, (200, 200));
+    }
+
+    #[test]
+    fn paint_raster_undo_redo_restores_tiles() {
+        let mut doc = Document::new((100, 100));
+        let id = doc.active_id();
+        let mut h = History::new();
+        let key = (0, 0);
+        // Snapshot "avant" (aucune tuile), peint directement (comme le fait
+        // l'app pendant le geste), puis "après" = tuile peinte.
+        let before = doc.layers[0].raster.tiles.get(&key).cloned();
+        doc.layers[0].raster.set_pixel(5, 5, [255, 0, 0, 255]);
+        let after = doc.layers[0].raster.tiles.get(&key).cloned();
+        h.push(
+            &mut doc,
+            Command::PaintRaster {
+                layer: id,
+                op: RasterOp::Brush,
+                target: RasterTarget::Content,
+                tiles: vec![(key, before, after)],
+            },
+        );
+        assert_eq!(doc.layers[0].raster.get_pixel(5, 5), [255, 0, 0, 255]);
+        h.undo(&mut doc);
+        assert_eq!(doc.layers[0].raster.get_pixel(5, 5), [0, 0, 0, 0]);
+        assert!(doc.layers[0].raster.is_empty());
+        h.redo(&mut doc);
+        assert_eq!(doc.layers[0].raster.get_pixel(5, 5), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn edit_pen_path_undo_redo_restores_anchor_position() {
+        use crate::tools::pen::{Anchor, PenPath};
+        let mut doc = Document::new((100, 100));
+        let layer = doc.active_id();
+        let mut h = History::new();
+
+        let before_path = PenPath { anchors: vec![Anchor::corner((0.0, 0.0)), Anchor::corner((10.0, 0.0))], closed: false };
+        let mut stroke = s();
+        stroke.id = 1;
+        stroke.anchors = Some(before_path.clone());
+        stroke.points = before_path
+            .sample()
+            .into_iter()
+            .map(|pos| crate::model::StrokePoint { pos, width: 4.0 })
+            .collect();
+        h.push(&mut doc, Command::AddStroke { layer, stroke });
+
+        let before_points = doc.layers[0].strokes[0].points.clone();
+        let mut after_path = before_path.clone();
+        after_path.anchors[1].pos = (20.0, 5.0); // ancre déplacée
+        let after_points = after_path
+            .sample()
+            .into_iter()
+            .map(|pos| crate::model::StrokePoint { pos, width: 4.0 })
+            .collect();
+
+        h.push(
+            &mut doc,
+            Command::EditPenPath { layer, id: 1, before_path, before_points, after_path, after_points },
+        );
+        assert_eq!(doc.layers[0].strokes[0].anchors.as_ref().unwrap().anchors[1].pos, (20.0, 5.0));
+
+        h.undo(&mut doc);
+        assert_eq!(doc.layers[0].strokes[0].anchors.as_ref().unwrap().anchors[1].pos, (10.0, 0.0));
+
+        h.redo(&mut doc);
+        assert_eq!(doc.layers[0].strokes[0].anchors.as_ref().unwrap().anchors[1].pos, (20.0, 5.0));
+    }
+
+    #[test]
+    fn paint_raster_on_mask_creates_and_restores_mask() {
+        let mut doc = Document::new((100, 100));
+        let id = doc.active_id();
+        let mut h = History::new();
+        assert!(doc.layers[0].mask.is_none());
+        let key = (0, 0);
+        // Le masque n'existe pas encore : "avant" est None des deux côtés
+        // (pas de tuile), le calque `mask` lui-même naît de la commande.
+        doc.layers[0].add_mask();
+        let before: Option<crate::model::raster::Tile> = None;
+        doc.layers[0].mask.as_mut().unwrap().set_pixel(5, 5, [0, 0, 0, 255]); // peint noir = masqué
+        let after = doc.layers[0].mask.as_ref().unwrap().tiles.get(&key).cloned();
+        h.push(
+            &mut doc,
+            Command::PaintRaster {
+                layer: id,
+                op: RasterOp::Brush,
+                target: RasterTarget::Mask,
+                tiles: vec![(key, before, after)],
+            },
+        );
+        assert_eq!(doc.layers[0].mask.as_ref().unwrap().mask_coverage(5, 5), 0);
+        h.undo(&mut doc);
+        // La tuile redevient absente : le pixel revient "visible" par défaut.
+        assert_eq!(doc.layers[0].mask.as_ref().unwrap().mask_coverage(5, 5), 255);
+        h.redo(&mut doc);
+        assert_eq!(doc.layers[0].mask.as_ref().unwrap().mask_coverage(5, 5), 0);
     }
 
     #[test]
