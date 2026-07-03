@@ -12,6 +12,7 @@ mod history;
 mod i18n;
 mod icon;
 mod input;
+mod keybindings;
 mod model;
 mod project;
 mod render;

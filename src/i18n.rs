@@ -75,6 +75,12 @@ pub fn is_french() -> bool {
 #[derive(Serialize, Deserialize, Default)]
 struct Settings {
     lang: Option<String>,
+    #[serde(default)]
+    palette: Vec<[u8; 3]>,
+    /// Raccourcis clavier personnalisés (Sprint 7.2) : id d'action → nom de
+    /// touche egui (`Key::name()`). Absent d'une entrée = valeur par défaut.
+    #[serde(default)]
+    shortcuts: std::collections::HashMap<String, String>,
 }
 
 fn settings_path() -> Option<PathBuf> {
@@ -126,17 +132,50 @@ fn detect_system_lang() -> Lang {
     Lang::Fr
 }
 
-fn save_settings(lang: Lang) {
+fn read_settings() -> Settings {
+    settings_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|data| serde_json::from_str(&data).ok())
+        .unwrap_or_default()
+}
+
+fn write_settings(settings: &Settings) {
     let Some(path) = settings_path() else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let settings = Settings {
-        lang: Some(lang.code().to_string()),
-    };
-    if let Ok(data) = serde_json::to_string_pretty(&settings) {
+    if let Ok(data) = serde_json::to_string_pretty(settings) {
         let _ = std::fs::write(path, data);
     }
+}
+
+fn save_settings(lang: Lang) {
+    let mut settings = read_settings();
+    settings.lang = Some(lang.code().to_string());
+    write_settings(&settings);
+}
+
+/// Palette de couleurs personnalisable (Sprint 7.1) : persistée dans le même
+/// `settings.json` local que la langue, jamais synchronisée.
+pub fn load_custom_palette() -> Vec<[u8; 3]> {
+    read_settings().palette
+}
+
+pub fn save_custom_palette(palette: &[[u8; 3]]) {
+    let mut settings = read_settings();
+    settings.palette = palette.to_vec();
+    write_settings(&settings);
+}
+
+/// Raccourcis clavier personnalisés (Sprint 7.2), même fichier local.
+pub fn load_shortcuts() -> std::collections::HashMap<String, String> {
+    read_settings().shortcuts
+}
+
+pub fn save_shortcuts(shortcuts: &std::collections::HashMap<String, String>) {
+    let mut settings = read_settings();
+    settings.shortcuts = shortcuts.clone();
+    write_settings(&settings);
 }
 
 #[cfg(test)]

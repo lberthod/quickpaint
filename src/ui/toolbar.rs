@@ -184,6 +184,114 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     tools_row(ui, app);
     options_row(ui, app);
     template_gallery(ctx, app);
+    shortcuts_prefs_window(ctx, app);
+    batch_export_window(ctx, app);
+}
+
+/// Panneau « Exporter en plusieurs tailles » (Sprint 7.3) : coche des
+/// multiples du document + une largeur personnalisée, un seul dossier choisi
+/// pour tous les fichiers écrits.
+fn batch_export_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_batch_export {
+        return;
+    }
+    let (dw, dh) = app.doc.size;
+    let mut open = true;
+    let mut want_export = false;
+    let mut want_cancel = false;
+    egui::Window::new(t("📐 Exporter en plusieurs tailles", "📐 Export multiple sizes"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(300.0);
+            ui.label(t("Format :", "Format:"));
+            ui.horizontal(|ui| {
+                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Pdf] {
+                    ui.radio_value(&mut app.batch_export.format, fmt, fmt.label());
+                }
+            });
+            ui.separator();
+            ui.label(t("Tailles à exporter :", "Sizes to export:"));
+            let dim = |m: f32| format!("{}×{}", (dw as f32 * m).round() as u32, (dh as f32 * m).round() as u32);
+            ui.checkbox(&mut app.batch_export.scale_half, format!("0.5× ({})", dim(0.5)));
+            ui.checkbox(&mut app.batch_export.scale_1, format!("1× ({})", dim(1.0)));
+            ui.checkbox(&mut app.batch_export.scale_2, format!("2× ({})", dim(2.0)));
+            ui.checkbox(&mut app.batch_export.scale_3, format!("3× ({})", dim(3.0)));
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut app.batch_export.custom_enabled, t("Largeur personnalisée (px) :", "Custom width (px):"));
+                ui.add_enabled(
+                    app.batch_export.custom_enabled,
+                    egui::TextEdit::singleline(&mut app.batch_export.custom_width).desired_width(70.0),
+                );
+            });
+            ui.separator();
+            ui.label(t(
+                "Un seul dossier sera demandé pour tous les fichiers.",
+                "You'll be asked for one folder for all files.",
+            ));
+            ui.horizontal(|ui| {
+                if ui.button(t("Exporter…", "Export…")).clicked() {
+                    want_export = true;
+                }
+                if ui.button(t("Annuler", "Cancel")).clicked() {
+                    want_cancel = true;
+                }
+            });
+        });
+    if want_export {
+        app.request_batch_export(ctx);
+    } else if want_cancel || !open {
+        app.show_batch_export = false;
+    }
+}
+
+/// Panneau de préférences des raccourcis d'outils (Sprint 7.2) : liste des
+/// actions, touche actuelle, bouton « Changer » qui arme la capture de la
+/// prochaine touche pressée (`app.capturing_shortcut`).
+fn shortcuts_prefs_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_shortcuts_prefs {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("⌨ Raccourcis clavier", "⌨ Keyboard shortcuts"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(320.0);
+            ui.label(t(
+                "Un clic sur « Changer », puis appuyez sur la touche voulue.",
+                "Click \"Change\", then press the key you want.",
+            ));
+            ui.separator();
+            egui::Grid::new("shortcuts_grid").num_columns(2).striped(true).show(ui, |ui| {
+                for action in crate::keybindings::ShortcutAction::ALL {
+                    ui.label(action.label());
+                    let capturing = app.capturing_shortcut == Some(action);
+                    let btn_label = if capturing {
+                        t("Appuyez sur une touche…", "Press a key…").to_string()
+                    } else {
+                        app.keybindings.key_for(action).name().to_string()
+                    };
+                    if ui.button(btn_label).clicked() {
+                        app.capturing_shortcut = Some(action);
+                    }
+                    ui.end_row();
+                }
+            });
+            ui.separator();
+            if ui.button(t("Réinitialiser les valeurs par défaut", "Reset to defaults")).clicked() {
+                app.keybindings.reset_defaults();
+                app.capturing_shortcut = None;
+            }
+        });
+    if !open {
+        app.show_shortcuts_prefs = false;
+        app.capturing_shortcut = None;
+    }
 }
 
 /// Galerie « Nouveau depuis un modèle » (roadmap P1 #9) : formats prédéfinis
@@ -272,6 +380,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     ui.close_menu();
                 }
             });
+            if ui.button(t("📐 Exporter en plusieurs tailles…", "📐 Export multiple sizes…")).clicked() {
+                app.show_batch_export = true;
+                ui.close_menu();
+            }
         });
 
         ui.menu_button(t("Édition", "Edit"), |ui| {
@@ -529,6 +641,13 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     app.filter_selection(f);
                     ui.close_menu();
                 }
+            }
+        });
+
+        ui.menu_button(t("Préférences", "Preferences"), |ui| {
+            if ui.button(t("⌨ Raccourcis clavier…", "⌨ Keyboard shortcuts…")).clicked() {
+                app.show_shortcuts_prefs = true;
+                ui.close_menu();
             }
         });
 
@@ -942,6 +1061,31 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
                     app.brush.color = [c[0], c[1], c[2], app.brush.color[3]];
                 }
             }
+        }
+
+        ui.separator();
+        ui.label(t("Palette :", "Palette:"));
+        let mut to_remove = None;
+        for (i, c) in app.custom_palette.clone().into_iter().enumerate() {
+            let resp = swatch(ui, c);
+            if resp.clicked() {
+                app.brush.color = [c[0], c[1], c[2], app.brush.color[3]];
+            }
+            if resp.secondary_clicked() {
+                to_remove = Some(i);
+            }
+            resp.on_hover_text(t("Clic : sélectionner · clic droit : retirer", "Click: select · right-click: remove"));
+        }
+        if let Some(i) = to_remove {
+            app.remove_from_palette(i);
+        }
+        let current = [app.brush.color[0], app.brush.color[1], app.brush.color[2]];
+        if ui
+            .add(egui::Button::new("+").min_size(Vec2::splat(20.0)))
+            .on_hover_text(t("Ajouter la couleur courante à la palette", "Add current color to palette"))
+            .clicked()
+        {
+            app.add_to_palette(current);
         }
 
         ui.separator();

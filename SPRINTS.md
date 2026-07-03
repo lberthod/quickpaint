@@ -27,26 +27,41 @@ donc retirés de la feuille de route (voir §4 « Explicitement écarté »).
 Objectif : combler les écarts « petit effort, gros confort quotidien »
 identifiés dans l'audit (§ Confort & écosystème).
 
-- [ ] **7.1 Palette de couleurs personnalisable** — S/M, ⭐⭐⭐
-      Remplacer/étendre `recent_colors` ([app.rs:131](src/app.rs:131)) par une
-      vraie palette éditable : ajouter/retirer une nuance, nommer un jeu de
-      couleurs, persister dans `settings.json` (même fichier que la
-      préférence de langue, [i18n.rs](src/i18n.rs)) — donc toujours local,
-      aucun compte requis. UI : petit panneau à côté du sélecteur HSV, glisser
-      une pastille vers une poubelle pour la retirer.
-- [ ] **7.2 Raccourcis clavier personnalisables** — M, ⭐⭐
-      `handle_shortcuts()` ([app.rs:2539](src/app.rs:2539)) câble les touches
-      en dur. Introduire une table `KeyBindings` (action → touche+modificateurs)
-      chargée/sauvée dans `settings.json`, avec un panneau de préférences
-      simple (liste d'actions, clic → capture la prochaine touche pressée).
-      Défauts actuels conservés si l'utilisateur ne personnalise rien.
-- [ ] **7.3 Export par lots / tailles multiples** — M, ⭐⭐
-      `export.rs` exporte une image à la fois. Ajouter un dialogue **Fichier ›
-      Exporter en plusieurs tailles…** : cocher plusieurs presets (ex. 1×, 2×,
-      largeurs cibles en px, ou les formats de la galerie de modèles) →
-      ré-échantillonnage + écriture successive dans un dossier choisi, un seul
-      clic. Réutilise `crop_rgba`/l'encodage existant, pas de nouvelle
-      dépendance.
+- [x] **7.1 Palette de couleurs personnalisable** — S/M, ⭐⭐⭐
+      `custom_palette: Vec<[u8; 3]>` sur `PaintApp` ([app.rs](src/app.rs)),
+      persistée dans `settings.json` (même fichier que la langue,
+      [i18n.rs](src/i18n.rs) `load_custom_palette`/`save_custom_palette`) —
+      local, aucun compte. UI : section **Palette** dans la barre Pinceau
+      ([toolbar.rs](src/ui/toolbar.rs)), bouton **+** ajoute la couleur
+      courante, clic droit sur une pastille la retire. Nommage de jeux de
+      couleurs laissé au backlog (une seule palette plate pour l'instant).
+      ✅
+- [x] **7.2 Raccourcis clavier personnalisables** — M, ⭐⭐
+      Nouveau module [keybindings.rs](src/keybindings.rs) : `ShortcutAction`
+      (12 outils) + `KeyBindings` (table action → `egui::Key`, sérialisée par
+      nom via `Key::from_name`/`Key::name()`), persistée dans `settings.json`
+      ([i18n.rs](src/i18n.rs) `load_shortcuts`/`save_shortcuts`). Le bloc de
+      touches câblées en dur dans `handle_shortcuts()`
+      ([app.rs:2561](src/app.rs:2561)) est remplacé par une boucle sur
+      `ShortcutAction::ALL`. Panneau **Préférences › ⌨ Raccourcis clavier…**
+      ([toolbar.rs](src/ui/toolbar.rs) `shortcuts_prefs_window`) : clic sur
+      « Changer » puis appui sur la touche voulue (capture prioritaire dans
+      `handle_shortcuts`, `Échap` annule) ; échange automatique si la touche
+      est déjà prise par un autre outil ; bouton de réinitialisation. Seuls
+      les raccourcis « une touche, un outil » sont personnalisables — les
+      combinaisons ⌘ (fichier/édition/zoom) restent les conventions macOS
+      fixes. ✅
+- [x] **7.3 Export par lots / tailles multiples** — M, ⭐⭐
+      `export::save_batch()` ([export.rs](src/export.rs)) : redimensionne
+      (Lanczos3, crate `image` déjà présente) la capture recadrée vers
+      plusieurs tailles et les écrit dans **un seul dossier** choisi une
+      fois. Panneau **Fichier › Exporter sous… › 📐 Exporter en plusieurs
+      tailles…** ([toolbar.rs](src/ui/toolbar.rs) `batch_export_window`) :
+      cases 0.5×/1×/2×/3× (multiples de `Document::size`, aperçu des
+      dimensions en direct) + largeur personnalisée optionnelle (hauteur
+      déduite du ratio). Réutilise le mécanisme de capture d'écran différée
+      existant (`handle_screenshot`), juste un flag `batch_export_requested`
+      en plus de `export_requested`. ✅
 
 **Jalon 7** : un utilisateur retrouve son confort (raccourcis à sa main,
 palette de marque, export web+print en un clic) sans quitter l'app.

@@ -106,6 +106,33 @@ pub struct ResizeDialog {
     pub anchor: (u8, u8),
 }
 
+/// État du panneau d'export par lots (Sprint 7.3) : les tailles cochées sont
+/// des multiples de `Document::size`, plus une largeur personnalisée
+/// optionnelle (hauteur déduite du ratio du document).
+pub struct BatchExportState {
+    pub format: crate::export::ExportFormat,
+    pub scale_half: bool,
+    pub scale_1: bool,
+    pub scale_2: bool,
+    pub scale_3: bool,
+    pub custom_enabled: bool,
+    pub custom_width: String,
+}
+
+impl Default for BatchExportState {
+    fn default() -> Self {
+        Self {
+            format: crate::export::ExportFormat::Png,
+            scale_half: false,
+            scale_1: true,
+            scale_2: true,
+            scale_3: false,
+            custom_enabled: false,
+            custom_width: String::new(),
+        }
+    }
+}
+
 /// Nœud ciblé par un glissé pendant l'édition de plume après coup (P2 #12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PenNodeTarget {
@@ -129,6 +156,15 @@ pub struct PaintApp {
     pub poly_sides: usize,
     /// Dernières couleurs utilisées (accès rapide, palette tactile).
     pub recent_colors: Vec<[u8; 3]>,
+    /// Palette personnalisable de l'utilisateur, persistée localement
+    /// (Sprint 7.1 — `settings.json`, jamais synchronisée).
+    pub custom_palette: Vec<[u8; 3]>,
+    /// Raccourcis clavier des outils, personnalisables (Sprint 7.2).
+    pub keybindings: crate::keybindings::KeyBindings,
+    /// Panneau de préférences des raccourcis ouvert ?
+    pub show_shortcuts_prefs: bool,
+    /// Action en attente d'une nouvelle touche (capture au prochain appui).
+    pub capturing_shortcut: Option<crate::keybindings::ShortcutAction>,
     /// Message éphémère affiché dans le footer (export, sauvegarde, etc.).
     pub status: Option<String>,
     /// Zoom et décalage (pan) de la vue (idée 2).
@@ -209,6 +245,15 @@ pub struct PaintApp {
     // Export bitmap (capture d'écran différée d'une frame) + format demandé.
     export_requested: bool,
     export_format: crate::export::ExportFormat,
+    // Export par lots / tailles multiples (Sprint 7.3) : capture différée
+    // d'une frame, comme l'export simple, mais écrit N fichiers au lieu d'un.
+    batch_export_requested: bool,
+    batch_export_format: crate::export::ExportFormat,
+    batch_export_sizes: Vec<(u32, u32)>,
+    /// Panneau « Exporter en plusieurs tailles » ouvert ?
+    pub show_batch_export: bool,
+    /// État des cases à cocher du panneau d'export par lots.
+    pub batch_export: BatchExportState,
     // Pot de peinture : point cliqué (écran) en attente de la capture.
     bucket_click: Option<Pos2>,
     last_canvas_rect: Rect,
@@ -253,6 +298,10 @@ impl Default for PaintApp {
             fill_shapes: false,
             poly_sides: 6,
             recent_colors: Vec::new(),
+            custom_palette: crate::i18n::load_custom_palette(),
+            keybindings: crate::keybindings::KeyBindings::load(),
+            show_shortcuts_prefs: false,
+            capturing_shortcut: None,
             status: None,
             zoom: 1.0,
             pan: Vec2::ZERO,
@@ -300,6 +349,11 @@ impl Default for PaintApp {
             text_focus_pending: false,
             export_requested: false,
             export_format: crate::export::ExportFormat::Png,
+            batch_export_requested: false,
+            batch_export_format: crate::export::ExportFormat::Png,
+            batch_export_sizes: Vec::new(),
+            show_batch_export: false,
+            batch_export: BatchExportState::default(),
             bucket_click: None,
             last_canvas_rect: Rect::ZERO,
             last_doc_rect: Rect::ZERO,
@@ -1756,6 +1810,24 @@ impl PaintApp {
         self.recent_colors.truncate(8);
     }
 
+    /// Ajoute une nuance à la palette personnalisable (Sprint 7.1) et
+    /// persiste immédiatement — pas de bouton « enregistrer » séparé.
+    pub fn add_to_palette(&mut self, rgb: [u8; 3]) {
+        if !self.custom_palette.contains(&rgb) {
+            self.custom_palette.push(rgb);
+            crate::i18n::save_custom_palette(&self.custom_palette);
+        }
+    }
+
+    /// Retire une nuance de la palette personnalisable (clic droit sur la
+    /// pastille) et persiste immédiatement.
+    pub fn remove_from_palette(&mut self, idx: usize) {
+        if idx < self.custom_palette.len() {
+            self.custom_palette.remove(idx);
+            crate::i18n::save_custom_palette(&self.custom_palette);
+        }
+    }
+
     fn adjust_size(&mut self, delta: f32) {
         match self.active_tool {
             ActiveTool::Eraser => {
@@ -2149,6 +2221,61 @@ impl PaintApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
     }
 
+    /// Tailles cochées dans le panneau d'export par lots, en pixels, dérivées
+    /// de `Document::size` (Sprint 7.3). Vide si rien n'est coché / saisi.
+    fn batch_export_target_sizes(&self) -> Vec<(u32, u32)> {
+        let (dw, dh) = self.doc.size;
+        let mut sizes = Vec::new();
+        let mut push = |w: u32, h: u32| {
+            if w > 0 && h > 0 && !sizes.contains(&(w, h)) {
+                sizes.push((w, h));
+            }
+        };
+        let scale = |m: f32| {
+            (((dw as f32) * m).round() as u32, ((dh as f32) * m).round() as u32)
+        };
+        if self.batch_export.scale_half {
+            let (w, h) = scale(0.5);
+            push(w, h);
+        }
+        if self.batch_export.scale_1 {
+            push(dw, dh);
+        }
+        if self.batch_export.scale_2 {
+            let (w, h) = scale(2.0);
+            push(w, h);
+        }
+        if self.batch_export.scale_3 {
+            let (w, h) = scale(3.0);
+            push(w, h);
+        }
+        if self.batch_export.custom_enabled {
+            if let Ok(w) = self.batch_export.custom_width.trim().parse::<u32>() {
+                if w > 0 && dw > 0 {
+                    let h = ((w as f32) * (dh as f32 / dw as f32)).round() as u32;
+                    push(w, h);
+                }
+            }
+        }
+        sizes
+    }
+
+    /// Déclenche l'export par lots (Sprint 7.3) : une capture d'écran comme
+    /// l'export simple, mais écrite en N fichiers (un dossier choisi une
+    /// seule fois) dans `handle_screenshot`.
+    pub fn request_batch_export(&mut self, ctx: &egui::Context) {
+        let sizes = self.batch_export_target_sizes();
+        if sizes.is_empty() {
+            self.status = Some(t("Aucune taille sélectionnée.", "No size selected.").into());
+            return;
+        }
+        self.batch_export_sizes = sizes;
+        self.batch_export_format = self.batch_export.format;
+        self.batch_export_requested = true;
+        self.show_batch_export = false;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+    }
+
     /// Export SVG vectoriel (opacité de calque correcte via `<g opacity>`).
     pub fn export_svg(&mut self) {
         self.encode_all_images();
@@ -2171,11 +2298,6 @@ impl PaintApp {
             self.do_bucket_fill(ctx, &image, click);
             return;
         }
-        if !self.export_requested {
-            return;
-        }
-        self.export_requested = false;
-
         let ppp = ctx.pixels_per_point();
         // On exporte la zone du document, bornée à la partie visible.
         let r = self.last_doc_rect.intersect(self.last_canvas_rect);
@@ -2185,6 +2307,24 @@ impl PaintApp {
             (r.width() * ppp).round().max(0.0) as usize,
             (r.height() * ppp).round().max(0.0) as usize,
         );
+
+        if self.batch_export_requested {
+            self.batch_export_requested = false;
+            let format = self.batch_export_format;
+            let sizes = std::mem::take(&mut self.batch_export_sizes);
+            self.status = Some(match crate::export::save_batch(&image, crop, format, &sizes) {
+                Ok(n) => format!("{n} {} ({}).", t("fichiers exportés", "files exported"), format.label()),
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => t("Export annulé.", "Export cancelled.").into(),
+                Err(e) => format!("{} : {e}", t("Échec de l'export", "Export failed")),
+            });
+            return;
+        }
+
+        if !self.export_requested {
+            return;
+        }
+        self.export_requested = false;
+
         let format = self.export_format;
         self.status = Some(match crate::export::save_dialog(&image, crop, format) {
             Ok(p) => format!("{} {} : {}", format.label(), t("enregistré", "saved"), p.display()),
@@ -2537,6 +2677,24 @@ impl PaintApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        // Capture d'un nouveau raccourci en cours (panneau de préférences,
+        // Sprint 7.2) : la prochaine touche pressée devient le raccourci de
+        // l'action visée, prioritaire sur tout le reste.
+        if let Some(action) = self.capturing_shortcut {
+            let captured = ctx.input(|i| i.events.iter().find_map(|e| match e {
+                egui::Event::Key { key, pressed: true, .. } => Some(*key),
+                _ => None,
+            }));
+            if let Some(key) = captured {
+                if key == egui::Key::Escape {
+                    // Échap annule la capture sans rien changer.
+                } else {
+                    self.keybindings.set(action, key);
+                }
+                self.capturing_shortcut = None;
+            }
+            return;
+        }
         let typing = ctx.wants_keyboard_input();
         // Les actions ouvrant une boîte de dialogue native sont exécutées
         // APRÈS la fermeture du verrou d'entrée (évite tout blocage modal).
@@ -2606,35 +2764,12 @@ impl PaintApp {
             }
             if !cmd && !typing {
                 use egui::Key;
-                if i.key_pressed(Key::V) {
-                    self.active_tool = ActiveTool::Select;
-                }
-                if i.key_pressed(Key::B) {
-                    self.active_tool = ActiveTool::Brush;
-                }
-                if i.key_pressed(Key::E) {
-                    self.active_tool = ActiveTool::Eraser;
-                }
-                if i.key_pressed(Key::L) {
-                    self.active_tool = ActiveTool::Line;
-                }
-                if i.key_pressed(Key::A) {
-                    self.active_tool = ActiveTool::Arrow;
-                }
-                if i.key_pressed(Key::R) {
-                    self.active_tool = ActiveTool::Rectangle;
-                }
-                if i.key_pressed(Key::O) {
-                    self.active_tool = ActiveTool::Ellipse;
-                }
-                if i.key_pressed(Key::T) {
-                    self.active_tool = ActiveTool::Text;
-                }
-                if i.key_pressed(Key::G) {
-                    self.active_tool = ActiveTool::Bucket;
-                }
-                if i.key_pressed(Key::P) {
-                    self.active_tool = ActiveTool::Pen;
+                // Changement d'outil : raccourcis personnalisables
+                // (Sprint 7.2, `crate::keybindings`) plutôt que câblés en dur.
+                for action in crate::keybindings::ShortcutAction::ALL {
+                    if self.keybindings.action_pressed(action, i) {
+                        self.active_tool = action.tool();
+                    }
                 }
                 // Plume : Entrée valide, Échap annule le chemin en cours.
                 if !self.pen.is_empty() {
@@ -2665,12 +2800,6 @@ impl PaintApp {
                     if nx != 0.0 || ny != 0.0 {
                         self.push_move(nx, ny);
                     }
-                }
-                if i.key_pressed(Key::I) {
-                    self.active_tool = ActiveTool::Eyedropper;
-                }
-                if i.key_pressed(Key::H) {
-                    self.active_tool = ActiveTool::Pan;
                 }
                 if i.key_pressed(Key::OpenBracket) {
                     self.adjust_size(-1.0);

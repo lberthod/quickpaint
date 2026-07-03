@@ -57,6 +57,36 @@ fn crop_rgba(image: &ColorImage, crop: Crop) -> (u32, u32, Vec<u8>) {
     (w as u32, h as u32, rgba)
 }
 
+/// Exporte simultanément plusieurs tailles dans un dossier choisi une seule
+/// fois (Sprint 7.3) — un clic pour couvrir web + print plutôt qu'un export
+/// par taille. Renvoie le nombre de fichiers écrits.
+pub fn save_batch(image: &ColorImage, crop: Crop, format: ExportFormat, sizes: &[(u32, u32)]) -> std::io::Result<usize> {
+    let (w, h, rgba) = crop_rgba(image, crop);
+    if w == 0 || h == 0 || sizes.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            t("zone d'export vide", "empty export area"),
+        ));
+    }
+    let base = image::RgbaImage::from_raw(w, h, rgba)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "buffer invalide"))?;
+    let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
+    };
+    for &(tw, th) in sizes {
+        let tw = tw.max(1);
+        let th = th.max(1);
+        let resized = if (tw, th) == (w, h) {
+            base.clone()
+        } else {
+            image::imageops::resize(&base, tw, th, image::imageops::FilterType::Lanczos3)
+        };
+        let path = dir.join(format!("QuickPaint-{tw}x{th}.{}", format.ext()));
+        encode_to(&path, tw, th, resized.as_raw(), format)?;
+    }
+    Ok(sizes.len())
+}
+
 /// Ouvre un sélecteur « Enregistrer » et écrit l'export au format demandé.
 /// Renvoie le chemin écrit, ou `None` si annulé / erreur.
 pub fn save_dialog(image: &ColorImage, crop: Crop, format: ExportFormat) -> std::io::Result<PathBuf> {
