@@ -48,6 +48,23 @@ pub fn flood(rgba: &[u8], w: usize, h: usize, sx: usize, sy: usize, tol: i32) ->
     mask
 }
 
+/// Variante non contiguë (Sprint 9.1, renforcement) : sélectionne **tous**
+/// les pixels proches (≤ `tol` par canal) de la couleur de départ, peu
+/// importe qu'ils soient connectés à `(sx, sy)` — utile pour un fond visible
+/// par petits bouts (feuillage, grillage…) là où `flood` s'arrêterait au
+/// premier pixel hors tolérance.
+pub fn flood_global(rgba: &[u8], w: usize, h: usize, sx: usize, sy: usize, tol: i32) -> Vec<bool> {
+    if sx >= w || sy >= h || rgba.len() < w * h * 4 {
+        return vec![false; w * h];
+    }
+    let i = (sy * w + sx) * 4;
+    let target = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
+    let d = |a: u8, b: u8| (a as i32 - b as i32).abs();
+    rgba.chunks_exact(4)
+        .map(|c| d(c[0], target[0]) <= tol && d(c[1], target[1]) <= tol && d(c[2], target[2]) <= tol && d(c[3], target[3]) <= tol)
+        .collect()
+}
+
 /// Flou « boîte » séparable sur un tampon **1 canal** (Sprint 9.1) : adoucit
 /// la frontière binaire du détourage plutôt que de laisser un bord à
 /// l'emporte-pièce. Même algorithme que le flou RVBA de `tools::filter`, mais
@@ -126,5 +143,16 @@ mod tests {
         // Colonne gauche remplie, barrière et droite non.
         assert!(mask[0] && mask[3] && mask[6]);
         assert!(!mask[1] && !mask[2]);
+    }
+
+    #[test]
+    fn flood_global_selects_disconnected_pixels_of_similar_color() {
+        // 3×1 : blanc, noir, blanc — les deux blancs ne sont pas connectés,
+        // `flood` s'arrêterait au premier ; `flood_global` prend les deux.
+        let rgba = vec![255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255];
+        let contiguous = flood(&rgba, 3, 1, 0, 0, 16);
+        assert!(contiguous[0] && !contiguous[2]);
+        let global = flood_global(&rgba, 3, 1, 0, 0, 16);
+        assert!(global[0] && global[2] && !global[1]);
     }
 }

@@ -122,7 +122,18 @@ d'arrière-plan) — mais **embarquée et exécutée en local**, aucun appel ré
       dans le **masque de calque peint** existant (P2 #14) plutôt que dans un
       mécanisme séparé — `RasterOp::Cutout` pour l'étiquette d'undo. 0
       dépendance ; couvre le cas fréquent (fond uni/simple). ✅
-- [ ] **9.2 Segmentation par modèle embarqué, 100 % local** — L, ⭐⭐⭐
+      **Renforcement (choisi à la place de 9.2 ML, 2026-07-03)** : plutôt
+      qu'un modèle de segmentation embarqué (nécessite d'acquérir et
+      vérifier la licence d'un fichier binaire, hors de portée d'un agent de
+      code), l'outil algorithmique a été rendu plus capable —
+      `bucket::flood_global` (sélection non contiguë, pour un fond visible
+      par bouts : feuillage, grillage…, case **Global**) et **⌥+clic pour
+      restaurer** (inverse le geste : redonne de la visibilité au lieu d'en
+      retirer, cumulatif comme le retrait — `min`/`max` contre la couverture
+      existante du masque, jamais de recul accidentel). Corrige une zone
+      trop agressivement détourée sans repasser par « Éditer le masque ». ✅
+- [ ] **9.2 Segmentation par modèle embarqué, 100 % local** — L, ⭐⭐⭐ — **reporté
+      (décision explicite, 2026-07-03)**
       Pour les fonds complexes : embarquer un modèle léger de segmentation de
       sujet (type U²-Net-portrait ou MODNet quantifié, quelques Mo) directement
       dans le bundle `.app`, exécuté via **`tract`** (runtime ONNX en Rust
@@ -132,6 +143,11 @@ d'arrière-plan) — mais **embarquée et exécutée en local**, aucun appel ré
       rapide ou si le modèle échoue.
       *Point de vigilance build* : le poids du modèle augmente la taille du
       DMG — à valider avec le pipeline de signature/notarisation existant.
+      *Reporté* : nécessite d'acquérir un fichier de poids binaire (licence à
+      vérifier) qu'un agent de code ne peut pas récupérer/valider seul dans
+      cette session. Choix produit : renforcer 9.1 à la place (voir plus
+      haut) plutôt que de bloquer sur cette dépendance. À reprendre si
+      l'utilisateur fournit lui-même un modèle `.onnx`.
 - [x] **9.3 Édition du masque de détourage** — S, ⭐⭐ (dépend de 9.1/9.2)
       Obtenu gratuitement par construction : 9.1 écrit directement dans
       `Layer.mask` (masque de calque peint, [ROADMAP #14](ROADMAP.md)), donc

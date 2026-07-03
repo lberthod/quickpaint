@@ -215,7 +215,7 @@ fn batch_export_window(ctx: &egui::Context, app: &mut PaintApp) {
     let mut open = true;
     let mut want_export = false;
     let mut want_cancel = false;
-    egui::Window::new(t("📐 Exporter en plusieurs tailles", "📐 Export multiple sizes"))
+    egui::Window::new(t("Exporter en plusieurs tailles", "Export multiple sizes"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
@@ -271,7 +271,7 @@ fn shortcuts_prefs_window(ctx: &egui::Context, app: &mut PaintApp) {
         return;
     }
     let mut open = true;
-    egui::Window::new(t("⌨ Raccourcis clavier", "⌨ Keyboard shortcuts"))
+    egui::Window::new(t("Raccourcis clavier", "Keyboard shortcuts"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
@@ -319,7 +319,7 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
     }
     let mut open = true;
     let mut picked: Option<(u32, u32)> = None;
-    egui::Window::new(t("🗂 Nouveau depuis un modèle", "🗂 New from template"))
+    egui::Window::new(t("Nouveau depuis un modèle", "New from template"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
@@ -353,33 +353,33 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     egui::menu::bar(ui, |ui| {
         ui.menu_button(t("Fichier", "File"), |ui| {
-            if ui.button(t("📄 Nouveau (⌘N)", "📄 New (⌘N)")).clicked() {
+            if ui.button(t("Nouveau (⌘N)", "New (⌘N)")).clicked() {
                 app.new_document();
                 ui.close_menu();
             }
-            if ui.button(t("🗂 Nouveau depuis un modèle…", "🗂 New from template…")).clicked() {
+            if ui.button(t("Nouveau depuis un modèle…", "New from template…")).clicked() {
                 app.show_template_gallery = true;
                 ui.close_menu();
             }
-            if ui.button(t("📂 Ouvrir… (⌘O)", "📂 Open… (⌘O)")).clicked() {
+            if ui.button(t("Ouvrir… (⌘O)", "Open… (⌘O)")).clicked() {
                 app.open_project();
                 ui.close_menu();
             }
-            if ui.button(t("💾 Enregistrer le projet (⌘S)", "💾 Save project (⌘S)")).clicked() {
+            if ui.button(t("Enregistrer le projet (⌘S)", "Save project (⌘S)")).clicked() {
                 app.save_project();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.button(t("🏞 Importer une image…", "🏞 Import image…")).clicked() {
+            if ui.button(t("Importer une image…", "Import image…")).clicked() {
                 app.import_image();
                 ui.close_menu();
             }
-            if ui.button(t("📋 Coller une image (⌘V)", "📋 Paste image (⌘V)")).clicked() {
+            if ui.button(t("Coller une image (⌘V)", "Paste image (⌘V)")).clicked() {
                 app.paste_image();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.button(t("🖼 Exporter en PNG (⌘E)", "🖼 Export as PNG (⌘E)")).clicked() {
+            if ui.button(t("Exporter en PNG (⌘E)", "Export as PNG (⌘E)")).clicked() {
                 app.request_export(ctx, ExportFormat::Png);
                 ui.close_menu();
             }
@@ -396,7 +396,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     ui.close_menu();
                 }
             });
-            if ui.button(t("📐 Exporter en plusieurs tailles…", "📐 Export multiple sizes…")).clicked() {
+            if ui.button(t("Exporter en plusieurs tailles…", "Export multiple sizes…")).clicked() {
                 app.show_batch_export = true;
                 ui.close_menu();
             }
@@ -440,14 +440,14 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             ui.separator();
             if ui
-                .add_enabled(has_sel, egui::Button::new(t("🎨 Copier le style (⌥⌘C)", "🎨 Copy style (⌥⌘C)")))
+                .add_enabled(has_sel, egui::Button::new(t("Copier le style (⌥⌘C)", "Copy style (⌥⌘C)")))
                 .clicked()
             {
                 app.copy_style();
                 ui.close_menu();
             }
             if ui
-                .add_enabled(has_sel, egui::Button::new(t("🎨 Coller le style (⌥⌘V)", "🎨 Paste style (⌥⌘V)")))
+                .add_enabled(has_sel, egui::Button::new(t("Coller le style (⌥⌘V)", "Paste style (⌥⌘V)")))
                 .clicked()
             {
                 app.paste_style();
@@ -455,7 +455,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             ui.separator();
             ui.add_enabled_ui(has_sel, |ui| {
-                ui.menu_button(t("🌈 Dégradé", "🌈 Gradient"), |ui| {
+                ui.menu_button(t("Dégradé", "Gradient"), |ui| {
                     if ui.button(t("Linéaire", "Linear")).clicked() {
                         app.apply_gradient(crate::model::GradientKind::Linear);
                         ui.close_menu();
@@ -485,7 +485,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     .count()
                     == 2;
             ui.add_enabled_ui(two_filled_shapes, |ui| {
-                ui.menu_button(t("🔷 Booléens", "🔷 Booleans"), |ui| {
+                ui.menu_button(t("Booléens", "Booleans"), |ui| {
                     use crate::tools::boolean::BooleanKind;
                     if ui.button(BooleanKind::Union.label()).clicked() {
                         app.boolean_op(BooleanKind::Union);
@@ -526,18 +526,18 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     ui.close_menu();
                 }
             });
-            if ui.button(t("🗑 Effacer le calque", "🗑 Clear layer")).clicked() {
+            if ui.button(t("Effacer le calque", "Clear layer")).clicked() {
                 app.clear_active_layer();
                 ui.close_menu();
             }
         });
 
         ui.menu_button(t("Calque", "Layer"), |ui| {
-            if ui.button(t("➕ Ajouter", "➕ Add")).clicked() {
+            if ui.button(t("Ajouter", "Add")).clicked() {
                 app.add_layer();
                 ui.close_menu();
             }
-            ui.menu_button(t("🎚 Ajouter un calque d'ajustement", "🎚 Add adjustment layer"), |ui| {
+            ui.menu_button(t("Ajouter un calque d'ajustement", "Add adjustment layer"), |ui| {
                 for f in crate::tools::filter::Filter::ALL {
                     if ui.button(f.label()).clicked() {
                         app.add_adjustment_layer(crate::tools::filter::Adjustment::Preset(f));
@@ -562,22 +562,22 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 "Non destructif : réversible, re-réglable (change le filtre à tout moment)",
                 "Non-destructive: reversible, re-adjustable (change the filter anytime)",
             ));
-            if ui.button(t("⧉ Dupliquer", "⧉ Duplicate")).clicked() {
+            if ui.button(t("Dupliquer", "Duplicate")).clicked() {
                 app.duplicate_layer();
                 ui.close_menu();
             }
             let can = app.doc.active_layer > 0;
-            if ui.add_enabled(can, egui::Button::new(t("⤓ Fusionner vers le bas", "⤓ Merge down"))).clicked() {
+            if ui.add_enabled(can, egui::Button::new(t("Fusionner vers le bas", "Merge down"))).clicked() {
                 app.merge_down();
                 ui.close_menu();
             }
-            if ui.add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("▦ Aplatir", "▦ Flatten"))).clicked() {
+            if ui.add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("Aplatir", "Flatten"))).clicked() {
                 app.flatten();
                 ui.close_menu();
             }
             ui.separator();
             if ui
-                .add_enabled(can, egui::Button::new(t("📁 Grouper avec le dessous", "📁 Group with below")))
+                .add_enabled(can, egui::Button::new(t("Grouper avec le dessous", "Group with below")))
                 .clicked()
             {
                 app.group_with_below();
@@ -590,11 +590,11 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
         });
 
         ui.menu_button(t("Image", "Image"), |ui| {
-            if ui.button(t("⤢ Redimensionner l'image…", "⤢ Resize image…")).clicked() {
+            if ui.button(t("Redimensionner l'image…", "Resize image…")).clicked() {
                 app.open_resize_dialog(false);
                 ui.close_menu();
             }
-            if ui.button(t("⛶ Taille du canevas…", "⛶ Canvas size…")).clicked() {
+            if ui.button(t("Taille du canevas…", "Canvas size…")).clicked() {
                 app.open_resize_dialog(true);
                 ui.close_menu();
             }
@@ -615,9 +615,9 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
 
         ui.menu_button(t("Aligner", "Align"), |ui| {
             let items: &[(&str, AlignMode)] = &[
-                (t("⫷ Bords gauches", "⫷ Left edges"), AlignMode::Left),
+                (t("Bords gauches", "Left edges"), AlignMode::Left),
                 (t("centres (H)", "centers (H)"), AlignMode::CenterH),
-                (t("⫸ Bords droits", "⫸ Right edges"), AlignMode::Right),
+                (t("Bords droits", "Right edges"), AlignMode::Right),
                 (t("Bords hauts", "Top edges"), AlignMode::Top),
                 (t("centres (V)", "centers (V)"), AlignMode::MiddleV),
                 (t("Bords bas", "Bottom edges"), AlignMode::Bottom),
@@ -641,10 +641,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
 
         ui.menu_button(t("Vue", "View"), |ui| {
             ui.horizontal(|ui| {
-                if ui.button("➖").clicked() {
+                if ui.button(egui::RichText::new("−").monospace()).clicked() {
                     app.zoom_out();
                 }
-                if ui.button("➕").clicked() {
+                if ui.button(egui::RichText::new("+").monospace()).clicked() {
                     app.zoom_in();
                 }
                 if ui.button("100 %").clicked() {
@@ -673,7 +673,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
         });
 
         ui.menu_button(t("Préférences", "Preferences"), |ui| {
-            if ui.button(t("⌨ Raccourcis clavier…", "⌨ Keyboard shortcuts…")).clicked() {
+            if ui.button(t("Raccourcis clavier…", "Keyboard shortcuts…")).clicked() {
                 app.show_shortcuts_prefs = true;
                 ui.close_menu();
             }
@@ -1054,6 +1054,11 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
                 "Écart de couleur toléré par rapport au point cliqué — augmenter pour un fond dégradé/bruité",
                 "Color difference tolerated from the clicked point — raise it for a gradient/noisy background",
             ));
+            ui.checkbox(&mut app.cutout_global, t("Global", "Global")).on_hover_text(t(
+                "Sélectionne toute la couleur proche dans la zone visible, pas seulement la région connectée au clic — utile pour un fond visible par bouts (feuillage…)",
+                "Selects all similar color in the visible area, not just the region connected to the click — useful for a background visible through gaps (foliage…)",
+            ));
+            ui.label(t("⌥+clic : restaurer", "⌥+click: restore"));
         }
         if matches!(app.active_tool, ActiveTool::CloneStamp | ActiveTool::Healing) {
             ui.separator();
@@ -1078,7 +1083,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             app.brush.color[3] = alpha;
         }
 
-        ui.menu_button(t("✨ Style", "✨ Style"), |ui| {
+        ui.menu_button(t("Style", "Style"), |ui| {
             let presets: &[(&str, f32, u8)] = &[
                 (t("Pinceau", "Brush"), 0.8, 255),
                 (t("Marqueur", "Marker"), 0.1, 150),

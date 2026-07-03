@@ -4,18 +4,73 @@
 use crate::app::PaintApp;
 use crate::i18n::t;
 use crate::model::Layer;
-use egui::Ui;
+use egui::{pos2, Color32, Rect, Sense, Stroke, Ui, Vec2};
+
+/// Petit bouton carré avec icône vectorielle (remplace les émojis d'état —
+/// rendu incohérent selon l'OS — par un dessin net et fixe).
+fn icon_button(ui: &mut Ui, active: bool, draw: impl FnOnce(&egui::Painter, Rect, Color32)) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
+    if active {
+        ui.painter().rect_filled(rect.shrink(1.0), 4.0, ui.visuals().selection.bg_fill);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect.shrink(1.0), 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
+    }
+    draw(ui.painter(), rect, ui.visuals().text_color());
+    resp
+}
+
+/// Œil ouvert (visible) ou fermé (masqué) — état de visibilité d'un calque.
+fn draw_eye(p: &egui::Painter, rect: Rect, visible: bool, col: Color32) {
+    let c = rect.center();
+    let w = rect.width() * 0.3;
+    let h = rect.height() * 0.18;
+    let st = Stroke::new(1.5, col);
+    if visible {
+        let n = 14;
+        let mut pts: Vec<egui::Pos2> = (0..=n)
+            .map(|i| {
+                let t = i as f32 / n as f32;
+                let x = c.x - w + 2.0 * w * t;
+                let y = c.y - h * (1.0 - (2.0 * t - 1.0).powi(2)).sqrt();
+                pos2(x, y)
+            })
+            .collect();
+        pts.extend((0..=n).rev().map(|i| {
+            let t = i as f32 / n as f32;
+            let x = c.x - w + 2.0 * w * t;
+            let y = c.y + h * (1.0 - (2.0 * t - 1.0).powi(2)).sqrt();
+            pos2(x, y)
+        }));
+        p.add(egui::Shape::closed_line(pts, st));
+        p.circle_filled(c, h * 0.5, col);
+    } else {
+        p.line_segment([pos2(c.x - w, c.y), pos2(c.x + w, c.y)], st);
+    }
+}
+
+/// Dossier — bascule de visibilité d'un groupe de calques.
+fn draw_folder(p: &egui::Painter, rect: Rect, col: Color32) {
+    let r = rect.shrink(5.0);
+    let st = Stroke::new(1.4, col);
+    let tab_h = r.height() * 0.22;
+    let body = Rect::from_min_max(pos2(r.min.x, r.min.y + tab_h), r.max);
+    p.rect_stroke(body, 1.5, st);
+    let tab_w = r.width() * 0.5;
+    p.line_segment([pos2(r.min.x, r.min.y + tab_h), pos2(r.min.x, r.min.y)], st);
+    p.line_segment([pos2(r.min.x, r.min.y), pos2(r.min.x + tab_w, r.min.y)], st);
+    p.line_segment([pos2(r.min.x + tab_w, r.min.y), pos2(r.min.x + tab_w + tab_h, r.min.y + tab_h)], st);
+}
 
 pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     ui.heading(t("Calques", "Layers"));
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
-        if ui.button(t("➕ Ajouter", "➕ Add")).clicked() {
+        if ui.button(t("Ajouter", "Add")).clicked() {
             app.add_layer();
         }
         if ui
-            .button(t("⧉ Dupliquer", "⧉ Duplicate"))
+            .button(t("Dupliquer", "Duplicate"))
             .on_hover_text(t("Dupliquer le calque actif", "Duplicate the active layer"))
             .clicked()
         {
@@ -23,7 +78,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
         let can_delete = app.doc.layers.len() > 1;
         if ui
-            .add_enabled(can_delete, egui::Button::new(t("🗑 Supprimer", "🗑 Delete")))
+            .add_enabled(can_delete, egui::Button::new(t("Supprimer", "Delete")))
             .clicked()
         {
             app.delete_active_layer();
@@ -34,13 +89,13 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         let n = app.doc.layers.len();
         let active = app.doc.active_layer;
         if ui
-            .add_enabled(active + 1 < n, egui::Button::new(t("⬆ Monter", "⬆ Move up")))
+            .add_enabled(active + 1 < n, egui::Button::new(t("▲ Monter", "▲ Move up")))
             .clicked()
         {
             app.move_active_layer(1);
         }
         if ui
-            .add_enabled(active > 0, egui::Button::new(t("⬇ Descendre", "⬇ Move down")))
+            .add_enabled(active > 0, egui::Button::new(t("▼ Descendre", "▼ Move down")))
             .clicked()
         {
             app.move_active_layer(-1);
@@ -50,14 +105,14 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal(|ui| {
         let active = app.doc.active_layer;
         if ui
-            .add_enabled(active > 0, egui::Button::new(t("⤓ Fusionner", "⤓ Merge")))
+            .add_enabled(active > 0, egui::Button::new(t("Fusionner", "Merge")))
             .on_hover_text(t("Fusionner avec le calque du dessous", "Merge with the layer below"))
             .clicked()
         {
             app.merge_down();
         }
         if ui
-            .add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("▦ Aplatir", "▦ Flatten")))
+            .add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("Aplatir", "Flatten")))
             .on_hover_text(t("Aplatir tous les calques en un seul", "Flatten all layers into one"))
             .clicked()
         {
@@ -77,8 +132,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         if group != prev_group {
             if let Some(name) = &group {
                 ui.horizontal(|ui| {
-                    if ui
-                        .selectable_label(false, "📁")
+                    if icon_button(ui, false, draw_folder)
                         .on_hover_text(t("Afficher / masquer le groupe", "Show / hide the group"))
                         .clicked()
                     {
@@ -95,9 +149,8 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             if group.is_some() {
                 ui.add_space(12.0); // indentation des calques groupés
             }
-            let eye = if layer.visible { "👁" } else { "—" };
-            if ui
-                .selectable_label(false, eye)
+            let visible = layer.visible;
+            if icon_button(ui, false, move |p, r, c| draw_eye(p, r, visible, c))
                 .on_hover_text(t("Afficher / masquer", "Show / hide"))
                 .clicked()
             {
@@ -108,9 +161,9 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             } else {
                 String::new()
             };
-            let clip = if layer.clip { "⤵ " } else { "" };
+            let clip = if layer.clip { "[clip] " } else { "" };
             let label = if layer.adjustment.is_some() {
-                format!("{}🎚 {}{}", clip, layer.name, dim)
+                format!("{}{} ({}){}", clip, layer.name, t("réglage", "adjustment"), dim)
             } else {
                 format!("{}{} ({}){}", clip, layer.name, layer.strokes.len(), dim)
             };
@@ -155,7 +208,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // Masque d'écrêtage : visible seulement à travers le calque du dessous.
     // Indisponible pour le calque du bas (rien en dessous).
     ui.add_enabled_ui(active > 0, |ui| {
-        ui.checkbox(&mut layer.clip, t("⤵ Écrêter sur le calque du dessous", "⤵ Clip to layer below"))
+        ui.checkbox(&mut layer.clip, t("Écrêter sur le calque du dessous", "Clip to layer below"))
             .on_hover_text(if layer.adjustment.is_some() {
                 t(
                     "N'ajuste que le calque juste en dessous (au lieu de tout ce qui est en dessous)",
@@ -176,7 +229,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     if let Some(mut adj) = layer.adjustment {
         use crate::tools::filter::{Adjustment, Filter};
         ui.horizontal(|ui| {
-            ui.label(t("🎚 Réglage", "🎚 Adjustment"));
+            ui.label(t("Réglage", "Adjustment"));
             egui::ComboBox::from_id_salt("adjustment").selected_text(adj.label()).show_ui(ui, |ui| {
                 for f in Filter::ALL {
                     ui.selectable_value(&mut adj, Adjustment::Preset(f), f.label());
@@ -245,9 +298,9 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     let has_mask = layer.mask.is_some();
     ui.horizontal(|ui| {
         let label = if has_mask {
-            t("🎭 Retirer le masque", "🎭 Remove mask")
+            t("Retirer le masque", "Remove mask")
         } else {
-            t("🎭 Ajouter un masque", "🎭 Add mask")
+            t("Ajouter un masque", "Add mask")
         };
         if ui.button(label).clicked() {
             app.toggle_active_layer_mask();
@@ -271,14 +324,14 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             l.images.len() + l.texts.len() + l.strokes.len()
         ));
         if ui
-            .button(t("↔ Aligner", "↔ Align"))
+            .button(t("Aligner", "Align"))
             .on_hover_text(t("Images côte à côte (comparer)", "Images side by side (compare)"))
             .clicked()
         {
             app.align_images_row();
         }
         if ui
-            .button(t("✂ Rogner", "✂ Crop"))
+            .button(t("Rogner", "Crop"))
             .on_hover_text(t("Recadrer l'image sélectionnée", "Crop the selected image"))
             .clicked()
         {
@@ -354,14 +407,14 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             // Ordre d'affichage : textes, puis images, puis traits (du dessus).
             let (id, lbl) = if row < nt {
                 let txt = &l.texts[nt - 1 - row];
-                (txt.id, format!("🔤 {}", short(&txt.text)))
+                (txt.id, format!("{}", short(&txt.text)))
             } else if row < nt + ni {
                 let im = &l.images[ni - 1 - (row - nt)];
-                (im.id, format!("🖼 {} {}×{}", t("Image", "Image"), im.w, im.h))
+                (im.id, format!("{} {}×{}", t("Image", "Image"), im.w, im.h))
             } else {
                 let s = &l.strokes[ns - 1 - (row - nt - ni)];
                 let kind = if s.fill { t("forme", "shape") } else { t("trait", "stroke") };
-                (s.id, format!("✏ {kind} ({} pts)", s.points.len()))
+                (s.id, format!("{kind} ({} pts)", s.points.len()))
             };
             if ui.selectable_label(app.selection.contains(&id), lbl).clicked() {
                 pick = Some(id);

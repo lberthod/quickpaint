@@ -256,13 +256,17 @@ pub struct PaintApp {
     pub batch_export: BatchExportState,
     // Pot de peinture : point cliqué (écran) en attente de la capture.
     bucket_click: Option<Pos2>,
-    // Détourage en un clic (Sprint 9.1) : point cliqué (écran) en attente de
-    // la capture, comme le pot de peinture.
-    cutout_click: Option<Pos2>,
+    // Détourage en un clic (Sprint 9.1) : point cliqué (écran) + modificateur
+    // (⌥ = restaurer) en attente de la capture, comme le pot de peinture.
+    cutout_click: Option<(Pos2, bool)>,
     /// Tolérance de couleur du détourage (0..=100, comparable au pot de
     /// peinture mais plus permissive par défaut — un fond photo est rarement
     /// parfaitement uni).
     pub cutout_tolerance: u8,
+    /// Détourage non contigu (Sprint 9.1, renforcement) : sélectionne toute
+    /// la couleur proche dans la zone visible, pas seulement la région
+    /// connectée au clic — utile pour un fond visible par bouts (feuillage…).
+    pub cutout_global: bool,
     last_canvas_rect: Rect,
     // Document à taille fixe (roadmap #3).
     last_doc_rect: Rect,
@@ -364,6 +368,7 @@ impl Default for PaintApp {
             bucket_click: None,
             cutout_click: None,
             cutout_tolerance: 32,
+            cutout_global: false,
             last_canvas_rect: Rect::ZERO,
             last_doc_rect: Rect::ZERO,
             view_initialized: false,
@@ -2303,8 +2308,8 @@ impl PaintApp {
             self.do_bucket_fill(ctx, &image, click);
             return;
         }
-        if let Some(click) = self.cutout_click.take() {
-            self.do_cutout(ctx, &image, click);
+        if let Some((click, restore)) = self.cutout_click.take() {
+            self.do_cutout(ctx, &image, click, restore);
             return;
         }
         let ppp = ctx.pixels_per_point();
@@ -2690,7 +2695,14 @@ impl PaintApp {
     /// (`bucket::feather`), puis écrit comme masque de calque peint — 100 %
     /// local, aucun modèle ni réseau. Le résultat reste éditable ensuite au
     /// pinceau/gomme pixel via « Éditer le masque » (Sprint 9.3).
-    fn do_cutout(&mut self, ctx: &egui::Context, image: &egui::ColorImage, click: Pos2) {
+    ///
+    /// `restore` (⌥+clic) inverse le geste : redonne de la visibilité au lieu
+    /// d'en retirer, pour rattraper une zone trop agressivement détourée sans
+    /// perdre le reste du masque. Les clics successifs sont cumulatifs dans
+    /// les deux sens : `cutout_global` sélectionne toute la couleur proche de
+    /// la zone visible plutôt que la seule région connexe au clic (fond
+    /// visible par bouts, feuillage, grillage…).
+    fn do_cutout(&mut self, ctx: &egui::Context, image: &egui::ColorImage, click: Pos2, restore: bool) {
         let ppp = ctx.pixels_per_point();
         let [iw, ih] = image.size;
         let r = self.last_doc_rect.intersect(self.last_canvas_rect);
@@ -2706,6 +2718,11 @@ impl PaintApp {
         if cx < 0 || cy < 0 || cx as usize >= rw || cy as usize >= rh {
             return;
         }
+        let layer_id = self.doc.active_id();
+        if restore && self.doc.layers.iter().find(|l| l.id == layer_id).is_none_or(|l| l.mask.is_none()) {
+            self.status = Some(t("Détourage : rien à restaurer (pas de masque).", "Cutout: nothing to restore (no mask yet).").into());
+            return;
+        }
 
         let mut region = vec![0u8; rw * rh * 4];
         for y in 0..rh {
@@ -2717,14 +2734,19 @@ impl PaintApp {
         }
 
         let tolerance = self.cutout_tolerance as i32;
-        let flooded = crate::tools::bucket::flood(&region, rw, rh, cx as usize, cy as usize, tolerance);
+        let flooded = if self.cutout_global {
+            crate::tools::bucket::flood_global(&region, rw, rh, cx as usize, cy as usize, tolerance)
+        } else {
+            crate::tools::bucket::flood(&region, rw, rh, cx as usize, cy as usize, tolerance)
+        };
         if !flooded.iter().any(|&f| f) {
             self.status = Some(t("Détourage : rien à retirer ici.", "Cutout: nothing to remove here.").into());
             return;
         }
-        // Masque brut (0 = fond à retirer, 255 = à garder), puis adouci pour
-        // un contour progressif plutôt qu'un découpage à l'emporte-pièce.
-        let raw: Vec<u8> = flooded.iter().map(|&f| if f { 0 } else { 255 }).collect();
+        // Masque brut, puis adouci pour un contour progressif plutôt qu'un
+        // découpage à l'emporte-pièce : en retrait, 0 = fond à cacher ; en
+        // restauration, 255 = zone à rendre visible.
+        let raw: Vec<u8> = flooded.iter().map(|&f| if restore == f { 255 } else { 0 }).collect();
         let feathered = crate::tools::bucket::feather(&raw, rw, rh, 2);
 
         let view = self.current_view();
@@ -2736,7 +2758,6 @@ impl PaintApp {
         let dx1 = (dp1.0.ceil() as i32).min(doc_w);
         let dy1 = (dp1.1.ceil() as i32).min(doc_h);
 
-        let layer_id = self.doc.active_id();
         let mask_ref = self.doc.layers.iter().find(|l| l.id == layer_id).and_then(|l| l.mask.as_ref());
         let mut before: std::collections::HashMap<crate::model::raster::TileKey, Option<crate::model::raster::Tile>> =
             Default::default();
@@ -2750,13 +2771,17 @@ impl PaintApp {
                     continue;
                 }
                 let cov = feathered[sy as usize * rw + sx as usize];
-                if cov == 255 {
-                    continue; // déjà pleinement visible : rien à changer
+                let existing = mask_ref.map(|m| m.mask_coverage(dx, dy)).unwrap_or(255);
+                // Cumulatif sans jamais reculer : en retrait, la visibilité ne
+                // peut que baisser (min) ; en restauration, que remonter (max).
+                let new_cov = if restore { cov.max(existing) } else { cov.min(existing) };
+                if new_cov == existing {
+                    continue; // rien à changer ici
                 }
                 for key in crate::model::RasterLayer::tiles_touched(dx as f32, dy as f32, 0.5) {
                     before.entry(key).or_insert_with(|| mask_ref.and_then(|m| m.tiles.get(&key).cloned()));
                 }
-                writes.push((dx, dy, cov));
+                writes.push((dx, dy, new_cov));
             }
         }
         if writes.is_empty() {
@@ -3437,7 +3462,11 @@ impl PaintApp {
                 if response.clicked() {
                     if let Some(p) = response.interact_pointer_pos() {
                         // Détourage différé : même mécanisme que le pot de peinture.
-                        self.cutout_click = Some(p);
+                        // ⌥+clic restaure la visibilité au lieu de la retirer —
+                        // corrige une zone trop agressivement détourée sans
+                        // repasser par « Éditer le masque ».
+                        let restore = ctx.input(|i| i.modifiers.alt);
+                        self.cutout_click = Some((p, restore));
                         ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
                     }
                 }
