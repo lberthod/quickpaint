@@ -256,6 +256,13 @@ pub struct PaintApp {
     pub batch_export: BatchExportState,
     // Pot de peinture : point cliqué (écran) en attente de la capture.
     bucket_click: Option<Pos2>,
+    // Détourage en un clic (Sprint 9.1) : point cliqué (écran) en attente de
+    // la capture, comme le pot de peinture.
+    cutout_click: Option<Pos2>,
+    /// Tolérance de couleur du détourage (0..=100, comparable au pot de
+    /// peinture mais plus permissive par défaut — un fond photo est rarement
+    /// parfaitement uni).
+    pub cutout_tolerance: u8,
     last_canvas_rect: Rect,
     // Document à taille fixe (roadmap #3).
     last_doc_rect: Rect,
@@ -355,6 +362,8 @@ impl Default for PaintApp {
             show_batch_export: false,
             batch_export: BatchExportState::default(),
             bucket_click: None,
+            cutout_click: None,
+            cutout_tolerance: 32,
             last_canvas_rect: Rect::ZERO,
             last_doc_rect: Rect::ZERO,
             view_initialized: false,
@@ -2294,6 +2303,10 @@ impl PaintApp {
             self.do_bucket_fill(ctx, &image, click);
             return;
         }
+        if let Some(click) = self.cutout_click.take() {
+            self.do_cutout(ctx, &image, click);
+            return;
+        }
         let ppp = ctx.pixels_per_point();
         // On exporte la zone du document, bornée à la partie visible.
         let r = self.last_doc_rect.intersect(self.last_canvas_rect);
@@ -2670,6 +2683,102 @@ impl PaintApp {
             Command::PaintRaster { layer: layer_id, op: RasterOp::Bucket, target: RasterTarget::Content, tiles },
         );
         self.status = Some(format!("{} ({count} px).", t("Zone remplie", "Area filled")));
+    }
+
+    /// Détourage en un clic (Sprint 9.1) : flood-fill depuis le point cliqué
+    /// sur la composition affichée (comme le pot de peinture), adouci
+    /// (`bucket::feather`), puis écrit comme masque de calque peint — 100 %
+    /// local, aucun modèle ni réseau. Le résultat reste éditable ensuite au
+    /// pinceau/gomme pixel via « Éditer le masque » (Sprint 9.3).
+    fn do_cutout(&mut self, ctx: &egui::Context, image: &egui::ColorImage, click: Pos2) {
+        let ppp = ctx.pixels_per_point();
+        let [iw, ih] = image.size;
+        let r = self.last_doc_rect.intersect(self.last_canvas_rect);
+        let x0 = (r.min.x * ppp).round().max(0.0) as usize;
+        let y0 = (r.min.y * ppp).round().max(0.0) as usize;
+        let rw = ((r.width() * ppp).round() as usize).min(iw.saturating_sub(x0));
+        let rh = ((r.height() * ppp).round() as usize).min(ih.saturating_sub(y0));
+        if rw == 0 || rh == 0 {
+            return;
+        }
+        let cx = (click.x * ppp).round() as i64 - x0 as i64;
+        let cy = (click.y * ppp).round() as i64 - y0 as i64;
+        if cx < 0 || cy < 0 || cx as usize >= rw || cy as usize >= rh {
+            return;
+        }
+
+        let mut region = vec![0u8; rw * rh * 4];
+        for y in 0..rh {
+            for x in 0..rw {
+                let px = image[(x0 + x, y0 + y)].to_srgba_unmultiplied();
+                let i = (y * rw + x) * 4;
+                region[i..i + 4].copy_from_slice(&px);
+            }
+        }
+
+        let tolerance = self.cutout_tolerance as i32;
+        let flooded = crate::tools::bucket::flood(&region, rw, rh, cx as usize, cy as usize, tolerance);
+        if !flooded.iter().any(|&f| f) {
+            self.status = Some(t("Détourage : rien à retirer ici.", "Cutout: nothing to remove here.").into());
+            return;
+        }
+        // Masque brut (0 = fond à retirer, 255 = à garder), puis adouci pour
+        // un contour progressif plutôt qu'un découpage à l'emporte-pièce.
+        let raw: Vec<u8> = flooded.iter().map(|&f| if f { 0 } else { 255 }).collect();
+        let feathered = crate::tools::bucket::feather(&raw, rw, rh, 2);
+
+        let view = self.current_view();
+        let dp0 = view.screen_to_doc(r.min);
+        let dp1 = view.screen_to_doc(egui::pos2(r.min.x + rw as f32 / ppp, r.min.y + rh as f32 / ppp));
+        let (doc_w, doc_h) = (self.doc.size.0 as i32, self.doc.size.1 as i32);
+        let dx0 = (dp0.0.floor() as i32).max(0);
+        let dy0 = (dp0.1.floor() as i32).max(0);
+        let dx1 = (dp1.0.ceil() as i32).min(doc_w);
+        let dy1 = (dp1.1.ceil() as i32).min(doc_h);
+
+        let layer_id = self.doc.active_id();
+        let mask_ref = self.doc.layers.iter().find(|l| l.id == layer_id).and_then(|l| l.mask.as_ref());
+        let mut before: std::collections::HashMap<crate::model::raster::TileKey, Option<crate::model::raster::Tile>> =
+            Default::default();
+        let mut writes: Vec<(i32, i32, u8)> = Vec::new();
+        for dy in dy0..dy1 {
+            for dx in dx0..dx1 {
+                let sp = view.doc_to_screen((dx as f32 + 0.5, dy as f32 + 0.5));
+                let sx = ((sp.x * ppp).round() as i64) - x0 as i64;
+                let sy = ((sp.y * ppp).round() as i64) - y0 as i64;
+                if sx < 0 || sy < 0 || sx as usize >= rw || sy as usize >= rh {
+                    continue;
+                }
+                let cov = feathered[sy as usize * rw + sx as usize];
+                if cov == 255 {
+                    continue; // déjà pleinement visible : rien à changer
+                }
+                for key in crate::model::RasterLayer::tiles_touched(dx as f32, dy as f32, 0.5) {
+                    before.entry(key).or_insert_with(|| mask_ref.and_then(|m| m.tiles.get(&key).cloned()));
+                }
+                writes.push((dx, dy, cov));
+            }
+        }
+        if writes.is_empty() {
+            return;
+        }
+        let count = writes.len();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            let mask = layer.mask.get_or_insert_with(Default::default);
+            for (dx, dy, cov) in writes {
+                mask.set_pixel(dx, dy, [cov, cov, cov, 255]);
+            }
+        }
+        let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
+        let tiles: Vec<_> = before
+            .into_iter()
+            .map(|(key, b)| (key, b, layer.mask.as_ref().and_then(|m| m.tiles.get(&key).cloned())))
+            .collect();
+        self.history.push(
+            &mut self.doc,
+            Command::PaintRaster { layer: layer_id, op: RasterOp::Cutout, target: RasterTarget::Mask, tiles },
+        );
+        self.status = Some(format!("{} ({count} px).", t("Détourage appliqué", "Cutout applied")));
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
@@ -3320,6 +3429,15 @@ impl PaintApp {
                     if let Some(p) = response.interact_pointer_pos() {
                         // Remplissage différé : on capture la composition affichée.
                         self.bucket_click = Some(p);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+                    }
+                }
+            }
+            ActiveTool::Cutout => {
+                if response.clicked() {
+                    if let Some(p) = response.interact_pointer_pos() {
+                        // Détourage différé : même mécanisme que le pot de peinture.
+                        self.cutout_click = Some(p);
                         ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
                     }
                 }

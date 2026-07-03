@@ -113,12 +113,15 @@ réglages tonals, toujours non destructif.
 Objectif : la fonctionnalité la plus demandée du marché (suppression
 d'arrière-plan) — mais **embarquée et exécutée en local**, aucun appel réseau.
 
-- [ ] **9.1 Détourage assisté (algorithmique, sans modèle)** — M, ⭐⭐
-      Première étape sans ML : améliorer la **baguette magique** existante en
-      un « détourage en un clic » — flood-fill tolérant sur les bords +
-      **feathering** (anti-aliasing du masque résultant, flou gaussien léger
-      sur l'alpha) pour un contour propre sur fond uni/simple. Rapide à livrer,
-      0 dépendance, couvre le cas fréquent (photo produit sur fond blanc/uni).
+- [x] **9.1 Détourage assisté (algorithmique, sans modèle)** — M, ⭐⭐
+      Nouvel outil **Détourage** (`ActiveTool::Cutout`) : clic sur le fond à
+      retirer → `bucket::flood` (le même flood-fill que le pot de peinture,
+      tolérance réglable par slider) sur la composition affichée, puis
+      `bucket::feather` (flou boîte 1 canal, nouveau) adoucit la frontière
+      binaire en un dégradé de couverture. Le résultat est écrit directement
+      dans le **masque de calque peint** existant (P2 #14) plutôt que dans un
+      mécanisme séparé — `RasterOp::Cutout` pour l'étiquette d'undo. 0
+      dépendance ; couvre le cas fréquent (fond uni/simple). ✅
 - [ ] **9.2 Segmentation par modèle embarqué, 100 % local** — L, ⭐⭐⭐
       Pour les fonds complexes : embarquer un modèle léger de segmentation de
       sujet (type U²-Net-portrait ou MODNet quantifié, quelques Mo) directement
@@ -129,11 +132,12 @@ d'arrière-plan) — mais **embarquée et exécutée en local**, aucun appel ré
       rapide ou si le modèle échoue.
       *Point de vigilance build* : le poids du modèle augmente la taille du
       DMG — à valider avec le pipeline de signature/notarisation existant.
-- [ ] **9.3 Édition du masque de détourage** — S, ⭐⭐ (dépend de 9.1/9.2)
-      Le résultat (9.1 ou 9.2) devient un **masque de calque peint**
-      ([ROADMAP #14](ROADMAP.md)) déjà existant : l'utilisateur peut retoucher
-      au pinceau/gomme pixel les zones mal détourées. Pas de nouveau
-      mécanisme, juste brancher la sortie du détourage sur `Layer.mask`.
+- [x] **9.3 Édition du masque de détourage** — S, ⭐⭐ (dépend de 9.1/9.2)
+      Obtenu gratuitement par construction : 9.1 écrit directement dans
+      `Layer.mask` (masque de calque peint, [ROADMAP #14](ROADMAP.md)), donc
+      le mécanisme d'édition déjà existant (bouton **Éditer le masque** +
+      pinceau/gomme pixel) fonctionne immédiatement sur un résultat de
+      détourage sans code supplémentaire. ✅
 
 **Jalon 9** : détourage disponible et crédible sans jamais quitter la machine
 — ce qui manquait le plus dans l'audit précédent.

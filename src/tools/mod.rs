@@ -44,6 +44,10 @@ pub enum ActiveTool {
     Bucket,
     Eyedropper,
     Pan,
+    /// Détourage en un clic (Sprint 9.1) : clic sur le fond à retirer →
+    /// flood-fill + adoucissement des bords, écrit dans le masque de calque
+    /// peint (100 % local, sans modèle ni réseau — voir aussi SPRINTS.md 9.2).
+    Cutout,
 }
 
 /// Sous-mode de l'outil Sélection (Sprint 1). Détermine le geste « glisser sur

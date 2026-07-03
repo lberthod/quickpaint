@@ -48,9 +48,67 @@ pub fn flood(rgba: &[u8], w: usize, h: usize, sx: usize, sy: usize, tol: i32) ->
     mask
 }
 
+/// Flou « boîte » séparable sur un tampon **1 canal** (Sprint 9.1) : adoucit
+/// la frontière binaire du détourage plutôt que de laisser un bord à
+/// l'emporte-pièce. Même algorithme que le flou RVBA de `tools::filter`, mais
+/// sans le pas de 4 octets par pixel — un buffer de masque n'a qu'un canal.
+pub fn feather(mask: &[u8], w: usize, h: usize, radius: usize) -> Vec<u8> {
+    if w == 0 || h == 0 || mask.len() < w * h || radius == 0 {
+        return mask.to_vec();
+    }
+    let pass = |src: &[u8], horizontal: bool| -> Vec<u8> {
+        let mut out = vec![0u8; w * h];
+        let (outer, inner) = if horizontal { (h, w) } else { (w, h) };
+        for o in 0..outer {
+            let idx = |i: usize| {
+                let (x, y) = if horizontal { (i, o) } else { (o, i) };
+                y * w + x
+            };
+            let mut sum = 0u32;
+            let mut count = 0u32;
+            for i in 0..=radius.min(inner - 1) {
+                sum += src[idx(i)] as u32;
+                count += 1;
+            }
+            for i in 0..inner {
+                out[idx(i)] = (sum / count.max(1)) as u8;
+                if i >= radius {
+                    sum -= src[idx(i - radius)] as u32;
+                    count -= 1;
+                }
+                let add = i + radius + 1;
+                if add < inner {
+                    sum += src[idx(add)] as u32;
+                    count += 1;
+                }
+            }
+        }
+        out
+    };
+    pass(&pass(mask, true), false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feather_smooths_a_hard_edge() {
+        // 5×1 : bloc net 0/255 en son milieu → après adoucissement, la
+        // transition ne doit plus être une marche brute.
+        let mask = vec![0u8, 0, 255, 255, 255];
+        let out = feather(&mask, 5, 1, 1);
+        assert!(out[1] > 0 && out[1] < 255, "edge pixel should be graded: {out:?}");
+        // Les extrémités, loin du bord, restent proches de leur valeur d'origine.
+        assert_eq!(out[0], 0);
+        assert_eq!(out[4], 255);
+    }
+
+    #[test]
+    fn feather_is_noop_with_zero_radius() {
+        let mask = vec![0u8, 255, 0, 255];
+        assert_eq!(feather(&mask, 2, 2, 0), mask);
+    }
 
     #[test]
     fn fills_contiguous_region_bounded_by_color() {

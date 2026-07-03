@@ -25,6 +25,7 @@ pub fn show(ui: &mut Ui, app: &PaintApp) {
         ActiveTool::Bucket => (t("🪣 Pot", "🪣 Bucket"), app.brush.width),
         ActiveTool::Eyedropper => (t("💉 Pipette", "💉 Eyedropper"), app.brush.width),
         ActiveTool::Pan => (t("✋ Main", "✋ Hand"), app.brush.width),
+        ActiveTool::Cutout => (t("🪄 Détourage", "🪄 Cutout"), app.brush.width),
     };
     let layer = app.doc.active_layer;
     let strokes = app.doc.layers[layer].strokes.len();

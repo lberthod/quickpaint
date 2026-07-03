@@ -135,6 +135,14 @@ fn tool_groups() -> Vec<Vec<(ActiveTool, &'static str, &'static str)>> {
                     "⌥+click = set source; drag = copies texture while blending toward the surrounding color",
                 ),
             ),
+            (
+                ActiveTool::Cutout,
+                t("Détourage", "Cutout"),
+                t(
+                    "Clic sur le fond à retirer : détoure en un clic (masque de calque, 100% local)",
+                    "Click the background to remove: one-click cutout (layer mask, 100% local)",
+                ),
+            ),
         ],
         vec![
             (
@@ -825,6 +833,16 @@ fn draw_icon(p: &egui::Painter, rect: egui::Rect, tool: ActiveTool, col: Color32
             p.add(Shape::closed_line(pts, st));
             p.circle_filled(at(0.82, 0.6), 0.07 * b.width(), col);
         }
+        ActiveTool::Cutout => {
+            // Ciseaux stylisés le long d'un contour pointillé = détourage.
+            p.line_segment([at(0.16, 0.5), at(0.32, 0.5)], st);
+            p.line_segment([at(0.4, 0.5), at(0.56, 0.5)], st);
+            p.line_segment([at(0.64, 0.5), at(0.8, 0.5)], st);
+            p.circle_stroke(at(0.16, 0.34), 0.06 * b.width(), st);
+            p.circle_stroke(at(0.16, 0.66), 0.06 * b.width(), st);
+            p.line_segment([at(0.16, 0.34), at(0.32, 0.5)], st);
+            p.line_segment([at(0.16, 0.66), at(0.32, 0.5)], st);
+        }
         ActiveTool::Eyedropper => {
             p.line_segment([at(0.22, 0.82), at(0.62, 0.42)], st);
             p.circle_stroke(at(0.72, 0.3), 0.13 * b.width(), st);
@@ -1028,6 +1046,14 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             ui.label(t("Dureté :", "Hardness:"));
             ui.add(egui::Slider::new(&mut app.pixel_hardness, 0.0..=1.0))
                 .on_hover_text(t("0 = bord dégradé (aérographe), 1 = bord net", "0 = soft edge (airbrush), 1 = hard edge"));
+        }
+        if app.active_tool == ActiveTool::Cutout {
+            ui.separator();
+            ui.label(t("Tolérance :", "Tolerance:"));
+            ui.add(egui::Slider::new(&mut app.cutout_tolerance, 0..=100)).on_hover_text(t(
+                "Écart de couleur toléré par rapport au point cliqué — augmenter pour un fond dégradé/bruité",
+                "Color difference tolerated from the clicked point — raise it for a gradient/noisy background",
+            ));
         }
         if matches!(app.active_tool, ActiveTool::CloneStamp | ActiveTool::Healing) {
             ui.separator();
