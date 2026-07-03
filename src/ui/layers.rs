@@ -2,23 +2,28 @@
 //! suppression. Les calques sont listés du dessus vers le dessous.
 
 use crate::app::PaintApp;
+use crate::i18n::t;
 use crate::model::Layer;
 use egui::Ui;
 
 pub fn show(ui: &mut Ui, app: &mut PaintApp) {
-    ui.heading("Calques");
+    ui.heading(t("Calques", "Layers"));
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
-        if ui.button("➕ Ajouter").clicked() {
+        if ui.button(t("➕ Ajouter", "➕ Add")).clicked() {
             app.add_layer();
         }
-        if ui.button("⧉ Dupliquer").on_hover_text("Dupliquer le calque actif").clicked() {
+        if ui
+            .button(t("⧉ Dupliquer", "⧉ Duplicate"))
+            .on_hover_text(t("Dupliquer le calque actif", "Duplicate the active layer"))
+            .clicked()
+        {
             app.duplicate_layer();
         }
         let can_delete = app.doc.layers.len() > 1;
         if ui
-            .add_enabled(can_delete, egui::Button::new("🗑 Supprimer"))
+            .add_enabled(can_delete, egui::Button::new(t("🗑 Supprimer", "🗑 Delete")))
             .clicked()
         {
             app.delete_active_layer();
@@ -29,13 +34,13 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         let n = app.doc.layers.len();
         let active = app.doc.active_layer;
         if ui
-            .add_enabled(active + 1 < n, egui::Button::new("⬆ Monter"))
+            .add_enabled(active + 1 < n, egui::Button::new(t("⬆ Monter", "⬆ Move up")))
             .clicked()
         {
             app.move_active_layer(1);
         }
         if ui
-            .add_enabled(active > 0, egui::Button::new("⬇ Descendre"))
+            .add_enabled(active > 0, egui::Button::new(t("⬇ Descendre", "⬇ Move down")))
             .clicked()
         {
             app.move_active_layer(-1);
@@ -45,15 +50,15 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal(|ui| {
         let active = app.doc.active_layer;
         if ui
-            .add_enabled(active > 0, egui::Button::new("⤓ Fusionner"))
-            .on_hover_text("Fusionner avec le calque du dessous")
+            .add_enabled(active > 0, egui::Button::new(t("⤓ Fusionner", "⤓ Merge")))
+            .on_hover_text(t("Fusionner avec le calque du dessous", "Merge with the layer below"))
             .clicked()
         {
             app.merge_down();
         }
         if ui
-            .add_enabled(app.doc.layers.len() > 1, egui::Button::new("▦ Aplatir"))
-            .on_hover_text("Aplatir tous les calques en un seul")
+            .add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("▦ Aplatir", "▦ Flatten")))
+            .on_hover_text(t("Aplatir tous les calques en un seul", "Flatten all layers into one"))
             .clicked()
         {
             app.flatten();
@@ -72,7 +77,11 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         if group != prev_group {
             if let Some(name) = &group {
                 ui.horizontal(|ui| {
-                    if ui.selectable_label(false, "📁").on_hover_text("Afficher / masquer le groupe").clicked() {
+                    if ui
+                        .selectable_label(false, "📁")
+                        .on_hover_text(t("Afficher / masquer le groupe", "Show / hide the group"))
+                        .clicked()
+                    {
                         toggle_group = Some(name.clone());
                     }
                     ui.label(egui::RichText::new(name).strong());
@@ -89,7 +98,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             let eye = if layer.visible { "👁" } else { "—" };
             if ui
                 .selectable_label(false, eye)
-                .on_hover_text("Afficher / masquer")
+                .on_hover_text(t("Afficher / masquer", "Show / hide"))
                 .clicked()
             {
                 layer.visible = !layer.visible;
@@ -121,10 +130,10 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     ui.separator();
     let active = app.doc.active_layer;
     let layer = &mut app.doc.layers[active];
-    ui.label("Calque actif :");
+    ui.label(t("Calque actif :", "Active layer:"));
     ui.add(egui::TextEdit::singleline(&mut layer.name).desired_width(f32::INFINITY));
     ui.horizontal(|ui| {
-        ui.label("Opacité");
+        ui.label(t("Opacité", "Opacity"));
         let mut pct = (layer.opacity * 100.0).round();
         if ui
             .add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %"))
@@ -134,7 +143,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
     });
     ui.horizontal(|ui| {
-        ui.label("Fusion");
+        ui.label(t("Fusion", "Blend"));
         egui::ComboBox::from_id_salt("blend")
             .selected_text(layer.blend.label())
             .show_ui(ui, |ui| {
@@ -146,18 +155,24 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // Masque d'écrêtage : visible seulement à travers le calque du dessous.
     // Indisponible pour le calque du bas (rien en dessous).
     ui.add_enabled_ui(active > 0, |ui| {
-        ui.checkbox(&mut layer.clip, "⤵ Écrêter sur le calque du dessous")
+        ui.checkbox(&mut layer.clip, t("⤵ Écrêter sur le calque du dessous", "⤵ Clip to layer below"))
             .on_hover_text(if layer.adjustment.is_some() {
-                "N'ajuste que le calque juste en dessous (au lieu de tout ce qui est en dessous)"
+                t(
+                    "N'ajuste que le calque juste en dessous (au lieu de tout ce qui est en dessous)",
+                    "Only adjusts the layer directly below (instead of everything below)",
+                )
             } else {
-                "Le calque n'apparaît qu'à travers l'opacité du calque inférieur"
+                t(
+                    "Le calque n'apparaît qu'à travers l'opacité du calque inférieur",
+                    "The layer only shows through the opacity of the layer below",
+                )
             });
     });
     // Calque d'ajustement (F3) : filtre re-réglable à tout moment, sans
     // jamais toucher aux pixels d'origine — change juste le rendu composé.
     if let Some(mut filter) = layer.adjustment {
         ui.horizontal(|ui| {
-            ui.label("🎚 Réglage");
+            ui.label(t("🎚 Réglage", "🎚 Adjustment"));
             egui::ComboBox::from_id_salt("adjustment")
                 .selected_text(filter.label())
                 .show_ui(ui, |ui| {
@@ -174,12 +189,19 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // existants une fois « Éditer le masque » activé.
     let has_mask = layer.mask.is_some();
     ui.horizontal(|ui| {
-        if ui.button(if has_mask { "🎭 Retirer le masque" } else { "🎭 Ajouter un masque" }).clicked() {
+        let label = if has_mask {
+            t("🎭 Retirer le masque", "🎭 Remove mask")
+        } else {
+            t("🎭 Ajouter un masque", "🎭 Add mask")
+        };
+        if ui.button(label).clicked() {
             app.toggle_active_layer_mask();
         }
         if has_mask {
-            ui.checkbox(&mut app.editing_mask, "Éditer le masque")
-                .on_hover_text("Le pinceau/gomme pixel peint le masque (blanc = visible, noir = masqué) au lieu du calque");
+            ui.checkbox(&mut app.editing_mask, t("Éditer le masque", "Edit mask")).on_hover_text(t(
+                "Le pinceau/gomme pixel peint le masque (blanc = visible, noir = masqué) au lieu du calque",
+                "The pixel brush/eraser paints the mask (white = visible, black = hidden) instead of the layer",
+            ));
         }
     });
 
@@ -189,13 +211,22 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         let active = app.doc.active_layer;
         let l = &app.doc.layers[active];
         ui.label(format!(
-            "Éléments ({}) :",
+            "{} ({}) :",
+            t("Éléments", "Elements"),
             l.images.len() + l.texts.len() + l.strokes.len()
         ));
-        if ui.button("↔ Aligner").on_hover_text("Images côte à côte (comparer)").clicked() {
+        if ui
+            .button(t("↔ Aligner", "↔ Align"))
+            .on_hover_text(t("Images côte à côte (comparer)", "Images side by side (compare)"))
+            .clicked()
+        {
             app.align_images_row();
         }
-        if ui.button("✂ Rogner").on_hover_text("Recadrer l'image sélectionnée").clicked() {
+        if ui
+            .button(t("✂ Rogner", "✂ Crop"))
+            .on_hover_text(t("Recadrer l'image sélectionnée", "Crop the selected image"))
+            .clicked()
+        {
             app.start_crop();
         }
     });
@@ -203,9 +234,9 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // Contrainte de ratio du recadrage (proposée pendant le mode rognage).
     if app.is_cropping() {
         ui.horizontal_wrapped(|ui| {
-            ui.label("Ratio :");
+            ui.label(t("Ratio :", "Ratio:"));
             let choices: &[(&str, Option<f32>)] = &[
-                ("Libre", None),
+                (t("Libre", "Free"), None),
                 ("1:1", Some(1.0)),
                 ("4:3", Some(4.0 / 3.0)),
                 ("16:9", Some(16.0 / 9.0)),
@@ -221,17 +252,33 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
         use crate::app::ZMove;
         let has = !app.selection.is_empty();
-        ui.label("Ordre :");
-        if ui.add_enabled(has, egui::Button::new("Devant")).on_hover_text("Premier plan (⌘⇧])").clicked() {
+        ui.label(t("Ordre :", "Order:"));
+        if ui
+            .add_enabled(has, egui::Button::new(t("Devant", "Front")))
+            .on_hover_text(t("Premier plan (⌘⇧])", "Bring to front (⌘⇧])"))
+            .clicked()
+        {
             app.reorder(ZMove::Front);
         }
-        if ui.add_enabled(has, egui::Button::new("Avancer")).on_hover_text("Avancer (⌘])").clicked() {
+        if ui
+            .add_enabled(has, egui::Button::new(t("Avancer", "Forward")))
+            .on_hover_text(t("Avancer (⌘])", "Bring forward (⌘])"))
+            .clicked()
+        {
             app.reorder(ZMove::Forward);
         }
-        if ui.add_enabled(has, egui::Button::new("Reculer")).on_hover_text("Reculer (⌘[)").clicked() {
+        if ui
+            .add_enabled(has, egui::Button::new(t("Reculer", "Backward")))
+            .on_hover_text(t("Reculer (⌘[)", "Send backward (⌘[)"))
+            .clicked()
+        {
             app.reorder(ZMove::Backward);
         }
-        if ui.add_enabled(has, egui::Button::new("Fond")).on_hover_text("Arrière-plan (⌘⇧[)").clicked() {
+        if ui
+            .add_enabled(has, egui::Button::new(t("Fond", "Back")))
+            .on_hover_text(t("Arrière-plan (⌘⇧[)", "Send to back (⌘⇧[)"))
+            .clicked()
+        {
             app.reorder(ZMove::Back);
         }
     });
@@ -251,14 +298,14 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         for row in range {
             // Ordre d'affichage : textes, puis images, puis traits (du dessus).
             let (id, lbl) = if row < nt {
-                let t = &l.texts[nt - 1 - row];
-                (t.id, format!("🔤 {}", short(&t.text)))
+                let txt = &l.texts[nt - 1 - row];
+                (txt.id, format!("🔤 {}", short(&txt.text)))
             } else if row < nt + ni {
                 let im = &l.images[ni - 1 - (row - nt)];
-                (im.id, format!("🖼 Image {}×{}", im.w, im.h))
+                (im.id, format!("🖼 {} {}×{}", t("Image", "Image"), im.w, im.h))
             } else {
                 let s = &l.strokes[ns - 1 - (row - nt - ni)];
-                let kind = if s.fill { "forme" } else { "trait" };
+                let kind = if s.fill { t("forme", "shape") } else { t("trait", "stroke") };
                 (s.id, format!("✏ {kind} ({} pts)", s.points.len()))
             };
             if ui.selectable_label(app.selection.contains(&id), lbl).clicked() {
@@ -278,7 +325,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
 /// Panneau d'historique : frise des actions ; clic = retour à cet état.
 fn history_panel(ui: &mut Ui, app: &mut PaintApp) {
     ui.separator();
-    egui::CollapsingHeader::new("Historique").default_open(false).show(ui, |ui| {
+    egui::CollapsingHeader::new(t("Historique", "History")).default_open(false).show(ui, |ui| {
         let timeline = app.history.timeline();
         let pos = app.history.position();
         let mut goto: Option<usize> = None;
@@ -290,7 +337,7 @@ fn history_panel(ui: &mut Ui, app: &mut PaintApp) {
             |ui, range| {
                 for row in range {
                     if row == 0 {
-                        if ui.selectable_label(pos == 0, "● État initial").clicked() {
+                        if ui.selectable_label(pos == 0, t("● État initial", "● Initial state")).clicked() {
                             goto = Some(0);
                         }
                     } else {
@@ -303,19 +350,19 @@ fn history_panel(ui: &mut Ui, app: &mut PaintApp) {
                 }
             },
         );
-        if let Some(t) = goto {
-            app.history_goto(t);
+        if let Some(step) = goto {
+            app.history_goto(step);
         }
     });
 }
 
-fn short(t: &str) -> String {
-    let t = t.trim();
-    if t.is_empty() {
-        "(vide)".into()
-    } else if t.chars().count() > 18 {
-        format!("{}…", t.chars().take(18).collect::<String>())
+fn short(s: &str) -> String {
+    let s = s.trim();
+    if s.is_empty() {
+        t("(vide)", "(empty)").to_string()
+    } else if s.chars().count() > 18 {
+        format!("{}…", s.chars().take(18).collect::<String>())
     } else {
-        t.to_string()
+        s.to_string()
     }
 }

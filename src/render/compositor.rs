@@ -53,7 +53,12 @@ impl Compositor {
     fn rebuild(&mut self, ctx: &egui::Context, doc: &Document, skip_text: Option<u64>) -> Option<ColorImage> {
         let (w, h) = doc.size;
         let mut base = Pixmap::new(w, h)?;
-        let atlas = ctx.fonts(|f| f.image());
+        // `ctx.fonts(|f| f.image())` clone tout l'atlas de glyphes (plusieurs Mo,
+        // en f32) — coûteux et inutile tant qu'aucun calque redevenu obsolète ne
+        // contient réellement du texte. Récupéré paresseusement, une seule fois
+        // par appel, au premier texte effectivement rastérisé (perf : ce chemin
+        // s'exécute à chaque frame pendant la peinture raster/pixel).
+        let mut atlas: Option<egui::epaint::FontImage> = None;
         let mut live = std::collections::HashSet::new();
         // Pixmap du dernier calque NON écrêté : base d'écrêtage des suivants.
         let mut clip_base: Option<Pixmap> = None;
@@ -85,7 +90,8 @@ impl Compositor {
                         crate::model::ElemRef::Text(i) => {
                             let t = &layer.texts[i];
                             if Some(t.id) != skip_text {
-                                raster_text(ctx, &mut lp, t, &atlas);
+                                let atlas = atlas.get_or_insert_with(|| ctx.fonts(|f| f.image()));
+                                raster_text(ctx, &mut lp, t, atlas);
                             }
                         }
                     }

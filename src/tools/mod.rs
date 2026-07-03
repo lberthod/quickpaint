@@ -13,6 +13,8 @@ pub use brush::Brush;
 pub use eraser::Eraser;
 pub use shape::Shape;
 
+use crate::i18n::t;
+
 /// Outil actuellement sélectionné dans l'UI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActiveTool {
@@ -58,9 +60,9 @@ impl SelectMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            SelectMode::Rect => "Rectangle",
-            SelectMode::Lasso => "Lasso",
-            SelectMode::Wand => "Baguette",
+            SelectMode::Rect => t("Rectangle", "Rectangle"),
+            SelectMode::Lasso => t("Lasso", "Lasso"),
+            SelectMode::Wand => t("Baguette", "Wand"),
         }
     }
 }

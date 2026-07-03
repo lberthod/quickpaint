@@ -242,12 +242,30 @@ Effort : S · M · L. Impact : ⭐ à ⭐⭐⭐.
 
 ### Transversal (n'importe quand, forte valeur)
 
-- [ ] **i18n EN/FR** — S/M, ⭐⭐⭐ : l'UI est en français, le README en anglais.
-      Table de chaînes + détection de locale.
+- [x] **i18n EN/FR** — S/M, ⭐⭐⭐ : [i18n.rs](src/i18n.rs) — `t(fr, en)` résolu à
+      la volée sur la langue courante (pas de table de clés séparée : les deux
+      versions voyagent côte à côte au site d'appel, donc jamais désynchronisées).
+      Détection de la langue système au démarrage (`defaults read -g AppleLocale`
+      sur macOS, repli `LANG`/`LC_ALL`), préférence explicite persistée dans
+      `~/Library/Application Support/QuickPaint/settings.json`. Sélecteur
+      **FR/EN** dans la barre de menu ([toolbar.rs](src/ui/toolbar.rs)). Toute
+      l'UI est couverte : menus, barre d'outils, panneaux calques/historique,
+      dialogues (redimensionner, modèles), messages de statut, libellés
+      annuler/rétablir. ✅
 - [ ] **Mac App Store** — M, ⭐⭐⭐ : la découvrabilité vaut plus que toute
       fonctionnalité. Sandbox + entitlements (rfd est déjà compatible).
-- [ ] **Perf compositor** : mesurer sur doc 4K/10 calques ; le tuilage (#1) est la
-      vraie réponse, en attendant limiter les rebuilds plein cadre.
+- [x] **Perf compositor (premier passage)** : l'atlas de glyphes egui
+      (`ctx.fonts(|f| f.image())`, plusieurs Mo en f32) était cloné à **chaque**
+      appel de `rebuild()` — donc à chaque frame pendant une peinture raster/pixel
+      (pinceau pixel, gomme pixel, tampon, masque), même sur un document sans
+      texte. Récupéré paresseusement maintenant : une seule fois par appel, et
+      seulement si un calque redevenu obsolète contient réellement du texte
+      ([compositor.rs](src/render/compositor.rs) `rebuild`). Le vrai fond du
+      sujet — recomposition **plein cadre** à chaque dab au lieu d'un rectangle
+      sale — reste au backlog : ça suppose de propager des dirty-rects à travers
+      le compositing par calque (ordre d'écrêtage/fusion séquentiel), plus gros
+      chantier que ce premier nettoyage. Mesure sur doc 4K/10 calques toujours à
+      faire.
 - [ ] **Format projet v2** : garder .json mais images en fichiers séparés dans un
       .zip (comme .ora/.sketch) — le base64 explose la taille des projets.
 

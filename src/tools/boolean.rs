@@ -9,6 +9,7 @@
 use geo_clipper::Clipper;
 use geo_types::{Coord, LineString, Polygon};
 
+use crate::i18n::t;
 use crate::model::{Stroke, StrokePoint};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,9 +22,9 @@ pub enum BooleanKind {
 impl BooleanKind {
     pub fn label(self) -> &'static str {
         match self {
-            BooleanKind::Union => "Union",
-            BooleanKind::Subtract => "Soustraction",
-            BooleanKind::Intersect => "Intersection",
+            BooleanKind::Union => t("Union", "Union"),
+            BooleanKind::Subtract => t("Soustraction", "Subtract"),
+            BooleanKind::Intersect => t("Intersection", "Intersect"),
         }
     }
 }

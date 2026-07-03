@@ -5,6 +5,7 @@
 //! lire les évènements → mettre à jour le trait → UI → rendre.
 
 use crate::history::{Command, History, RasterOp, RasterTarget};
+use crate::i18n::t;
 use crate::input::GestureCapture;
 use crate::model::{Document, Stroke, Tool};
 use crate::render::canvas::{self, ActiveStroke, StrokeCache, ViewTransform};
@@ -335,14 +336,14 @@ impl PaintApp {
 
     pub fn new_document(&mut self) {
         self.apply_loaded(Document::new(self.doc.size));
-        self.status = Some("Nouveau document.".into());
+        self.status = Some(t("Nouveau document.", "New document.").into());
     }
 
     /// Nouveau document vierge à une taille donnée (roadmap P1 #9, galerie
     /// de modèles) — contrairement à `set_canvas_size`, repart de zéro.
     pub fn new_document_sized(&mut self, w: u32, h: u32) {
         self.apply_loaded(Document::new((w.max(1), h.max(1))));
-        self.status = Some(format!("Nouveau document {w}×{h}."));
+        self.status = Some(format!("{} {w}×{h}.", t("Nouveau document", "New document")));
     }
 
     /// Profondeur monotone pour qu'un nouvel élément passe au-dessus des autres.
@@ -696,7 +697,7 @@ impl PaintApp {
     /// la couleur est proche (par canal, ≤ `wand_tol`) de l'élément cliqué.
     fn magic_wand(&mut self, d: (f32, f32), additive: bool) {
         let Some(target) = self.color_at_active(d) else {
-            self.status = Some("Baguette : aucun élément coloré ici.".into());
+            self.status = Some(t("Baguette : aucun élément coloré ici.", "Wand: no colored element here.").into());
             return;
         };
         let tol = self.wand_tol;
@@ -733,9 +734,9 @@ impl PaintApp {
     fn report_selection(&mut self) {
         let n = self.selection.len();
         self.status = Some(match n {
-            0 => "Aucun élément sélectionné.".into(),
-            1 => "1 élément sélectionné.".into(),
-            _ => format!("{n} éléments sélectionnés."),
+            0 => t("Aucun élément sélectionné.", "No element selected.").into(),
+            1 => t("1 élément sélectionné.", "1 element selected.").into(),
+            _ => format!("{n} {}", t("éléments sélectionnés.", "elements selected.")),
         });
     }
 
@@ -919,9 +920,9 @@ impl PaintApp {
             self.crop_mode = true;
             self.crop_rect = None;
             self.active_tool = ActiveTool::Select;
-            self.status = Some("Recadrage : glissez la zone à garder.".into());
+            self.status = Some(t("Recadrage : glissez la zone à garder.", "Crop: drag the area to keep.").into());
         } else {
-            self.status = Some("Sélectionne d'abord une image.".into());
+            self.status = Some(t("Sélectionne d'abord une image.", "Select an image first.").into());
         }
     }
 
@@ -970,7 +971,7 @@ impl PaintApp {
             Command::ReplaceImage { layer, id, before: Box::new(before), after: Box::new(after) },
         );
         self.image_textures.remove(&id);
-        self.status = Some("Image recadrée.".into());
+        self.status = Some(t("Image recadrée.", "Image cropped.").into());
     }
 
     /// Supprime les éléments sélectionnés (Suppr) : traits et textes.
@@ -1083,7 +1084,7 @@ impl PaintApp {
     pub fn import_image(&mut self) {
         let Some((w, h, rgba)) = crate::project::import_image_dialog() else { return };
         self.place_image(w, h, rgba);
-        self.status = Some("Image importée — déplacez-la (outil Sélection).".into());
+        self.status = Some(t("Image importée — déplacez-la (outil Sélection).", "Image imported — move it (Select tool).").into());
     }
 
     /// Colle une image depuis le presse-papiers (⌘V) — cœur du cas « comparer ».
@@ -1092,10 +1093,10 @@ impl PaintApp {
             Ok(img) => {
                 let (w, h) = (img.width as u32, img.height as u32);
                 self.place_image(w, h, img.bytes.into_owned());
-                self.status = Some("Image collée depuis le presse-papiers.".into());
+                self.status = Some(t("Image collée depuis le presse-papiers.", "Image pasted from clipboard.").into());
             }
             Err(_) => {
-                self.status = Some("Aucune image dans le presse-papiers.".into());
+                self.status = Some(t("Aucune image dans le presse-papiers.", "No image in the clipboard.").into());
             }
         }
     }
@@ -1129,7 +1130,7 @@ impl PaintApp {
             &mut self.doc,
             Command::SetLayers { before, before_active: i, after, after_active: i },
         );
-        self.status = Some("Images alignées côte à côte.".into());
+        self.status = Some(t("Images alignées côte à côte.", "Images aligned side by side.").into());
     }
 
     /// Applique un filtre aux images sélectionnées du calque actif (annulable).
@@ -1143,7 +1144,7 @@ impl PaintApp {
             .map(|im| im.id)
             .collect();
         if ids.is_empty() {
-            self.status = Some("Sélectionne une image (outil Sélection).".into());
+            self.status = Some(t("Sélectionne une image (outil Sélection).", "Select an image (Select tool).").into());
             return;
         }
         for id in ids {
@@ -1167,7 +1168,7 @@ impl PaintApp {
             );
             self.image_textures.remove(&id);
         }
-        self.status = Some(format!("Filtre appliqué : {}", filter.label()));
+        self.status = Some(format!("{} {}", t("Filtre appliqué :", "Filter applied:"), filter.label()));
     }
 
     // --- Fusion de calques --------------------------------------------------
@@ -1190,7 +1191,7 @@ impl PaintApp {
             &mut self.doc,
             Command::SetLayers { before, before_active: i, after, after_active: i - 1 },
         );
-        self.status = Some("Calque fusionné vers le bas.".into());
+        self.status = Some(t("Calque fusionné vers le bas.", "Layer merged down.").into());
     }
 
     /// Duplique le calque actif (nouveaux ids), inséré au-dessus. Annulable.
@@ -1199,7 +1200,7 @@ impl PaintApp {
         let mut dup = self.doc.layers[i].clone();
         dup.id = self.doc.next_layer_id;
         self.doc.next_layer_id += 1;
-        dup.name = format!("{} copie", dup.name);
+        dup.name = format!("{} {}", dup.name, t("copie", "copy"));
         for s in &mut dup.strokes {
             s.id = self.next_id;
             self.next_id += 1;
@@ -1214,7 +1215,7 @@ impl PaintApp {
         }
         self.selection.clear();
         self.history.push(&mut self.doc, Command::AddLayer { index: i + 1, layer: Box::new(dup) });
-        self.status = Some("Calque dupliqué.".into());
+        self.status = Some(t("Calque dupliqué.", "Layer duplicated.").into());
     }
 
     // --- Alignement / répartition (backlog) ---------------------------------
@@ -1276,7 +1277,7 @@ impl PaintApp {
     pub fn align(&mut self, mode: AlignMode) {
         let elems = self.selected_elements_bounds();
         if elems.len() < 2 {
-            self.status = Some("Sélectionne au moins 2 éléments.".into());
+            self.status = Some(t("Sélectionne au moins 2 éléments.", "Select at least 2 elements.").into());
             return;
         }
         let gmin_x = elems.iter().map(|(_, (mn, _))| mn.0).fold(f32::INFINITY, f32::min);
@@ -1300,7 +1301,7 @@ impl PaintApp {
             },
             AlignMode::DistributeH | AlignMode::DistributeV => {
                 if elems.len() < 3 {
-                    self.status = Some("Répartir : au moins 3 éléments.".into());
+                    self.status = Some(t("Répartir : au moins 3 éléments.", "Distribute: at least 3 elements.").into());
                     return;
                 }
                 let horiz = matches!(mode, AlignMode::DistributeH);
@@ -1327,7 +1328,7 @@ impl PaintApp {
         let layer = self.doc.active_id();
         self.history.push(&mut self.doc, Command::MoveEach { layer, moves });
         self.cache.invalidate(ids.iter());
-        self.status = Some("Éléments alignés.".into());
+        self.status = Some(t("Éléments alignés.", "Elements aligned.").into());
     }
 
     /// Aplatit tous les calques (visibles) en un seul. Annulable.
@@ -1337,7 +1338,7 @@ impl PaintApp {
         }
         let before = self.doc.layers.clone();
         let before_active = self.doc.active_layer;
-        let mut base = crate::model::Layer::new(1, "Calque 1");
+        let mut base = crate::model::Layer::new(1, t("Calque 1", "Layer 1"));
         for l in &before {
             base.strokes.extend(l.strokes.iter().cloned());
             base.texts.extend(l.texts.iter().cloned());
@@ -1348,7 +1349,7 @@ impl PaintApp {
             &mut self.doc,
             Command::SetLayers { before, before_active, after: vec![base], after_active: 0 },
         );
-        self.status = Some("Calques aplatis.".into());
+        self.status = Some(t("Calques aplatis.", "Layers flattened.").into());
     }
 
     /// Duplique la sélection avec un léger décalage (⌘D).
@@ -1424,7 +1425,10 @@ impl PaintApp {
             }
             ZMove::Forward | ZMove::Backward => {
                 if sel.len() != 1 {
-                    self.status = Some("Avancer/Reculer : sélectionne un seul élément.".into());
+                    self.status = Some(t(
+                        "Avancer/Reculer : sélectionne un seul élément.",
+                        "Forward/Backward: select a single element.",
+                    ).into());
                     return;
                 }
                 let (id, zc) = sel[0];
@@ -1497,7 +1501,7 @@ impl PaintApp {
         }
         if !c.is_empty() {
             self.clip = c;
-            self.status = Some("Copié.".into());
+            self.status = Some(t("Copié.", "Copied.").into());
         }
     }
 
@@ -1529,9 +1533,9 @@ impl PaintApp {
         if n > 0 {
             self.history.touch();
             self.cache.clear();
-            self.status = Some(format!("Dégradé appliqué à {n} forme(s)."));
+            self.status = Some(format!("{} {n} {}", t("Dégradé appliqué à", "Gradient applied to"), t("forme(s).", "shape(s).")));
         } else {
-            self.status = Some("Sélectionne au moins une forme pleine (Rempli).".into());
+            self.status = Some(t("Sélectionne au moins une forme pleine (Rempli).", "Select at least one filled shape (Filled).").into());
         }
     }
 
@@ -1548,7 +1552,7 @@ impl PaintApp {
         if n > 0 {
             self.history.touch();
             self.cache.clear();
-            self.status = Some(format!("Dégradé retiré de {n} forme(s)."));
+            self.status = Some(format!("{} {n} {}", t("Dégradé retiré de", "Gradient removed from"), t("forme(s).", "shape(s).")));
         }
     }
 
@@ -1559,7 +1563,7 @@ impl PaintApp {
     /// pertinent pour la soustraction (« retire clip de subject »).
     pub fn boolean_op(&mut self, kind: crate::tools::boolean::BooleanKind) {
         if self.selection.len() != 2 {
-            self.status = Some("Sélectionne exactement 2 formes pleines.".into());
+            self.status = Some(t("Sélectionne exactement 2 formes pleines.", "Select exactly 2 filled shapes.").into());
             return;
         }
         let active = self.doc.active_layer;
@@ -1572,7 +1576,10 @@ impl PaintApp {
             .filter(|(_, s)| self.selection.contains(&s.id) && s.fill)
             .collect();
         if picked.len() != 2 {
-            self.status = Some("Sélectionne exactement 2 formes pleines (option « Rempli »).".into());
+            self.status = Some(t(
+                "Sélectionne exactement 2 formes pleines (option « Rempli »).",
+                "Select exactly 2 filled shapes (\"Filled\" option).",
+            ).into());
             return;
         }
         picked.sort_by(|a, b| a.1.z.partial_cmp(&b.1.z).unwrap());
@@ -1596,8 +1603,8 @@ impl PaintApp {
         self.selection = new_ids.into_iter().collect();
         self.cache.clear();
         self.status = Some(match self.selection.is_empty() {
-            true => format!("{} : résultat vide.", kind.label()),
-            false => format!("{} appliquée.", kind.label()),
+            true => format!("{} : {}", kind.label(), t("résultat vide.", "empty result.")),
+            false => format!("{} {}", kind.label(), t("appliquée.", "applied.")),
         });
     }
 
@@ -1610,14 +1617,14 @@ impl PaintApp {
         let id = match self.selection.iter().next() {
             Some(id) => *id,
             None => {
-                self.status = Some("Sélectionne d'abord un élément.".into());
+                self.status = Some(t("Sélectionne d'abord un élément.", "Select an element first.").into());
                 return;
             }
         };
         if let Some(s) = l.strokes.iter().find(|s| s.id == id) {
             self.style_clipboard =
                 Some(StyleClipboard { color: s.color, width: s.base_width, fill: s.fill, text: None });
-            self.status = Some("Style copié.".into());
+            self.status = Some(t("Style copié.", "Style copied.").into());
         } else if let Some(t) = l.texts.iter().find(|t| t.id == id) {
             self.style_clipboard = Some(StyleClipboard {
                 color: t.color,
@@ -1632,9 +1639,9 @@ impl PaintApp {
                     outline_color: t.outline_color,
                 }),
             });
-            self.status = Some("Style copié.".into());
+            self.status = Some(crate::i18n::t("Style copié.", "Style copied.").into());
         } else {
-            self.status = Some("Cet élément n'a pas de style copiable.".into());
+            self.status = Some(t("Cet élément n'a pas de style copiable.", "This element has no copyable style.").into());
         }
     }
 
@@ -1642,11 +1649,11 @@ impl PaintApp {
     /// selon son propre type (un trait garde sa forme, seul le style change).
     pub fn paste_style(&mut self) {
         let Some(style) = self.style_clipboard.clone() else {
-            self.status = Some("Copie d'abord un style (⌥⌘C).".into());
+            self.status = Some(t("Copie d'abord un style (⌥⌘C).", "Copy a style first (⌥⌘C).").into());
             return;
         };
         if self.selection.is_empty() {
-            self.status = Some("Sélectionne au moins un élément.".into());
+            self.status = Some(t("Sélectionne au moins un élément.", "Select at least one element.").into());
             return;
         }
         let active = self.doc.active_layer;
@@ -1683,9 +1690,9 @@ impl PaintApp {
         if n > 0 {
             self.history.touch();
             self.cache.clear();
-            self.status = Some(format!("Style appliqué à {n} élément(s)."));
+            self.status = Some(format!("{} {n} {}", t("Style appliqué à", "Style applied to"), t("élément(s).", "element(s).")));
         } else {
-            self.status = Some("Aucun trait ni texte dans la sélection.".into());
+            self.status = Some(t("Aucun trait ni texte dans la sélection.", "No stroke or text in the selection.").into());
         }
     }
 
@@ -1738,7 +1745,7 @@ impl PaintApp {
         }
         self.selection = newsel;
         self.active_tool = ActiveTool::Select;
-        self.status = Some("Collé.".into());
+        self.status = Some(t("Collé.", "Pasted.").into());
         true
     }
 
@@ -1764,7 +1771,7 @@ impl PaintApp {
         let id = self.doc.next_layer_id;
         self.doc.next_layer_id += 1;
         let n = self.doc.layers.len() + 1;
-        let layer = crate::model::Layer::new(id, format!("Calque {n}"));
+        let layer = crate::model::Layer::new(id, format!("{} {n}", t("Calque", "Layer")));
         let index = self.doc.layers.len();
         self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
     }
@@ -1775,10 +1782,15 @@ impl PaintApp {
     pub fn add_adjustment_layer(&mut self, filter: crate::tools::filter::Filter) {
         let id = self.doc.next_layer_id;
         self.doc.next_layer_id += 1;
-        let layer = crate::model::Layer::new_adjustment(id, format!("Réglage : {}", filter.label()), filter);
+        let layer = crate::model::Layer::new_adjustment(id, format!("{} : {}", t("Réglage", "Adjustment"), filter.label()), filter);
         let index = self.doc.active_layer + 1;
         self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
-        self.status = Some(format!("Calque d'ajustement « {} » ajouté.", filter.label()));
+        self.status = Some(format!(
+            "{} « {} » {}",
+            t("Calque d'ajustement", "Adjustment layer"),
+            filter.label(),
+            t("ajouté.", "added.")
+        ));
     }
 
     pub fn delete_active_layer(&mut self) {
@@ -1801,7 +1813,7 @@ impl PaintApp {
         let name = self.doc.layers[i - 1]
             .group
             .clone()
-            .unwrap_or_else(|| format!("Groupe {}", self.doc.next_layer_id));
+            .unwrap_or_else(|| format!("{} {}", t("Groupe", "Group"), self.doc.next_layer_id));
         self.doc.next_layer_id += 1;
         let before = self.doc.layers.clone();
         let mut after = before.clone();
@@ -1811,7 +1823,7 @@ impl PaintApp {
             &mut self.doc,
             Command::SetLayers { before, before_active: i, after, after_active: i },
         );
-        self.status = Some("Calques groupés.".into());
+        self.status = Some(t("Calques groupés.", "Layers grouped.").into());
     }
 
     /// Retire le calque actif de son groupe.
@@ -1943,8 +1955,8 @@ impl PaintApp {
         let mut after = self.doc.clone();
         after.scale_content(w as f32 / ow as f32, h as f32 / oh as f32);
         after.size = (w, h);
-        self.push_doc_snapshot(after, "Redimensionner l'image");
-        self.status = Some(format!("Image redimensionnée : {w}×{h}"));
+        self.push_doc_snapshot(after, t("Redimensionner l'image", "Resize image"));
+        self.status = Some(format!("{} : {w}×{h}", t("Image redimensionnée", "Image resized")));
     }
 
     /// Change la taille du canevas sans mettre le contenu à l'échelle :
@@ -1960,15 +1972,19 @@ impl PaintApp {
         let mut after = self.doc.clone();
         after.translate_content(dx, dy);
         after.size = (w, h);
-        self.push_doc_snapshot(after, "Taille du canevas");
-        self.status = Some(format!("Canevas : {w}×{h}"));
+        self.push_doc_snapshot(after, t("Taille du canevas", "Canvas size"));
+        self.status = Some(format!("{} : {w}×{h}", t("Canevas", "Canvas")));
     }
 
     /// Fenêtre modale du redimensionnement (rendue à chaque frame si ouverte).
     fn show_resize_dialog(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.resize_dialog.take() else { return };
         let (ow, oh) = self.doc.size;
-        let title = if d.canvas_mode { "Taille du canevas" } else { "Redimensionner l'image" };
+        let title = if d.canvas_mode {
+            t("Taille du canevas", "Canvas size")
+        } else {
+            t("Redimensionner l'image", "Resize image")
+        };
         let mut open = true;
         let mut apply = false;
         let mut cancel = false;
@@ -1978,11 +1994,11 @@ impl PaintApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.label(format!("Taille actuelle : {ow}×{oh}"));
+                ui.label(format!("{} : {ow}×{oh}", t("Taille actuelle", "Current size")));
                 ui.horizontal(|ui| {
-                    ui.label("Largeur :");
+                    ui.label(t("Largeur :", "Width:"));
                     let rw = ui.add(egui::DragValue::new(&mut d.w).range(1..=16384).suffix(" px"));
-                    ui.label("Hauteur :");
+                    ui.label(t("Hauteur :", "Height:"));
                     let rh = ui.add(egui::DragValue::new(&mut d.h).range(1..=16384).suffix(" px"));
                     // Proportions liées (mode image) : le champ modifié pilote l'autre.
                     if !d.canvas_mode && d.keep_ratio && oh > 0 && ow > 0 {
@@ -1994,7 +2010,7 @@ impl PaintApp {
                     }
                 });
                 if d.canvas_mode {
-                    ui.label("Ancrage du contenu :");
+                    ui.label(t("Ancrage du contenu :", "Content anchor:"));
                     // Grille 3×3 : la case cochée est le côté où reste le contenu.
                     for row in 0..3u8 {
                         ui.horizontal(|ui| {
@@ -2007,9 +2023,9 @@ impl PaintApp {
                         });
                     }
                 } else {
-                    ui.checkbox(&mut d.keep_ratio, "Conserver les proportions");
+                    ui.checkbox(&mut d.keep_ratio, t("Conserver les proportions", "Keep proportions"));
                     ui.horizontal(|ui| {
-                        ui.label("Échelle :");
+                        ui.label(t("Échelle :", "Scale:"));
                         for pct in [25u32, 50, 200] {
                             if ui.button(format!("{pct} %")).clicked() {
                                 d.w = (ow.saturating_mul(pct) / 100).max(1);
@@ -2020,10 +2036,10 @@ impl PaintApp {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
-                    if ui.button("Annuler").clicked() {
+                    if ui.button(t("Annuler", "Cancel")).clicked() {
                         cancel = true;
                     }
-                    if ui.button("Appliquer").clicked() {
+                    if ui.button(t("Appliquer", "Apply")).clicked() {
                         apply = true;
                     }
                 });
@@ -2072,14 +2088,14 @@ impl PaintApp {
     pub fn save_project(&mut self) {
         self.encode_all_images();
         if let Some(p) = crate::project::save_dialog(&self.doc) {
-            self.status = Some(format!("Projet enregistré : {}", p.display()));
+            self.status = Some(format!("{} : {}", t("Projet enregistré", "Project saved"), p.display()));
         }
     }
 
     pub fn open_project(&mut self) {
         if let Some(doc) = crate::project::open_dialog() {
             self.apply_loaded(doc);
-            self.status = Some("Projet ouvert.".into());
+            self.status = Some(t("Projet ouvert.", "Project opened.").into());
         }
     }
 
@@ -2138,8 +2154,8 @@ impl PaintApp {
         self.encode_all_images();
         let bg = [self.bg.r(), self.bg.g(), self.bg.b()];
         self.status = Some(match crate::svg::save_to_desktop(&self.doc, bg) {
-            Ok(p) => format!("SVG enregistré : {}", p.display()),
-            Err(e) => format!("Échec de l'export SVG : {e}"),
+            Ok(p) => format!("{} : {}", t("SVG enregistré", "SVG saved"), p.display()),
+            Err(e) => format!("{} : {e}", t("Échec de l'export SVG", "SVG export failed")),
         });
     }
 
@@ -2171,9 +2187,9 @@ impl PaintApp {
         );
         let format = self.export_format;
         self.status = Some(match crate::export::save_dialog(&image, crop, format) {
-            Ok(p) => format!("{} enregistré : {}", format.label(), p.display()),
-            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => "Export annulé.".into(),
-            Err(e) => format!("Échec de l'export : {e}"),
+            Ok(p) => format!("{} {} : {}", format.label(), t("enregistré", "saved"), p.display()),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => t("Export annulé.", "Export cancelled.").into(),
+            Err(e) => format!("{} : {e}", t("Échec de l'export", "Export failed")),
         });
     }
 
@@ -2236,7 +2252,10 @@ impl PaintApp {
         self.editing_pen = Some((id, path.clone()));
         self.selection.clear();
         self.selection.insert(id);
-        self.status = Some("Édition du chemin : glisse une ancre/poignée ; Échap ou double-clic ailleurs pour terminer.".into());
+        self.status = Some(t(
+            "Édition du chemin : glisse une ancre/poignée ; Échap ou double-clic ailleurs pour terminer.",
+            "Editing path: drag an anchor/handle; Esc or double-click elsewhere to finish.",
+        ).into());
         true
     }
 
@@ -2331,7 +2350,7 @@ impl PaintApp {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.editing_pen = None;
             self.pen_drag = None;
-            self.status = Some("Édition du chemin terminée.".into());
+            self.status = Some(t("Édition du chemin terminée.", "Path editing finished.").into());
             return;
         }
         if response.drag_started() {
@@ -2364,7 +2383,7 @@ impl PaintApp {
                 let d = view.screen_to_doc(p);
                 if self.hit_test_pen_node(d).is_none() {
                     self.editing_pen = None;
-                    self.status = Some("Édition du chemin terminée.".into());
+                    self.status = Some(t("Édition du chemin terminée.", "Path editing finished.").into());
                 }
             }
         }
@@ -2514,7 +2533,7 @@ impl PaintApp {
             &mut self.doc,
             Command::PaintRaster { layer: layer_id, op: RasterOp::Bucket, target: RasterTarget::Content, tiles },
         );
-        self.status = Some(format!("Zone remplie ({count} px)."));
+        self.status = Some(format!("{} ({count} px).", t("Zone remplie", "Area filled")));
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
@@ -2698,7 +2717,7 @@ impl PaintApp {
                 let resp = ui.add(
                     egui::TextEdit::multiline(&mut t.text)
                         .desired_width(260.0)
-                        .hint_text("Tapez votre texte…")
+                        .hint_text(crate::i18n::t("Tapez votre texte…", "Type your text…"))
                         .font(font),
                 );
                 if self.text_focus_pending {
@@ -3206,9 +3225,9 @@ impl PaintApp {
                         self.status = Some(match eyedropper::pick(&self.doc, d) {
                             Some(rgb) => {
                                 self.brush.color = [rgb[0], rgb[1], rgb[2], self.brush.color[3]];
-                                "Couleur prélevée.".into()
+                                t("Couleur prélevée.", "Color picked.").into()
                             }
-                            None => "Pas de trait ici (fond).".into(),
+                            None => t("Pas de trait ici (fond).", "No stroke here (background).").into(),
                         });
                     }
                 }
@@ -3389,7 +3408,7 @@ impl PaintApp {
             };
             if let Some(p) = pos {
                 self.clone_source = Some(view.screen_to_doc(p));
-                self.status = Some("Source du tampon définie (glisser pour peindre).".into());
+                self.status = Some(t("Source du tampon définie (glisser pour peindre).", "Stamp source set (drag to paint).").into());
             }
             return;
         }
@@ -3400,7 +3419,7 @@ impl PaintApp {
                 self.paint_clone_point(d);
                 self.raster_stroke_last = Some(d);
             } else if self.clone_source.is_none() {
-                self.status = Some("Alt+clic pour définir la source du tampon.".into());
+                self.status = Some(t("Alt+clic pour définir la source du tampon.", "Alt+click to set the stamp source.").into());
             }
         }
         if response.dragged() {

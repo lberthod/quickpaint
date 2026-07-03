@@ -4,6 +4,7 @@
 //! **id stable** (pas par index) : suppression / réordonnancement ne corrompent
 //! plus la pile. Une commande sur un calque disparu devient un no-op.
 
+use crate::i18n::t;
 use crate::model::raster::{Tile, TileKey};
 use crate::model::{Document, ImageItem, Layer, Stroke, TextItem};
 
@@ -127,30 +128,30 @@ impl Command {
     /// Libellé court pour le panneau d'historique.
     pub fn label(&self) -> &'static str {
         match self {
-            Command::AddStroke { .. } => "Trait",
-            Command::AddMany { .. } => "Coller / dupliquer",
-            Command::Erase { .. } => "Effacer",
-            Command::SplitStrokes { .. } => "Gomme partielle",
-            Command::Move { .. } => "Déplacer",
-            Command::MoveEach { .. } => "Aligner",
-            Command::SetZMany { .. } => "Réordonner",
-            Command::Scale { .. } => "Mise à l'échelle",
-            Command::Rotate { .. } => "Rotation",
-            Command::Clear { .. } => "Vider le calque",
-            Command::AddText { .. } => "Texte",
-            Command::DeleteText { .. } => "Suppr. texte",
-            Command::AddImage { .. } => "Image",
-            Command::DeleteImage { .. } => "Suppr. image",
-            Command::ReplaceImage { .. } => "Filtre / recadrage",
-            Command::AddLayer { .. } => "Ajouter calque",
-            Command::RemoveLayer { .. } => "Suppr. calque",
-            Command::SetLayers { .. } => "Fusion / aplatir",
+            Command::AddStroke { .. } => t("Trait", "Stroke"),
+            Command::AddMany { .. } => t("Coller / dupliquer", "Paste / duplicate"),
+            Command::Erase { .. } => t("Effacer", "Erase"),
+            Command::SplitStrokes { .. } => t("Gomme partielle", "Partial erase"),
+            Command::Move { .. } => t("Déplacer", "Move"),
+            Command::MoveEach { .. } => t("Aligner", "Align"),
+            Command::SetZMany { .. } => t("Réordonner", "Reorder"),
+            Command::Scale { .. } => t("Mise à l'échelle", "Scale"),
+            Command::Rotate { .. } => t("Rotation", "Rotate"),
+            Command::Clear { .. } => t("Vider le calque", "Clear layer"),
+            Command::AddText { .. } => t("Texte", "Text"),
+            Command::DeleteText { .. } => t("Suppr. texte", "Delete text"),
+            Command::AddImage { .. } => t("Image", "Image"),
+            Command::DeleteImage { .. } => t("Suppr. image", "Delete image"),
+            Command::ReplaceImage { .. } => t("Filtre / recadrage", "Filter / crop"),
+            Command::AddLayer { .. } => t("Ajouter calque", "Add layer"),
+            Command::RemoveLayer { .. } => t("Suppr. calque", "Delete layer"),
+            Command::SetLayers { .. } => t("Fusion / aplatir", "Merge / flatten"),
             Command::SetDoc { label, .. } => label,
-            Command::EditPenPath { .. } => "Éditer le chemin",
-            Command::PaintRaster { op: RasterOp::Brush, .. } => "Pinceau pixel",
-            Command::PaintRaster { op: RasterOp::Eraser, .. } => "Gomme pixel",
-            Command::PaintRaster { op: RasterOp::Bucket, .. } => "Pot de peinture",
-            Command::PaintRaster { op: RasterOp::Clone, .. } => "Tampon de clonage",
+            Command::EditPenPath { .. } => t("Éditer le chemin", "Edit path"),
+            Command::PaintRaster { op: RasterOp::Brush, .. } => t("Pinceau pixel", "Pixel brush"),
+            Command::PaintRaster { op: RasterOp::Eraser, .. } => t("Gomme pixel", "Pixel eraser"),
+            Command::PaintRaster { op: RasterOp::Bucket, .. } => t("Pot de peinture", "Paint bucket"),
+            Command::PaintRaster { op: RasterOp::Clone, .. } => t("Tampon de clonage", "Clone stamp"),
         }
     }
 }

@@ -4,42 +4,47 @@
 
 use crate::app::{AlignMode, PaintApp};
 use crate::export::ExportFormat;
+use crate::i18n::{self, t, Lang};
 use crate::tools::{ActiveTool, SelectMode};
 use egui::{Align, Color32, Layout, Sense, Ui, Vec2};
 
 /// Modèles de document (roadmap P1 #9), groupés par catégorie — utilisés à
 /// la fois pour changer la taille du document courant (menu Vue, garde le
 /// contenu) et pour créer un nouveau document à cette taille (Fichier ▸
-/// Nouveau depuis un modèle, galerie).
-const TEMPLATES: &[(&str, &[(&str, u32, u32)])] = &[
-    (
-        "Réseaux sociaux",
-        &[
-            ("Post carré (Instagram)", 1080, 1080),
-            ("Story / Reel", 1080, 1920),
-            ("Post portrait", 1080, 1350),
-            ("Bannière Facebook", 1200, 630),
-            ("Miniature YouTube", 1280, 720),
-            ("Bannière YouTube", 2560, 1440),
-        ],
-    ),
-    (
-        "Impression",
-        &[
-            ("Affiche A4", 1748, 2480),
-            ("Carte de visite", 1050, 600),
-            ("Carte postale", 1748, 1240),
-        ],
-    ),
-    (
-        "Écran",
-        &[
-            ("Présentation 16:9", 1920, 1080),
-            ("HD 1280×720", 1280, 720),
-            ("Document par défaut", 1280, 800),
-        ],
-    ),
-];
+/// Nouveau depuis un modèle, galerie). Calculé à chaque appel (pas `const`)
+/// pour suivre la langue courante — coût négligeable, quelques dizaines
+/// d'entrées.
+fn templates() -> Vec<(&'static str, Vec<(&'static str, u32, u32)>)> {
+    vec![
+        (
+            t("Réseaux sociaux", "Social media"),
+            vec![
+                (t("Post carré (Instagram)", "Square post (Instagram)"), 1080, 1080),
+                (t("Story / Reel", "Story / Reel"), 1080, 1920),
+                (t("Post portrait", "Portrait post"), 1080, 1350),
+                (t("Bannière Facebook", "Facebook banner"), 1200, 630),
+                (t("Miniature YouTube", "YouTube thumbnail"), 1280, 720),
+                (t("Bannière YouTube", "YouTube banner"), 2560, 1440),
+            ],
+        ),
+        (
+            t("Impression", "Print"),
+            vec![
+                (t("Affiche A4", "A4 poster"), 1748, 2480),
+                (t("Carte de visite", "Business card"), 1050, 600),
+                (t("Carte postale", "Postcard"), 1748, 1240),
+            ],
+        ),
+        (
+            t("Écran", "Screen"),
+            vec![
+                (t("Présentation 16:9", "16:9 presentation"), 1920, 1080),
+                ("HD 1280×720", 1280, 720),
+                (t("Document par défaut", "Default document"), 1280, 800),
+            ],
+        ),
+    ]
+}
 
 /// Couleurs d'accès rapide (palette tactile).
 const PRESET_COLORS: &[[u8; 3]] = &[
@@ -56,48 +61,122 @@ const PRESET_COLORS: &[[u8; 3]] = &[
 ];
 
 /// Groupes d'outils (nom, explication). Les icônes sont dessinées (cf.
-/// `draw_icon`) pour rester nettes et toujours visibles.
-const TOOL_GROUPS: &[&[(ActiveTool, &str, &str)]] = &[
-    &[
-        (ActiveTool::Select, "Sélection (V)", "Sélectionner, déplacer, redimensionner et tourner des éléments"),
-        (ActiveTool::Pan, "Main (H)", "Déplacer la vue · ou Espace + glisser"),
-    ],
-    &[
-        (ActiveTool::Brush, "Pinceau (B)", "Trait à main levée, épaisseur selon la vitesse"),
-        (ActiveTool::Eraser, "Gomme (E)", "Efface les traits survolés du calque actif"),
-        (ActiveTool::Bucket, "Pot de peinture (G)", "Remplit une zone fermée de la couleur courante"),
-        (ActiveTool::Eyedropper, "Pipette (I)", "Prélève une couleur du dessin"),
-    ],
-    &[
-        (
-            ActiveTool::PixelBrush,
-            "Pinceau pixel",
-            "Peint des pixels (dureté réglable) dans le calque actif — comme GIMP/Photoshop",
-        ),
-        (
-            ActiveTool::PixelEraser,
-            "Gomme pixel",
-            "Efface des pixels (retire de l'alpha) dans le calque actif",
-        ),
-        (
-            ActiveTool::CloneStamp,
-            "Tampon de clonage",
-            "⌥+clic = définir la source ; glisser = peindre en recopiant depuis la source",
-        ),
-    ],
-    &[
-        (ActiveTool::Line, "Ligne (L)", "Segment droit · Maj = horizontale/verticale"),
-        (ActiveTool::Arrow, "Flèche (A)", "Segment avec pointe · idéal pour annoter"),
-        (ActiveTool::Rectangle, "Rectangle (R)", "Rectangle · Maj = carré · option Rempli"),
-        (ActiveTool::Ellipse, "Ellipse (O)", "Ellipse · Maj = cercle · option Rempli"),
-        (ActiveTool::Polygon, "Polygone", "Polygone régulier · nombre de côtés réglable"),
-        (ActiveTool::Star, "Étoile", "Étoile · nombre de branches réglable"),
-    ],
-    &[
-        (ActiveTool::Pen, "Plume (P)", "Chemin de Bézier · clic = sommet, glissé = courbe ; Entrée valide"),
-        (ActiveTool::Text, "Texte (T)", "Cliquer pour écrire ; double-clic pour éditer"),
-    ],
-];
+/// `draw_icon`) pour rester nettes et toujours visibles. Calculé à chaque
+/// appel pour suivre la langue courante.
+fn tool_groups() -> Vec<Vec<(ActiveTool, &'static str, &'static str)>> {
+    vec![
+        vec![
+            (
+                ActiveTool::Select,
+                t("Sélection (V)", "Select (V)"),
+                t(
+                    "Sélectionner, déplacer, redimensionner et tourner des éléments",
+                    "Select, move, resize and rotate elements",
+                ),
+            ),
+            (
+                ActiveTool::Pan,
+                t("Main (H)", "Hand (H)"),
+                t("Déplacer la vue · ou Espace + glisser", "Pan the view · or Space + drag"),
+            ),
+        ],
+        vec![
+            (
+                ActiveTool::Brush,
+                t("Pinceau (B)", "Brush (B)"),
+                t("Trait à main levée, épaisseur selon la vitesse", "Freehand stroke, width follows speed"),
+            ),
+            (
+                ActiveTool::Eraser,
+                t("Gomme (E)", "Eraser (E)"),
+                t("Efface les traits survolés du calque actif", "Erases hovered strokes on the active layer"),
+            ),
+            (
+                ActiveTool::Bucket,
+                t("Pot de peinture (G)", "Paint bucket (G)"),
+                t("Remplit une zone fermée de la couleur courante", "Fills a closed area with the current color"),
+            ),
+            (
+                ActiveTool::Eyedropper,
+                t("Pipette (I)", "Eyedropper (I)"),
+                t("Prélève une couleur du dessin", "Picks a color from the drawing"),
+            ),
+        ],
+        vec![
+            (
+                ActiveTool::PixelBrush,
+                t("Pinceau pixel", "Pixel brush"),
+                t(
+                    "Peint des pixels (dureté réglable) dans le calque actif — comme GIMP/Photoshop",
+                    "Paints pixels (adjustable hardness) on the active layer — like GIMP/Photoshop",
+                ),
+            ),
+            (
+                ActiveTool::PixelEraser,
+                t("Gomme pixel", "Pixel eraser"),
+                t(
+                    "Efface des pixels (retire de l'alpha) dans le calque actif",
+                    "Erases pixels (removes alpha) on the active layer",
+                ),
+            ),
+            (
+                ActiveTool::CloneStamp,
+                t("Tampon de clonage", "Clone stamp"),
+                t(
+                    "⌥+clic = définir la source ; glisser = peindre en recopiant depuis la source",
+                    "⌥+click = set source; drag = paint by copying from the source",
+                ),
+            ),
+        ],
+        vec![
+            (
+                ActiveTool::Line,
+                t("Ligne (L)", "Line (L)"),
+                t("Segment droit · Maj = horizontale/verticale", "Straight segment · Shift = horizontal/vertical"),
+            ),
+            (
+                ActiveTool::Arrow,
+                t("Flèche (A)", "Arrow (A)"),
+                t("Segment avec pointe · idéal pour annoter", "Segment with tip · great for annotating"),
+            ),
+            (
+                ActiveTool::Rectangle,
+                t("Rectangle (R)", "Rectangle (R)"),
+                t("Rectangle · Maj = carré · option Rempli", "Rectangle · Shift = square · Filled option"),
+            ),
+            (
+                ActiveTool::Ellipse,
+                t("Ellipse (O)", "Ellipse (O)"),
+                t("Ellipse · Maj = cercle · option Rempli", "Ellipse · Shift = circle · Filled option"),
+            ),
+            (
+                ActiveTool::Polygon,
+                t("Polygone", "Polygon"),
+                t("Polygone régulier · nombre de côtés réglable", "Regular polygon · adjustable side count"),
+            ),
+            (
+                ActiveTool::Star,
+                t("Étoile", "Star"),
+                t("Étoile · nombre de branches réglable", "Star · adjustable point count"),
+            ),
+        ],
+        vec![
+            (
+                ActiveTool::Pen,
+                t("Plume (P)", "Pen (P)"),
+                t(
+                    "Chemin de Bézier · clic = sommet, glissé = courbe ; Entrée valide",
+                    "Bézier path · click = vertex, drag = curve; Enter confirms",
+                ),
+            ),
+            (
+                ActiveTool::Text,
+                t("Texte (T)", "Text (T)"),
+                t("Cliquer pour écrire ; double-clic pour éditer", "Click to write; double-click to edit"),
+            ),
+        ],
+    ]
+}
 
 pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     menu_bar(ui, app, ctx);
@@ -116,26 +195,26 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
     }
     let mut open = true;
     let mut picked: Option<(u32, u32)> = None;
-    egui::Window::new("🗂 Nouveau depuis un modèle")
+    egui::Window::new(t("🗂 Nouveau depuis un modèle", "🗂 New from template"))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             ui.set_min_width(360.0);
-            for (cat, items) in TEMPLATES {
-                ui.label(egui::RichText::new(*cat).strong());
+            for (cat, items) in templates() {
+                ui.label(egui::RichText::new(cat).strong());
                 ui.horizontal_wrapped(|ui| {
-                    for (label, w, h) in *items {
+                    for (label, w, h) in items {
                         let text = format!("{label}\n{w}×{h}");
                         if ui.add(egui::Button::new(text).min_size(egui::vec2(150.0, 40.0))).clicked() {
-                            picked = Some((*w, *h));
+                            picked = Some((w, h));
                         }
                     }
                 });
                 ui.separator();
             }
-            if ui.button("Annuler").clicked() {
+            if ui.button(t("Annuler", "Cancel")).clicked() {
                 app.show_template_gallery = false;
             }
         });
@@ -149,38 +228,38 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
 
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     egui::menu::bar(ui, |ui| {
-        ui.menu_button("Fichier", |ui| {
-            if ui.button("📄 Nouveau (⌘N)").clicked() {
+        ui.menu_button(t("Fichier", "File"), |ui| {
+            if ui.button(t("📄 Nouveau (⌘N)", "📄 New (⌘N)")).clicked() {
                 app.new_document();
                 ui.close_menu();
             }
-            if ui.button("🗂 Nouveau depuis un modèle…").clicked() {
+            if ui.button(t("🗂 Nouveau depuis un modèle…", "🗂 New from template…")).clicked() {
                 app.show_template_gallery = true;
                 ui.close_menu();
             }
-            if ui.button("📂 Ouvrir… (⌘O)").clicked() {
+            if ui.button(t("📂 Ouvrir… (⌘O)", "📂 Open… (⌘O)")).clicked() {
                 app.open_project();
                 ui.close_menu();
             }
-            if ui.button("💾 Enregistrer le projet (⌘S)").clicked() {
+            if ui.button(t("💾 Enregistrer le projet (⌘S)", "💾 Save project (⌘S)")).clicked() {
                 app.save_project();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.button("🏞 Importer une image…").clicked() {
+            if ui.button(t("🏞 Importer une image…", "🏞 Import image…")).clicked() {
                 app.import_image();
                 ui.close_menu();
             }
-            if ui.button("📋 Coller une image (⌘V)").clicked() {
+            if ui.button(t("📋 Coller une image (⌘V)", "📋 Paste image (⌘V)")).clicked() {
                 app.paste_image();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.button("🖼 Exporter en PNG (⌘E)").clicked() {
+            if ui.button(t("🖼 Exporter en PNG (⌘E)", "🖼 Export as PNG (⌘E)")).clicked() {
                 app.request_export(ctx, ExportFormat::Png);
                 ui.close_menu();
             }
-            ui.menu_button("Exporter sous…", |ui| {
+            ui.menu_button(t("Exporter sous…", "Export as…"), |ui| {
                 for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Pdf] {
                     if ui.button(fmt.label()).clicked() {
                         app.request_export(ctx, fmt);
@@ -188,74 +267,86 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     }
                 }
                 ui.separator();
-                if ui.button("SVG (vectoriel)").clicked() {
+                if ui.button(t("SVG (vectoriel)", "SVG (vector)")).clicked() {
                     app.export_svg();
                     ui.close_menu();
                 }
             });
         });
 
-        ui.menu_button("Édition", |ui| {
-            if ui.add_enabled(app.history.can_undo(), egui::Button::new("↶ Annuler (⌘Z)")).clicked() {
+        ui.menu_button(t("Édition", "Edit"), |ui| {
+            if ui.add_enabled(app.history.can_undo(), egui::Button::new(t("↶ Annuler (⌘Z)", "↶ Undo (⌘Z)"))).clicked() {
                 app.undo();
                 ui.close_menu();
             }
-            if ui.add_enabled(app.history.can_redo(), egui::Button::new("↷ Rétablir (⌘⇧Z)")).clicked() {
+            if ui
+                .add_enabled(app.history.can_redo(), egui::Button::new(t("↷ Rétablir (⌘⇧Z)", "↷ Redo (⌘⇧Z)")))
+                .clicked()
+            {
                 app.redo();
                 ui.close_menu();
             }
             ui.separator();
             let has_sel = !app.selection.is_empty();
-            if ui.add_enabled(has_sel, egui::Button::new("Copier (⌘C)")).clicked() {
+            if ui.add_enabled(has_sel, egui::Button::new(t("Copier (⌘C)", "Copy (⌘C)"))).clicked() {
                 app.copy_selection();
                 ui.close_menu();
             }
-            if ui.add_enabled(has_sel, egui::Button::new("Couper (⌘X)")).clicked() {
+            if ui.add_enabled(has_sel, egui::Button::new(t("Couper (⌘X)", "Cut (⌘X)"))).clicked() {
                 app.cut_selection();
                 ui.close_menu();
             }
-            if ui.button("Coller (⌘V)").clicked() {
+            if ui.button(t("Coller (⌘V)", "Paste (⌘V)")).clicked() {
                 if !app.paste_clipboard() {
                     app.paste_image();
                 }
                 ui.close_menu();
             }
-            if ui.add_enabled(has_sel, egui::Button::new("Dupliquer (⌘D)")).clicked() {
+            if ui.add_enabled(has_sel, egui::Button::new(t("Dupliquer (⌘D)", "Duplicate (⌘D)"))).clicked() {
                 app.duplicate_selection();
                 ui.close_menu();
             }
-            if ui.add_enabled(has_sel, egui::Button::new("Supprimer (Suppr)")).clicked() {
+            if ui.add_enabled(has_sel, egui::Button::new(t("Supprimer (Suppr)", "Delete (Del)"))).clicked() {
                 app.delete_selection();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.add_enabled(has_sel, egui::Button::new("🎨 Copier le style (⌥⌘C)")).clicked() {
+            if ui
+                .add_enabled(has_sel, egui::Button::new(t("🎨 Copier le style (⌥⌘C)", "🎨 Copy style (⌥⌘C)")))
+                .clicked()
+            {
                 app.copy_style();
                 ui.close_menu();
             }
-            if ui.add_enabled(has_sel, egui::Button::new("🎨 Coller le style (⌥⌘V)")).clicked() {
+            if ui
+                .add_enabled(has_sel, egui::Button::new(t("🎨 Coller le style (⌥⌘V)", "🎨 Paste style (⌥⌘V)")))
+                .clicked()
+            {
                 app.paste_style();
                 ui.close_menu();
             }
             ui.separator();
             ui.add_enabled_ui(has_sel, |ui| {
-                ui.menu_button("🌈 Dégradé", |ui| {
-                    if ui.button("Linéaire").clicked() {
+                ui.menu_button(t("🌈 Dégradé", "🌈 Gradient"), |ui| {
+                    if ui.button(t("Linéaire", "Linear")).clicked() {
                         app.apply_gradient(crate::model::GradientKind::Linear);
                         ui.close_menu();
                     }
-                    if ui.button("Radial").clicked() {
+                    if ui.button(t("Radial", "Radial")).clicked() {
                         app.apply_gradient(crate::model::GradientKind::Radial);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Retirer le dégradé").clicked() {
+                    if ui.button(t("Retirer le dégradé", "Remove gradient")).clicked() {
                         app.remove_gradient();
                         ui.close_menu();
                     }
                 })
                 .response
-                .on_hover_text("S'applique aux formes pleines (option « Rempli ») sélectionnées");
+                .on_hover_text(t(
+                    "S'applique aux formes pleines (option « Rempli ») sélectionnées",
+                    "Applies to selected filled shapes (\"Filled\" option)",
+                ));
             });
             ui.separator();
             let two_filled_shapes = app.selection.len() == 2
@@ -266,56 +357,59 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     .count()
                     == 2;
             ui.add_enabled_ui(two_filled_shapes, |ui| {
-                ui.menu_button("🔷 Booléens", |ui| {
+                ui.menu_button(t("🔷 Booléens", "🔷 Booleans"), |ui| {
                     use crate::tools::boolean::BooleanKind;
-                    if ui.button("Union").clicked() {
+                    if ui.button(BooleanKind::Union.label()).clicked() {
                         app.boolean_op(BooleanKind::Union);
                         ui.close_menu();
                     }
-                    if ui.button("Soustraction").clicked() {
+                    if ui.button(BooleanKind::Subtract.label()).clicked() {
                         app.boolean_op(BooleanKind::Subtract);
                         ui.close_menu();
                     }
-                    if ui.button("Intersection").clicked() {
+                    if ui.button(BooleanKind::Intersect.label()).clicked() {
                         app.boolean_op(BooleanKind::Intersect);
                         ui.close_menu();
                     }
                 })
                 .response
-                .on_hover_text("Sélectionne exactement 2 formes pleines (option « Rempli »)");
+                .on_hover_text(t(
+                    "Sélectionne exactement 2 formes pleines (option « Rempli »)",
+                    "Select exactly 2 filled shapes (\"Filled\" option)",
+                ));
             });
             ui.separator();
-            ui.menu_button("Disposition", |ui| {
+            ui.menu_button(t("Disposition", "Order"), |ui| {
                 use crate::app::ZMove;
-                if ui.button("Premier plan (⌘⇧])").clicked() {
+                if ui.button(t("Premier plan (⌘⇧])", "Bring to front (⌘⇧])")).clicked() {
                     app.reorder(ZMove::Front);
                     ui.close_menu();
                 }
-                if ui.button("Avancer (⌘])").clicked() {
+                if ui.button(t("Avancer (⌘])", "Bring forward (⌘])")).clicked() {
                     app.reorder(ZMove::Forward);
                     ui.close_menu();
                 }
-                if ui.button("Reculer (⌘[)").clicked() {
+                if ui.button(t("Reculer (⌘[)", "Send backward (⌘[)")).clicked() {
                     app.reorder(ZMove::Backward);
                     ui.close_menu();
                 }
-                if ui.button("Arrière-plan (⌘⇧[)").clicked() {
+                if ui.button(t("Arrière-plan (⌘⇧[)", "Send to back (⌘⇧[)")).clicked() {
                     app.reorder(ZMove::Back);
                     ui.close_menu();
                 }
             });
-            if ui.button("🗑 Effacer le calque").clicked() {
+            if ui.button(t("🗑 Effacer le calque", "🗑 Clear layer")).clicked() {
                 app.clear_active_layer();
                 ui.close_menu();
             }
         });
 
-        ui.menu_button("Calque", |ui| {
-            if ui.button("➕ Ajouter").clicked() {
+        ui.menu_button(t("Calque", "Layer"), |ui| {
+            if ui.button(t("➕ Ajouter", "➕ Add")).clicked() {
                 app.add_layer();
                 ui.close_menu();
             }
-            ui.menu_button("🎚 Ajouter un calque d'ajustement", |ui| {
+            ui.menu_button(t("🎚 Ajouter un calque d'ajustement", "🎚 Add adjustment layer"), |ui| {
                 for f in crate::tools::filter::Filter::ALL {
                     if ui.button(f.label()).clicked() {
                         app.add_adjustment_layer(f);
@@ -324,47 +418,53 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 }
             })
             .response
-            .on_hover_text("Non destructif : réversible, re-réglable (change le filtre à tout moment)");
-            if ui.button("⧉ Dupliquer").clicked() {
+            .on_hover_text(t(
+                "Non destructif : réversible, re-réglable (change le filtre à tout moment)",
+                "Non-destructive: reversible, re-adjustable (change the filter anytime)",
+            ));
+            if ui.button(t("⧉ Dupliquer", "⧉ Duplicate")).clicked() {
                 app.duplicate_layer();
                 ui.close_menu();
             }
             let can = app.doc.active_layer > 0;
-            if ui.add_enabled(can, egui::Button::new("⤓ Fusionner vers le bas")).clicked() {
+            if ui.add_enabled(can, egui::Button::new(t("⤓ Fusionner vers le bas", "⤓ Merge down"))).clicked() {
                 app.merge_down();
                 ui.close_menu();
             }
-            if ui.add_enabled(app.doc.layers.len() > 1, egui::Button::new("▦ Aplatir")).clicked() {
+            if ui.add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("▦ Aplatir", "▦ Flatten"))).clicked() {
                 app.flatten();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.add_enabled(can, egui::Button::new("📁 Grouper avec le dessous")).clicked() {
+            if ui
+                .add_enabled(can, egui::Button::new(t("📁 Grouper avec le dessous", "📁 Group with below")))
+                .clicked()
+            {
                 app.group_with_below();
                 ui.close_menu();
             }
-            if ui.button("Dégrouper ce calque").clicked() {
+            if ui.button(t("Dégrouper ce calque", "Ungroup this layer")).clicked() {
                 app.ungroup_active();
                 ui.close_menu();
             }
         });
 
-        ui.menu_button("Image", |ui| {
-            if ui.button("⤢ Redimensionner l'image…").clicked() {
+        ui.menu_button(t("Image", "Image"), |ui| {
+            if ui.button(t("⤢ Redimensionner l'image…", "⤢ Resize image…")).clicked() {
                 app.open_resize_dialog(false);
                 ui.close_menu();
             }
-            if ui.button("⛶ Taille du canevas…").clicked() {
+            if ui.button(t("⛶ Taille du canevas…", "⛶ Canvas size…")).clicked() {
                 app.open_resize_dialog(true);
                 ui.close_menu();
             }
             ui.separator();
-            ui.menu_button("Taille du document", |ui| {
-                for (cat, items) in TEMPLATES {
-                    ui.menu_button(*cat, |ui| {
-                        for (label, w, h) in *items {
+            ui.menu_button(t("Taille du document", "Document size"), |ui| {
+                for (cat, items) in templates() {
+                    ui.menu_button(cat, |ui| {
+                        for (label, w, h) in items {
                             if ui.button(format!("{label} ({w}×{h})")).clicked() {
-                                app.set_canvas_size(*w, *h);
+                                app.set_canvas_size(w, h);
                                 ui.close_menu();
                             }
                         }
@@ -373,14 +473,14 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
         });
 
-        ui.menu_button("Aligner", |ui| {
+        ui.menu_button(t("Aligner", "Align"), |ui| {
             let items: &[(&str, AlignMode)] = &[
-                ("⫷ Bords gauches", AlignMode::Left),
-                ("centres (H)", AlignMode::CenterH),
-                ("⫸ Bords droits", AlignMode::Right),
-                ("Bords hauts", AlignMode::Top),
-                ("centres (V)", AlignMode::MiddleV),
-                ("Bords bas", AlignMode::Bottom),
+                (t("⫷ Bords gauches", "⫷ Left edges"), AlignMode::Left),
+                (t("centres (H)", "centers (H)"), AlignMode::CenterH),
+                (t("⫸ Bords droits", "⫸ Right edges"), AlignMode::Right),
+                (t("Bords hauts", "Top edges"), AlignMode::Top),
+                (t("centres (V)", "centers (V)"), AlignMode::MiddleV),
+                (t("Bords bas", "Bottom edges"), AlignMode::Bottom),
             ];
             for (label, mode) in items {
                 if ui.button(*label).clicked() {
@@ -389,17 +489,17 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 }
             }
             ui.separator();
-            if ui.button("Répartir horizontalement").clicked() {
+            if ui.button(t("Répartir horizontalement", "Distribute horizontally")).clicked() {
                 app.align(AlignMode::DistributeH);
                 ui.close_menu();
             }
-            if ui.button("Répartir verticalement").clicked() {
+            if ui.button(t("Répartir verticalement", "Distribute vertically")).clicked() {
                 app.align(AlignMode::DistributeV);
                 ui.close_menu();
             }
         });
 
-        ui.menu_button("Vue", |ui| {
+        ui.menu_button(t("Vue", "View"), |ui| {
             ui.horizontal(|ui| {
                 if ui.button("➖").clicked() {
                     app.zoom_out();
@@ -410,20 +510,20 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 if ui.button("100 %").clicked() {
                     app.reset_view();
                 }
-                if ui.button("Ajuster").clicked() {
+                if ui.button(t("Ajuster", "Fit")).clicked() {
                     app.fit_view();
                 }
             });
             ui.separator();
-            ui.checkbox(&mut app.show_grid, "Grille");
-            ui.checkbox(&mut app.show_rulers, "Règles");
-            ui.checkbox(&mut app.snap_enabled, "Magnétisme");
+            ui.checkbox(&mut app.show_grid, t("Grille", "Grid"));
+            ui.checkbox(&mut app.show_rulers, t("Règles", "Rulers"));
+            ui.checkbox(&mut app.snap_enabled, t("Magnétisme", "Snap"));
             ui.add(
-                egui::DragValue::new(&mut app.grid_size).speed(1.0).range(5.0..=200.0).prefix("pas "),
+                egui::DragValue::new(&mut app.grid_size).speed(1.0).range(5.0..=200.0).prefix(t("pas ", "step ")),
             );
         });
 
-        ui.menu_button("Filtres", |ui| {
+        ui.menu_button(t("Filtres", "Filters"), |ui| {
             for f in crate::tools::filter::Filter::ALL {
                 if ui.button(f.label()).clicked() {
                     app.filter_selection(f);
@@ -432,31 +532,33 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button("À propos", |ui| {
+        ui.menu_button(t("À propos", "About"), |ui| {
             ui.strong("QuickPaint");
-            ui.label("Éditeur de dessin tactile · Rust + egui");
+            ui.label(t("Éditeur de dessin tactile · Rust + egui", "Touch drawing editor · Rust + egui"));
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label("Auteur :");
+                ui.label(t("Auteur :", "Author:"));
                 ui.hyperlink_to("Loïc Berthod", "https://github.com/lberthod");
             });
             ui.hyperlink_to("github.com/lberthod/quickpaint", "https://github.com/lberthod/quickpaint");
         });
 
-        // Côté droit : zoom + annuler/rétablir rapides.
+        // Côté droit : langue + zoom + annuler/rétablir rapides.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.label(format!("Zoom {:.0} %", app.zoom * 100.0));
+            language_switch(ui);
+            ui.separator();
+            ui.label(format!("{} {:.0} %", t("Zoom", "Zoom"), app.zoom * 100.0));
             ui.separator();
             if ui
                 .add_enabled(app.history.can_redo(), egui::Button::new("↷"))
-                .on_hover_text("Rétablir (⌘⇧Z)")
+                .on_hover_text(t("Rétablir (⌘⇧Z)", "Redo (⌘⇧Z)"))
                 .clicked()
             {
                 app.redo();
             }
             if ui
                 .add_enabled(app.history.can_undo(), egui::Button::new("↶"))
-                .on_hover_text("Annuler (⌘Z)")
+                .on_hover_text(t("Annuler (⌘Z)", "Undo (⌘Z)"))
                 .clicked()
             {
                 app.undo();
@@ -465,13 +567,25 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     });
 }
 
+/// Sélecteur de langue FR/EN (roadmap transversal — i18n). Persisté entre
+/// lancements ; la détection système ne sert que de valeur initiale.
+fn language_switch(ui: &mut Ui) {
+    let fr_selected = i18n::is_french();
+    if ui.selectable_label(!fr_selected, "EN").clicked() && fr_selected {
+        i18n::set(Lang::En);
+    }
+    if ui.selectable_label(fr_selected, "FR").clicked() && !fr_selected {
+        i18n::set(Lang::Fr);
+    }
+}
+
 fn tools_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
-        for (gi, group) in TOOL_GROUPS.iter().enumerate() {
+        for (gi, group) in tool_groups().iter().enumerate() {
             if gi > 0 {
                 ui.separator();
             }
-            for (tool, name, hint) in *group {
+            for (tool, name, hint) in group {
                 tool_button(ui, app, *tool, name, hint);
             }
         }
@@ -620,17 +734,17 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     use crate::model::text::{TextAlign, TextFont};
     let mut changed = false;
 
-    ui.label("Taille :");
+    ui.label(t("Taille :", "Size:"));
     ui.add(egui::Slider::new(&mut app.text_size, 8.0..=200.0));
 
     ui.separator();
-    ui.label("Police :");
+    ui.label(t("Police :", "Font:"));
     for f in TextFont::ALL {
         if ui.selectable_value(&mut app.text_font, f, f.label()).changed() {
             changed = true;
         }
     }
-    if ui.selectable_label(app.text_bold, "𝐆").on_hover_text("Gras").clicked() {
+    if ui.selectable_label(app.text_bold, "𝐆").on_hover_text(t("Gras", "Bold")).clicked() {
         app.text_bold = !app.text_bold;
         changed = true;
     }
@@ -639,7 +753,7 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     changed |= font_family_picker(ui, app);
 
     ui.separator();
-    ui.label("Aligner :");
+    ui.label(t("Aligner :", "Align:"));
     for a in TextAlign::ALL {
         if ui.selectable_value(&mut app.text_align, a, a.label()).changed() {
             changed = true;
@@ -647,7 +761,7 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     }
 
     ui.separator();
-    ui.label("Texte :");
+    ui.label(t("Texte :", "Text:"));
     let c = app.brush.color;
     let mut col = Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
     if ui.color_edit_button_srgba(&mut col).changed() {
@@ -657,7 +771,7 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     }
 
     ui.separator();
-    ui.label("Contour :");
+    ui.label(t("Contour :", "Outline:"));
     if ui.add(egui::Slider::new(&mut app.text_outline_w, 0.0..=8.0)).changed() {
         changed = true;
     }
@@ -680,16 +794,19 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
 /// (`ensure_loaded`), pas au survol de la liste.
 fn font_family_picker(ui: &mut Ui, app: &mut PaintApp) -> bool {
     let mut changed = false;
-    ui.label("Police système :");
+    ui.label(t("Police système :", "System font:"));
     // Le filtre vit **hors** du popup du ComboBox : un TextEdit imbriqué
     // dans une popup transitoire egui perd le focus / referme le popup au
     // clic (comportement fragile constaté), donc on garde un champ toujours
     // visible dans la barre d'options — le popup ne fait qu'afficher la
     // liste déjà filtrée.
-    ui.add(egui::TextEdit::singleline(&mut app.font_search).hint_text("Filtrer…").desired_width(100.0));
-    let current = app.text_font_family.clone().unwrap_or_else(|| "(intégrée)".into());
+    ui.add(egui::TextEdit::singleline(&mut app.font_search).hint_text(t("Filtrer…", "Filter…")).desired_width(100.0));
+    let current = app.text_font_family.clone().unwrap_or_else(|| t("(intégrée)", "(built-in)").into());
     egui::ComboBox::from_id_salt("sys_font").selected_text(current).width(170.0).show_ui(ui, |ui| {
-        if ui.selectable_label(app.text_font_family.is_none(), "(intégrée : Sans/Mono)").clicked() {
+        if ui
+            .selectable_label(app.text_font_family.is_none(), t("(intégrée : Sans/Mono)", "(built-in: Sans/Mono)"))
+            .clicked()
+        {
             app.text_font_family = None;
             changed = true;
         }
@@ -707,7 +824,7 @@ fn font_family_picker(ui: &mut Ui, app: &mut PaintApp) -> bool {
         });
     })
     .response
-    .on_hover_text(format!("{} polices détectées sur ce Mac", app.font_manager.face_count()));
+    .on_hover_text(format!("{} {}", app.font_manager.face_count(), t("polices détectées sur ce Mac", "fonts detected on this Mac")));
     changed
 }
 
@@ -715,19 +832,19 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
         // Outil Sélection : choix du mode (rectangle / lasso / baguette).
         if app.active_tool == ActiveTool::Select {
-            ui.label("Mode :");
+            ui.label(t("Mode :", "Mode:"));
             for mode in SelectMode::ALL {
                 ui.selectable_value(&mut app.select_mode, mode, mode.label());
             }
             if app.select_mode == SelectMode::Wand {
                 ui.separator();
                 ui.add(
-                    egui::Slider::new(&mut app.wand_tol, 0..=128).text("Tolérance"),
+                    egui::Slider::new(&mut app.wand_tol, 0..=128).text(t("Tolérance", "Tolerance")),
                 )
-                .on_hover_text("Écart de couleur toléré par canal");
+                .on_hover_text(t("Écart de couleur toléré par canal", "Color tolerance per channel"));
             }
             ui.separator();
-            ui.label("Couleur :");
+            ui.label(t("Couleur :", "Color:"));
             brush_color_edit(ui, app);
             return;
         }
@@ -736,7 +853,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             text_options(ui, app);
             return;
         }
-        ui.label("Taille :");
+        ui.label(t("Taille :", "Size:"));
         let (size, range) = match app.active_tool {
             ActiveTool::Eraser | ActiveTool::PixelEraser => (&mut app.eraser.width, 4.0..=80.0),
             ActiveTool::Text => (&mut app.text_size, 8.0..=200.0),
@@ -744,47 +861,54 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         };
         ui.add(egui::Slider::new(size, range));
         if app.active_tool.as_shape().map(|s| s.closed()).unwrap_or(false) {
-            ui.checkbox(&mut app.fill_shapes, "Rempli");
+            ui.checkbox(&mut app.fill_shapes, t("Rempli", "Filled"));
         }
         if app.active_tool == ActiveTool::Eraser {
             ui.separator();
-            ui.label("Gomme :");
-            ui.selectable_value(&mut app.eraser_partial, false, "Objet")
-                .on_hover_text("Supprime l'élément entier touché");
-            ui.selectable_value(&mut app.eraser_partial, true, "Partielle")
-                .on_hover_text("N'efface que la portion de trait touchée (découpe)");
+            ui.label(t("Gomme :", "Eraser:"));
+            ui.selectable_value(&mut app.eraser_partial, false, t("Objet", "Object"))
+                .on_hover_text(t("Supprime l'élément entier touché", "Removes the whole touched element"));
+            ui.selectable_value(&mut app.eraser_partial, true, t("Partielle", "Partial"))
+                .on_hover_text(t(
+                    "N'efface que la portion de trait touchée (découpe)",
+                    "Only erases the touched portion of the stroke (splits it)",
+                ));
         }
         if matches!(app.active_tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::CloneStamp) {
             ui.separator();
-            ui.label("Dureté :");
+            ui.label(t("Dureté :", "Hardness:"));
             ui.add(egui::Slider::new(&mut app.pixel_hardness, 0.0..=1.0))
-                .on_hover_text("0 = bord dégradé (aérographe), 1 = bord net");
+                .on_hover_text(t("0 = bord dégradé (aérographe), 1 = bord net", "0 = soft edge (airbrush), 1 = hard edge"));
         }
         if app.active_tool == ActiveTool::CloneStamp {
             ui.separator();
-            let label = if app.clone_source.is_some() { "Source définie ✓" } else { "⌥+clic pour définir la source" };
+            let label = if app.clone_source.is_some() {
+                t("Source définie ✓", "Source set ✓")
+            } else {
+                t("⌥+clic pour définir la source", "⌥+click to set the source")
+            };
             ui.label(label);
         }
         if matches!(app.active_tool, ActiveTool::Polygon | ActiveTool::Star) {
-            ui.add(egui::DragValue::new(&mut app.poly_sides).range(3..=16).prefix("côtés "));
+            ui.add(egui::DragValue::new(&mut app.poly_sides).range(3..=16).prefix(t("côtés ", "sides ")));
         }
         ui.separator();
 
-        ui.label("Couleur :");
+        ui.label(t("Couleur :", "Color:"));
         brush_color_edit(ui, app);
 
-        ui.label("Opacité :");
+        ui.label(t("Opacité :", "Opacity:"));
         let mut alpha = app.brush.color[3];
         if ui.add(egui::Slider::new(&mut alpha, 1..=255)).changed() {
             app.brush.color[3] = alpha;
         }
 
-        ui.menu_button("✨ Style", |ui| {
+        ui.menu_button(t("✨ Style", "✨ Style"), |ui| {
             let presets: &[(&str, f32, u8)] = &[
-                ("Pinceau", 0.8, 255),
-                ("Marqueur", 0.1, 150),
-                ("Calligraphie", 1.0, 255),
-                ("Aérographe", 0.25, 90),
+                (t("Pinceau", "Brush"), 0.8, 255),
+                (t("Marqueur", "Marker"), 0.1, 150),
+                (t("Calligraphie", "Calligraphy"), 1.0, 255),
+                (t("Aérographe", "Airbrush"), 0.25, 90),
             ];
             for (name, pressure, a) in presets {
                 if ui.button(*name).clicked() {
@@ -795,10 +919,10 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             }
         })
         .response
-        .on_hover_text("Presets de pinceau");
+        .on_hover_text(t("Presets de pinceau", "Brush presets"));
 
         ui.separator();
-        ui.label("Fond :");
+        ui.label(t("Fond :", "Background:"));
         let mut bg = [app.bg.r(), app.bg.g(), app.bg.b()];
         if ui.color_edit_button_srgb(&mut bg).changed() {
             app.bg = Color32::from_rgb(bg[0], bg[1], bg[2]);
@@ -812,7 +936,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         }
         if !app.recent_colors.is_empty() {
             ui.separator();
-            ui.label("Récentes :");
+            ui.label(t("Récentes :", "Recent:"));
             for c in app.recent_colors.clone() {
                 if swatch(ui, c).clicked() {
                     app.brush.color = [c[0], c[1], c[2], app.brush.color[3]];
@@ -821,9 +945,9 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         }
 
         ui.separator();
-        ui.label("Pression");
+        ui.label(t("Pression", "Pressure"));
         ui.add(egui::Slider::new(&mut app.capture_pressure_strength, 0.0..=1.0))
-            .on_hover_text("Intensité de la pression simulée (vitesse → épaisseur)");
+            .on_hover_text(t("Intensité de la pression simulée (vitesse → épaisseur)", "Simulated pressure strength (speed → thickness)"));
     });
 }
 

@@ -38,6 +38,8 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
 - **View**: touch zoom/pan, grid + snapping, **rulers**, fixed document size.
 - **History**: non-linear (panel + jump straight to any state).
 - **Export**: **PNG, JPEG, WebP, PDF**, vector **SVG**; **project save** as `.json`.
+- **Languages**: **FR/EN** UI, detected from the system locale at launch
+  (switchable anytime from the menu bar, preference persisted).
 
 ## Build & run
 
@@ -53,7 +55,8 @@ your Applications folder. Signed and notarized — no Gatekeeper warning.
 ## Architecture
 
 `model` (data) · `input` (gesture capture) · `render` (egui rendering + tiny-skia
-CPU compositor) · `history` (command-based undo/redo) · `tools` · `ui`.
+CPU compositor) · `history` (command-based undo/redo) · `tools` · `ui` · `i18n`
+(FR/EN string resolution).
 
 ## License
 

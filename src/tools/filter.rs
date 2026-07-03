@@ -3,6 +3,7 @@
 //! d'ajustement non destructif** (roadmap F3, cf. `render::compositor`).
 //! Purs et testables ; l'intégration (undo, ré-encodage PNG) est dans `app`.
 
+use crate::i18n::t;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,15 +35,15 @@ impl Filter {
 
     pub fn label(self) -> &'static str {
         match self {
-            Filter::Brighter => "Plus clair",
-            Filter::Darker => "Plus sombre",
-            Filter::Contrast => "Contraste +",
-            Filter::Saturate => "Saturation +",
-            Filter::Desaturate => "Saturation −",
-            Filter::Grayscale => "Noir & blanc",
-            Filter::Invert => "Négatif",
-            Filter::Sharpen => "Netteté",
-            Filter::Blur => "Flou",
+            Filter::Brighter => t("Plus clair", "Brighter"),
+            Filter::Darker => t("Plus sombre", "Darker"),
+            Filter::Contrast => t("Contraste +", "Contrast +"),
+            Filter::Saturate => t("Saturation +", "Saturation +"),
+            Filter::Desaturate => t("Saturation −", "Saturation −"),
+            Filter::Grayscale => t("Noir & blanc", "Black & white"),
+            Filter::Invert => t("Négatif", "Invert"),
+            Filter::Sharpen => t("Netteté", "Sharpen"),
+            Filter::Blur => t("Flou", "Blur"),
         }
     }
 }

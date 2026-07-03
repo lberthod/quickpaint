@@ -2,6 +2,7 @@
 //! par egui/eframe (`Event::Screenshot`), recadrée sur la zone du document, puis
 //! on encode au format choisi : PNG, JPG, WebP ou PDF (mono-page).
 
+use crate::i18n::t;
 use egui::ColorImage;
 use std::io::Write;
 use std::path::PathBuf;
@@ -63,7 +64,7 @@ pub fn save_dialog(image: &ColorImage, crop: Crop, format: ExportFormat) -> std:
     if w == 0 || h == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "zone d'export vide",
+            t("zone d'export vide", "empty export area"),
         ));
     }
     let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
@@ -72,7 +73,7 @@ pub fn save_dialog(image: &ColorImage, crop: Crop, format: ExportFormat) -> std:
         .set_file_name(format!("QuickPaint-{stamp}.{}", format.ext()))
         .save_file()
     else {
-        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "annulé"));
+        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
     };
     encode_to(&path, w, h, &rgba, format)?;
     Ok(path)

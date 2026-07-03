@@ -4,6 +4,7 @@ use super::image::ImageItem;
 use super::raster::{self, RasterLayer};
 use super::stroke::Stroke;
 use super::text::TextItem;
+use crate::i18n::t;
 use serde::{Deserialize, Serialize};
 
 /// Mode de fusion d'un calque (roadmap #8).
@@ -30,12 +31,12 @@ impl BlendMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            BlendMode::Normal => "Normal",
-            BlendMode::Multiply => "Produit",
-            BlendMode::Screen => "Écran",
-            BlendMode::Overlay => "Incrustation",
-            BlendMode::Darken => "Obscurcir",
-            BlendMode::Lighten => "Éclaircir",
+            BlendMode::Normal => t("Normal", "Normal"),
+            BlendMode::Multiply => t("Produit", "Multiply"),
+            BlendMode::Screen => t("Écran", "Screen"),
+            BlendMode::Overlay => t("Incrustation", "Overlay"),
+            BlendMode::Darken => t("Obscurcir", "Darken"),
+            BlendMode::Lighten => t("Éclaircir", "Lighten"),
         }
     }
 }
@@ -251,7 +252,7 @@ pub struct Document {
 impl Document {
     pub fn new(size: (u32, u32)) -> Self {
         Self {
-            layers: vec![Layer::new(1, "Calque 1")],
+            layers: vec![Layer::new(1, t("Calque 1", "Layer 1"))],
             active_layer: 0,
             size,
             next_layer_id: 2,

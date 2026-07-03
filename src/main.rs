@@ -9,6 +9,7 @@ mod app;
 mod export;
 mod fonts;
 mod history;
+mod i18n;
 mod icon;
 mod input;
 mod model;
@@ -21,6 +22,8 @@ mod ui;
 use app::PaintApp;
 
 fn main() -> eframe::Result<()> {
+    i18n::init();
+
     // Mode utilitaire : `quickpaint --dump-icon <fichier.png> <taille>` écrit
     // l'icône en PNG (sert à générer l'.icns du bundle .app), puis quitte.
     let args: Vec<String> = std::env::args().collect();
