@@ -191,6 +191,60 @@ fn tool_groups() -> Vec<Vec<(ActiveTool, &'static str, &'static str)>> {
                 t("Cliquer pour écrire ; double-clic pour éditer", "Click to write; double-click to edit"),
             ),
         ],
+        vec![
+            (
+                ActiveTool::Dodge,
+                t("Densité -", "Dodge"),
+                t("Éclaircit progressivement les pixels survolés", "Progressively lightens the pixels under the brush"),
+            ),
+            (
+                ActiveTool::Burn,
+                t("Densité +", "Burn"),
+                t("Assombrit progressivement les pixels survolés", "Progressively darkens the pixels under the brush"),
+            ),
+            (
+                ActiveTool::Saturate,
+                t("Éponge (saturer)", "Sponge (saturate)"),
+                t("Augmente la saturation locale", "Increases local color saturation"),
+            ),
+            (
+                ActiveTool::Desaturate,
+                t("Éponge (désaturer)", "Sponge (desaturate)"),
+                t("Diminue la saturation locale (vers le gris)", "Decreases local color saturation (toward gray)"),
+            ),
+            (
+                ActiveTool::Blur,
+                t("Flou localisé", "Local blur"),
+                t("Adoucit les détails sous le pinceau (moyenne 3×3)", "Softens detail under the brush (3×3 average)"),
+            ),
+            (
+                ActiveTool::Sharpen,
+                t("Netteté localisée", "Local sharpen"),
+                t("Accentue le contraste local sous le pinceau", "Boosts local contrast under the brush"),
+            ),
+            (
+                ActiveTool::Smudge,
+                t("Estompe", "Smudge"),
+                t("Pousse la couleur le long du glissé, comme du doigt", "Pushes color along the drag, like a finger in wet paint"),
+            ),
+        ],
+        vec![
+            (
+                ActiveTool::Measure,
+                t("Règle", "Measure"),
+                t("Glisser affiche la distance (px) et l'angle — n'affecte jamais le document", "Drag to show distance (px) and angle — never touches the document"),
+            ),
+            (
+                ActiveTool::Symmetry,
+                t("Miroir", "Symmetry"),
+                t("Dessin répété par rotation autour du centre (nombre d'axes réglable)", "Drawing repeated by rotation around the center (adjustable axis count)"),
+            ),
+            (
+                ActiveTool::Gradient,
+                t("Dégradé", "Gradient"),
+                t("Glisser sur une forme pleine sélectionnée pose les points du dégradé", "Drag over a selected filled shape to place the gradient points"),
+            ),
+        ],
     ]
 }
 
@@ -488,10 +542,17 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
+/// Étiquette de menu « icône Phosphor + texte » — repère visuel rapide en
+/// plus du texte, sans dépendre des emojis du système.
+fn mtitle(glyph: &str, label: &str) -> String {
+    format!("{glyph} {label}")
+}
+
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
+    use egui_phosphor::regular as ic;
     egui::menu::bar(ui, |ui| {
-        ui.menu_button(t("Fichier", "File"), |ui| {
-            if ui.button(t("Nouveau (⌘N)", "New (⌘N)")).clicked() {
+        ui.menu_button(mtitle(ic::FILE, t("Fichier", "File")), |ui| {
+            if ui.button(mtitle(ic::FILE_PLUS, t("Nouveau (⌘N)", "New (⌘N)"))).clicked() {
                 app.new_document();
                 ui.close_menu();
             }
@@ -499,11 +560,11 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.show_template_gallery = true;
                 ui.close_menu();
             }
-            if ui.button(t("Ouvrir… (⌘O)", "Open… (⌘O)")).clicked() {
+            if ui.button(mtitle(ic::FOLDER_OPEN, t("Ouvrir… (⌘O)", "Open… (⌘O)"))).clicked() {
                 app.open_project();
                 ui.close_menu();
             }
-            if ui.button(t("Enregistrer le projet (⌘S)", "Save project (⌘S)")).clicked() {
+            if ui.button(mtitle(ic::FLOPPY_DISK, t("Enregistrer le projet (⌘S)", "Save project (⌘S)"))).clicked() {
                 app.save_project();
                 ui.close_menu();
             }
@@ -512,12 +573,12 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.import_image();
                 ui.close_menu();
             }
-            if ui.button(t("Coller une image (⌘V)", "Paste image (⌘V)")).clicked() {
+            if ui.button(mtitle(ic::CLIPBOARD, t("Coller une image (⌘V)", "Paste image (⌘V)"))).clicked() {
                 app.paste_image();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.button(t("Exporter en PNG (⌘E)", "Export as PNG (⌘E)")).clicked() {
+            if ui.button(mtitle(ic::EXPORT, t("Exporter en PNG (⌘E)", "Export as PNG (⌘E)"))).clicked() {
                 app.request_export(ctx, ExportFormat::Png);
                 ui.close_menu();
             }
@@ -540,7 +601,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(t("Édition", "Edit"), |ui| {
+        ui.menu_button(mtitle(ic::PENCIL_SIMPLE, t("Édition", "Edit")), |ui| {
             if ui.add_enabled(app.history.can_undo(), egui::Button::new(t("↶ Annuler (⌘Z)", "↶ Undo (⌘Z)"))).clicked() {
                 app.undo();
                 ui.close_menu();
@@ -678,7 +739,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(t("Calque", "Layer"), |ui| {
+        ui.menu_button(mtitle(ic::STACK_SIMPLE, t("Calque", "Layer")), |ui| {
             if ui.button(t("Ajouter", "Add")).clicked() {
                 app.add_layer();
                 ui.close_menu();
@@ -735,7 +796,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(t("Image", "Image"), |ui| {
+        ui.menu_button(mtitle(ic::IMAGE, t("Image", "Image")), |ui| {
             if ui.button(t("Redimensionner l'image…", "Resize image…")).clicked() {
                 app.open_resize_dialog(false);
                 ui.close_menu();
@@ -759,7 +820,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
         });
 
-        ui.menu_button(t("Aligner", "Align"), |ui| {
+        ui.menu_button(mtitle(ic::FRAME_CORNERS, t("Aligner", "Align")), |ui| {
             let items: &[(&str, AlignMode)] = &[
                 (t("Bords gauches", "Left edges"), AlignMode::Left),
                 (t("centres (H)", "centers (H)"), AlignMode::CenterH),
@@ -785,7 +846,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(t("Vue", "View"), |ui| {
+        ui.menu_button(mtitle(ic::EYE, t("Vue", "View")), |ui| {
             ui.horizontal(|ui| {
                 if ui.button(egui::RichText::new("−").monospace()).clicked() {
                     app.zoom_out();
@@ -809,7 +870,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             );
         });
 
-        ui.menu_button(t("Filtres", "Filters"), |ui| {
+        ui.menu_button(mtitle(ic::SLIDERS, t("Filtres", "Filters")), |ui| {
             for f in crate::tools::filter::Filter::ALL {
                 if ui.button(f.label()).clicked() {
                     app.filter_selection(f);
@@ -818,14 +879,14 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(t("Préférences", "Preferences"), |ui| {
+        ui.menu_button(mtitle(ic::GEAR, t("Préférences", "Preferences")), |ui| {
             if ui.button(t("Raccourcis clavier…", "Keyboard shortcuts…")).clicked() {
                 app.show_shortcuts_prefs = true;
                 ui.close_menu();
             }
         });
 
-        ui.menu_button(t("À propos", "About"), |ui| {
+        ui.menu_button(mtitle(ic::INFO, t("À propos", "About")), |ui| {
             ui.strong("QuickPaint");
             ui.label(t("Éditeur de dessin tactile · Rust + egui", "Touch drawing editor · Rust + egui"));
             ui.separator();
@@ -885,156 +946,112 @@ fn tools_row(ui: &mut Ui, app: &mut PaintApp) {
     });
 }
 
+/// Famille de la police Phosphor "Fill" (silhouettes pleines, cf. `PaintApp::new`).
+fn fill_font(size: f32) -> egui::FontId {
+    egui::FontId::new(size, egui::FontFamily::Name("phosphor-fill".into()))
+}
+
+/// Couleur d'accent par outil — regroupée par famille (navigation, peinture,
+/// retouche, formes, texte) pour une tuile colorée façon boîte à outils
+/// (GIMP/Photoshop), plutôt que des icônes grises plates uniformes.
+fn tool_accent(tool: ActiveTool) -> Color32 {
+    match tool {
+        ActiveTool::Select => Color32::from_rgb(0x2F, 0x6F, 0xED),
+        ActiveTool::Pan => Color32::from_rgb(0x5B, 0x8D, 0xEF),
+        ActiveTool::Brush => Color32::from_rgb(0xF2, 0x99, 0x4A),
+        ActiveTool::Eraser => Color32::from_rgb(0xEB, 0x57, 0x57),
+        ActiveTool::Bucket => Color32::from_rgb(0x00, 0xAC, 0xC1),
+        ActiveTool::Eyedropper => Color32::from_rgb(0x00, 0x96, 0x88),
+        ActiveTool::PixelBrush => Color32::from_rgb(0xE0, 0x7A, 0x1F),
+        ActiveTool::PixelEraser => Color32::from_rgb(0xD3, 0x3F, 0x3F),
+        ActiveTool::CloneStamp => Color32::from_rgb(0x9B, 0x51, 0xE0),
+        ActiveTool::Healing => Color32::from_rgb(0xC0, 0x39, 0x2B),
+        ActiveTool::Cutout => Color32::from_rgb(0x7C, 0x4D, 0xC4),
+        ActiveTool::Line => Color32::from_rgb(0x27, 0xAE, 0x60),
+        ActiveTool::Arrow => Color32::from_rgb(0x21, 0x96, 0x53),
+        ActiveTool::Rectangle => Color32::from_rgb(0x1E, 0x8E, 0x6E),
+        ActiveTool::Ellipse => Color32::from_rgb(0x16, 0xA0, 0x85),
+        ActiveTool::Polygon => Color32::from_rgb(0x2E, 0xB5, 0x7C),
+        ActiveTool::Star => Color32::from_rgb(0x3D, 0xC3, 0x8E),
+        ActiveTool::Pen => Color32::from_rgb(0xD8, 0x4A, 0x7C),
+        ActiveTool::Text => Color32::from_rgb(0xC2, 0x40, 0x5C),
+        ActiveTool::Dodge => Color32::from_rgb(0xE8, 0xB4, 0x2A),
+        ActiveTool::Burn => Color32::from_rgb(0xC7, 0x5A, 0x1E),
+        ActiveTool::Saturate => Color32::from_rgb(0x1E, 0x88, 0xC7),
+        ActiveTool::Desaturate => Color32::from_rgb(0x6B, 0x7C, 0x93),
+        ActiveTool::Blur => Color32::from_rgb(0x8E, 0x9B, 0xE8),
+        ActiveTool::Sharpen => Color32::from_rgb(0x4B, 0x5A, 0xC7),
+        ActiveTool::Smudge => Color32::from_rgb(0xB0, 0x7A, 0x4E),
+        ActiveTool::Measure => Color32::from_rgb(0x3D, 0x8B, 0x6E),
+        ActiveTool::Symmetry => Color32::from_rgb(0xA0, 0x4E, 0xA6),
+        ActiveTool::Gradient => Color32::from_rgb(0xE0, 0x5A, 0x8E),
+    }
+}
+
 fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hint: &str) {
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 30.0), Sense::click());
     let selected = app.active_tool == tool;
-    if selected {
-        ui.painter().rect_filled(rect.shrink(1.0), 5.0, ui.visuals().selection.bg_fill);
+    let accent = tool_accent(tool);
+    let (bg, icon_col) = if selected {
+        (accent, Color32::WHITE)
     } else if resp.hovered() {
-        ui.painter().rect_filled(rect.shrink(1.0), 5.0, ui.visuals().widgets.hovered.weak_bg_fill);
+        (accent.gamma_multiply(0.45), Color32::WHITE)
+    } else {
+        (accent.gamma_multiply(0.16), accent)
+    };
+    ui.painter().rect_filled(rect.shrink(1.0), 6.0, bg);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tool_glyph(tool), fill_font(18.0), icon_col);
+    // Badge damier en coin : signale les outils « pixel » (peignent le
+    // calque raster) par opposition à leurs équivalents vectoriels.
+    if matches!(tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser) {
+        let badge = rect.center() + Vec2::new(9.0, 8.0);
+        ui.painter().text(
+            badge,
+            egui::Align2::CENTER_CENTER,
+            egui_phosphor::regular::GRID_FOUR,
+            egui::FontId::proportional(10.0),
+            icon_col,
+        );
     }
-    draw_icon(ui.painter(), rect, tool, ui.visuals().text_color());
     if resp.clicked() {
         app.active_tool = tool;
     }
     resp.on_hover_text(format!("{name} — {hint}"));
 }
 
-/// Dessine l'icône vectorielle d'un outil dans `rect` (toujours visible, net).
-fn draw_icon(p: &egui::Painter, rect: egui::Rect, tool: ActiveTool, col: Color32) {
-    use egui::Shape;
-    let b = egui::Rect::from_center_size(rect.center(), Vec2::splat(18.0));
-    let at = |x: f32, y: f32| egui::pos2(b.min.x + x * b.width(), b.min.y + y * b.height());
-    let st = egui::Stroke::new(1.8, col);
-    // Pointe de flèche en `tip`, pointant dans la direction `dir` (normalisée).
-    let chevron = |tip: egui::Pos2, dir: (f32, f32)| {
-        let s = 0.16 * b.width();
-        let (dx, dy) = dir;
-        let (bx, by) = (-dx, -dy);
-        let a = 0.6_f32;
-        let (c, si) = (a.cos(), a.sin());
-        let l = (bx * c - by * si, bx * si + by * c);
-        let r = (bx * c + by * si, -bx * si + by * c);
-        p.line_segment([tip, egui::pos2(tip.x + l.0 * s, tip.y + l.1 * s)], st);
-        p.line_segment([tip, egui::pos2(tip.x + r.0 * s, tip.y + r.1 * s)], st);
-    };
-
+/// Glyphe Phosphor associé à chaque outil (police embarquée, cf. `PaintApp::new`).
+fn tool_glyph(tool: ActiveTool) -> &'static str {
+    use egui_phosphor::regular::*;
     match tool {
-        ActiveTool::Select => {
-            let pts = vec![
-                at(0.24, 0.06), at(0.24, 0.86), at(0.42, 0.66), at(0.54, 0.96),
-                at(0.64, 0.91), at(0.52, 0.62), at(0.74, 0.62),
-            ];
-            p.add(Shape::convex_polygon(pts, col, egui::Stroke::NONE));
-        }
-        ActiveTool::Pan => {
-            p.line_segment([at(0.5, 0.1), at(0.5, 0.9)], st);
-            p.line_segment([at(0.1, 0.5), at(0.9, 0.5)], st);
-            chevron(at(0.5, 0.1), (0.0, -1.0));
-            chevron(at(0.5, 0.9), (0.0, 1.0));
-            chevron(at(0.1, 0.5), (-1.0, 0.0));
-            chevron(at(0.9, 0.5), (1.0, 0.0));
-        }
-        ActiveTool::Brush => {
-            p.line_segment([at(0.2, 0.85), at(0.66, 0.34)], st);
-            p.circle_filled(at(0.72, 0.27), 0.13 * b.width(), col);
-        }
-        ActiveTool::Eraser => {
-            let pts = vec![at(0.18, 0.6), at(0.55, 0.24), at(0.82, 0.46), at(0.45, 0.82)];
-            p.add(Shape::closed_line(pts, st));
-            p.line_segment([at(0.45, 0.82), at(0.82, 0.46)], st);
-        }
-        ActiveTool::PixelBrush => {
-            p.line_segment([at(0.2, 0.85), at(0.66, 0.34)], st);
-            p.circle_filled(at(0.72, 0.27), 0.13 * b.width(), col);
-            // Petit damier : signale le pixel (par opposition au trait vectoriel).
-            let s = 0.09 * b.width();
-            p.rect_filled(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s)), 0.0, col);
-            p.rect_stroke(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s * 2.0)), 0.0, st);
-        }
-        ActiveTool::PixelEraser => {
-            let pts = vec![at(0.18, 0.6), at(0.55, 0.24), at(0.82, 0.46), at(0.45, 0.82)];
-            p.add(Shape::closed_line(pts, st));
-            p.line_segment([at(0.45, 0.82), at(0.82, 0.46)], st);
-            let s = 0.09 * b.width();
-            p.rect_filled(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s)), 0.0, col);
-            p.rect_stroke(egui::Rect::from_center_size(at(0.24, 0.24), Vec2::splat(s * 2.0)), 0.0, st);
-        }
-        ActiveTool::CloneStamp => {
-            // Tampon (rectangle arrondi stylisé) + petite croix = point source.
-            p.rect_stroke(egui::Rect::from_min_max(at(0.22, 0.34), at(0.68, 0.74)), 3.0, st);
-            p.line_segment([at(0.3, 0.74), at(0.6, 0.9)], st);
-            p.line_segment([at(0.78, 0.16), at(0.78, 0.3)], st);
-            p.line_segment([at(0.71, 0.23), at(0.85, 0.23)], st);
-        }
-        ActiveTool::Healing => {
-            // Pansement (rectangle arrondi) + étincelle = correction douce.
-            p.rect_stroke(egui::Rect::from_min_max(at(0.2, 0.36), at(0.66, 0.72)), 6.0, st);
-            p.line_segment([at(0.78, 0.16), at(0.78, 0.32)], st);
-            p.line_segment([at(0.7, 0.24), at(0.86, 0.24)], st);
-            p.circle_filled(at(0.78, 0.24), 0.05 * b.width(), col);
-        }
-        ActiveTool::Bucket => {
-            let pts = vec![at(0.28, 0.32), at(0.72, 0.32), at(0.62, 0.82), at(0.38, 0.82)];
-            p.add(Shape::closed_line(pts, st));
-            p.circle_filled(at(0.82, 0.6), 0.07 * b.width(), col);
-        }
-        ActiveTool::Cutout => {
-            // Ciseaux stylisés le long d'un contour pointillé = détourage.
-            p.line_segment([at(0.16, 0.5), at(0.32, 0.5)], st);
-            p.line_segment([at(0.4, 0.5), at(0.56, 0.5)], st);
-            p.line_segment([at(0.64, 0.5), at(0.8, 0.5)], st);
-            p.circle_stroke(at(0.16, 0.34), 0.06 * b.width(), st);
-            p.circle_stroke(at(0.16, 0.66), 0.06 * b.width(), st);
-            p.line_segment([at(0.16, 0.34), at(0.32, 0.5)], st);
-            p.line_segment([at(0.16, 0.66), at(0.32, 0.5)], st);
-        }
-        ActiveTool::Eyedropper => {
-            p.line_segment([at(0.22, 0.82), at(0.62, 0.42)], st);
-            p.circle_stroke(at(0.72, 0.3), 0.13 * b.width(), st);
-        }
-        ActiveTool::Line => {
-            p.line_segment([at(0.14, 0.86), at(0.86, 0.14)], st);
-        }
-        ActiveTool::Arrow => {
-            p.line_segment([at(0.14, 0.86), at(0.84, 0.16)], st);
-            chevron(at(0.84, 0.16), (0.7, -0.7));
-        }
-        ActiveTool::Rectangle => {
-            p.rect_stroke(egui::Rect::from_min_max(at(0.16, 0.26), at(0.84, 0.74)), 1.0, st);
-        }
-        ActiveTool::Ellipse => {
-            p.circle_stroke(at(0.5, 0.5), 0.34 * b.width(), st);
-        }
-        ActiveTool::Polygon => {
-            let pts: Vec<egui::Pos2> = (0..6)
-                .map(|i| {
-                    let a = -std::f32::consts::FRAC_PI_2 + i as f32 / 6.0 * std::f32::consts::TAU;
-                    at(0.5 + a.cos() * 0.36, 0.5 + a.sin() * 0.36)
-                })
-                .collect();
-            p.add(Shape::closed_line(pts, st));
-        }
-        ActiveTool::Star => {
-            let pts: Vec<egui::Pos2> = (0..10)
-                .map(|i| {
-                    let a = -std::f32::consts::FRAC_PI_2 + i as f32 / 10.0 * std::f32::consts::TAU;
-                    let r = if i % 2 == 0 { 0.42 } else { 0.18 };
-                    at(0.5 + a.cos() * r, 0.5 + a.sin() * r)
-                })
-                .collect();
-            p.add(Shape::convex_polygon(pts, col, egui::Stroke::NONE));
-        }
-        ActiveTool::Pen => {
-            p.line_segment([at(0.8, 0.2), at(0.42, 0.62)], st);
-            let nib = vec![at(0.42, 0.62), at(0.26, 0.74), at(0.34, 0.54)];
-            p.add(Shape::convex_polygon(nib, col, egui::Stroke::NONE));
-            p.line_segment([at(0.26, 0.74), at(0.2, 0.82)], st);
-        }
-        ActiveTool::Text => {
-            p.line_segment([at(0.24, 0.24), at(0.76, 0.24)], st);
-            p.line_segment([at(0.5, 0.24), at(0.5, 0.82)], st);
-        }
+        ActiveTool::Select => CURSOR,
+        ActiveTool::Pan => HAND,
+        ActiveTool::Brush => PAINT_BRUSH,
+        ActiveTool::Eraser => ERASER,
+        ActiveTool::PixelBrush => PAINT_BRUSH,
+        ActiveTool::PixelEraser => ERASER,
+        ActiveTool::CloneStamp => STAMP,
+        ActiveTool::Healing => FIRST_AID,
+        ActiveTool::Bucket => PAINT_BUCKET,
+        ActiveTool::Cutout => SCISSORS,
+        ActiveTool::Eyedropper => EYEDROPPER,
+        ActiveTool::Line => LINE_SEGMENT,
+        ActiveTool::Arrow => ARROW_UP_RIGHT,
+        ActiveTool::Rectangle => RECTANGLE,
+        ActiveTool::Ellipse => CIRCLE,
+        ActiveTool::Polygon => POLYGON,
+        ActiveTool::Star => STAR,
+        ActiveTool::Pen => PEN_NIB,
+        ActiveTool::Text => TEXT_T,
+        ActiveTool::Dodge => SUN,
+        ActiveTool::Burn => FIRE,
+        ActiveTool::Saturate => DROP,
+        ActiveTool::Desaturate => DROP_HALF,
+        ActiveTool::Blur => CIRCLES_THREE,
+        ActiveTool::Sharpen => TRIANGLE,
+        ActiveTool::Smudge => FINGERPRINT,
+        ActiveTool::Measure => RULER,
+        ActiveTool::Symmetry => BUTTERFLY,
+        ActiveTool::Gradient => GRADIENT,
     }
 }
 
@@ -1163,6 +1180,18 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             text_options(ui, app);
             return;
         }
+        // Outil Règle : aucune couleur/opacité (survol pur), juste la mesure en cours.
+        if app.active_tool == ActiveTool::Measure {
+            if let Some((a, b)) = app.measure {
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let dist = (dx * dx + dy * dy).sqrt();
+                let angle = dy.atan2(dx).to_degrees();
+                ui.label(format!("{:.0} px · {:.1}°", dist, angle));
+            } else {
+                ui.label(t("Glisser sur le canevas pour mesurer une distance", "Drag on the canvas to measure a distance"));
+            }
+            return;
+        }
         ui.label(t("Taille :", "Size:"));
         let (size, range) = match app.active_tool {
             ActiveTool::Eraser | ActiveTool::PixelEraser => (&mut app.eraser.width, 4.0..=80.0),
@@ -1186,12 +1215,50 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         }
         if matches!(
             app.active_tool,
-            ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::CloneStamp | ActiveTool::Healing
+            ActiveTool::PixelBrush
+                | ActiveTool::PixelEraser
+                | ActiveTool::CloneStamp
+                | ActiveTool::Healing
+                | ActiveTool::Dodge
+                | ActiveTool::Burn
+                | ActiveTool::Saturate
+                | ActiveTool::Desaturate
+                | ActiveTool::Blur
+                | ActiveTool::Sharpen
+                | ActiveTool::Smudge
         ) {
             ui.separator();
             ui.label(t("Dureté :", "Hardness:"));
             ui.add(egui::Slider::new(&mut app.pixel_hardness, 0.0..=1.0))
                 .on_hover_text(t("0 = bord dégradé (aérographe), 1 = bord net", "0 = soft edge (airbrush), 1 = hard edge"));
+        }
+        if matches!(
+            app.active_tool,
+            ActiveTool::Dodge
+                | ActiveTool::Burn
+                | ActiveTool::Saturate
+                | ActiveTool::Desaturate
+                | ActiveTool::Blur
+                | ActiveTool::Sharpen
+                | ActiveTool::Smudge
+        ) {
+            ui.separator();
+            ui.label(t("Intensité :", "Strength:"));
+            ui.add(egui::Slider::new(&mut app.effect_strength, 0.05..=1.0)).on_hover_text(t(
+                "Force de l'effet par passage — repasser plusieurs fois l'accentue",
+                "Effect strength per pass — go over it again to build it up",
+            ));
+        }
+        if app.active_tool == ActiveTool::Symmetry {
+            ui.separator();
+            ui.label(t("Axes :", "Axes:"));
+            ui.add(egui::DragValue::new(&mut app.symmetry_axes).range(2..=12));
+        }
+        if app.active_tool == ActiveTool::Gradient {
+            ui.separator();
+            ui.selectable_value(&mut app.gradient_kind, crate::model::GradientKind::Linear, t("Linéaire", "Linear"));
+            ui.selectable_value(&mut app.gradient_kind, crate::model::GradientKind::Radial, t("Radial", "Radial"));
+            ui.label(t("(s'applique aux formes pleines sélectionnées)", "(applies to selected filled shapes)"));
         }
         if app.active_tool == ActiveTool::Cutout {
             ui.separator();

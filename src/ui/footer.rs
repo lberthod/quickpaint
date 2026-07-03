@@ -26,6 +26,16 @@ pub fn show(ui: &mut Ui, app: &PaintApp) {
         ActiveTool::Eyedropper => (t("Pipette", "Eyedropper"), app.brush.width),
         ActiveTool::Pan => (t("Main", "Hand"), app.brush.width),
         ActiveTool::Cutout => (t("Détourage", "Cutout"), app.brush.width),
+        ActiveTool::Dodge => (t("Densité -", "Dodge"), app.brush.width),
+        ActiveTool::Burn => (t("Densité +", "Burn"), app.brush.width),
+        ActiveTool::Saturate => (t("Éponge (saturer)", "Sponge (saturate)"), app.brush.width),
+        ActiveTool::Desaturate => (t("Éponge (désaturer)", "Sponge (desaturate)"), app.brush.width),
+        ActiveTool::Blur => (t("Flou localisé", "Local blur"), app.brush.width),
+        ActiveTool::Sharpen => (t("Netteté localisée", "Local sharpen"), app.brush.width),
+        ActiveTool::Smudge => (t("Estompe", "Smudge"), app.brush.width),
+        ActiveTool::Measure => (t("Règle", "Measure"), app.brush.width),
+        ActiveTool::Symmetry => (t("Miroir", "Symmetry"), app.brush.width),
+        ActiveTool::Gradient => (t("Dégradé", "Gradient"), app.brush.width),
     };
     let layer = app.doc.active_layer;
     let strokes = app.doc.layers[layer].strokes.len();

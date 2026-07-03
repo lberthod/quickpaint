@@ -180,7 +180,7 @@ fn hue_saturation(rgba: &mut [u8], hue_deg: f32, sat: f32, light: f32) {
     }
 }
 
-fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+pub(crate) fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
@@ -200,7 +200,7 @@ fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
     (h, s, l)
 }
 
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+pub(crate) fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
     if s <= 0.0 {
         let v = (l * 255.0).round().clamp(0.0, 255.0) as u8;
         return (v, v, v);

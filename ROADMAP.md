@@ -34,6 +34,13 @@ Légende : ✅ présent · 🟡 partiel · ❌ absent
 | **Calque raster peignable** | ✅ (tuilé, undo par tuile) | ✅ | ❌ | ✅ | 🟡 | ✅ |
 | Pot de peinture (flood-fill pixel) | ✅ (écrit dans la couche raster, borné au canevas) | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Tampon de clonage | ✅ (⌥+clic = source, décalage constant) | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Densité -/+ (dodge/burn) | ✅ (Sprint 11.1) | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Éponge (saturer/désaturer) | ✅ (Sprint 11.2) | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Flou / netteté localisés | ✅ (Sprint 11.3, pinceau 3×3) | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Estompe (smudge) | ✅ (Sprint 11.4) | ❌ | ❌ | ✅ | ❌ | ✅ |
+| Règle / mesure | ✅ (Sprint 11.5) | ❌ | 🟡 | 🟡 | ✅ | 🟡 |
+| Miroir / symétrie (dessin) | ✅ (Sprint 11.6, rotatif ; réflexion en backlog) | ❌ | ❌ | ❌ | ❌ | 🟡 |
+| Dégradé interactif (glisser) | ✅ (Sprint 11.7) | ❌ | 🟡 | ✅ | ✅ | 🟡 |
 | Import d'image + coller (⌘V) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Recadrage (libre + ratios) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Filtres (lum./contraste/satur./netteté/flou/négatif/N&B) | ✅ (destructif **ou** en calque d'ajustement) | ✅ | ✅ | ✅ | 🟡 | ✅ |
@@ -289,3 +296,13 @@ Jalon 3 « atelier vectoriel » : #11–#13.
 Le premier plan (sélection, texte, doc fixe, AA, raster d'images, pot de peinture,
 import, modes de fusion, plume, grille/magnétisme) est **entièrement livré** en
 5 sprints + release signée/notarisée. Voir le journal git pour le détail.
+
+## 6. Suite — Sprints 7 à 11 (terminés) et 12+ (proposé)
+
+Le détail sprint par sprint (confort/personnalisation, retouche photo avancée,
+détourage local, bibliothèque d'assets, puis les **10 nouveaux outils** de
+retouche locale et composition — densité/éponge/flou/netteté/estompe, règle,
+miroir, dégradé interactif) vit dans [SPRINTS.md](SPRINTS.md), avec un
+Sprint 12+ proposé (raccourcis pour ces 10 outils, symétrie par réflexion,
+format projet v2, App Store…). Ce document (ROADMAP.md) reste la vue
+d'ensemble « pourquoi » ; SPRINTS.md est le « quoi, comment, dans quel ordre ».

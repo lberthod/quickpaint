@@ -199,18 +199,185 @@ embarqués dans l'app, sans jamais interroger un service distant.
 
 ---
 
-## Ordre d'attaque conseillé
+## Sprint 11 — 10 nouveaux outils de retouche & composition
+
+Objectif : la boîte à outils s'arrêtait à la retouche « patch » (clonage,
+correcteur) et à la composition figée (formes, dégradé via menu seulement).
+Ce sprint ajoute les gestes de retouche locale à la GIMP/Photoshop (densité,
+éponge, flou, netteté, estompe) et trois outils de composition/mesure qui
+manquaient. Tous partagent l'infrastructure existante (moteur raster tuilé
+F1, undo par tuile, `Command::AddMany`) — aucune nouvelle dépendance,
+100 % local.
+
+- [x] **11.1 Densité -/+ (Dodge/Burn)** — M, ⭐⭐
+      Deux nouveaux outils (`ActiveTool::Dodge`/`Burn`) éclaircissent/
+      assombrissent progressivement les pixels de la couche raster sous le
+      pinceau, répétables comme un vrai pinceau (repasser accentue l'effet).
+      Fonction pixel partagée `RasterLayer::apply_effect`
+      ([model/raster.rs](src/model/raster.rs)) avec `PixelEffect::Lighten`/
+      `Darken` ; même geste glisser-tuile-undo que le pinceau pixel. ✅
+- [x] **11.2 Éponge (saturer/désaturer)** — M, ⭐⭐
+      `ActiveTool::Saturate`/`Desaturate` : conversion RVB↔HSL par pixel
+      (réutilise `tools::filter::rgb_to_hsl`/`hsl_to_rgb`, rendues
+      `pub(crate)` plutôt que dupliquées) et déplace la composante S de
+      ±intensité. ✅
+- [x] **11.3 Flou & netteté localisés** — M, ⭐⭐
+      `ActiveTool::Blur`/`Sharpen` : moyenne 3×3 mélangée au pixel d'origine
+      (flou) ou écart à cette moyenne amplifié (netteté, masque flou
+      simplifié) — instantané pris avant écriture pour ne pas lire des
+      pixels déjà modifiés par le même coup de tampon. MVP assumé : le
+      voisinage s'arrête à 3×3 et traite les pixels hors du disque courant
+      comme transparents plutôt que d'aller lire au-delà — suffisant pour un
+      pinceau de retouche, pas un vrai filtre de convolution plein cadre. ✅
+- [x] **11.4 Estompe (Smudge)** — M, ⭐⭐
+      `ActiveTool::Smudge` : `RasterLayer::smudge_segment` pousse la couleur
+      échantillonnée au point de départ vers chaque pas du glissé, mélangée à
+      ce qui s'y trouve déjà (mélange 50/50 cumulatif) — imite le doigt dans
+      de la peinture fraîche sans résoudre une vraie advection de fluide. ✅
+- [x] **11.5 Règle / mesure** — S, ⭐
+      `ActiveTool::Measure` : glisser affiche un segment + distance (px) et
+      angle en survol pur, jamais écrit dans le document ni l'historique
+      (`app.measure`, `paint_measure`). Utile pour vérifier des proportions
+      avant d'aligner/dimensionner. ✅
+- [x] **11.6 Miroir / symétrie** — M, ⭐⭐
+      `ActiveTool::Symmetry` : réutilise la capture de trait du pinceau
+      vectoriel ; à la fin du geste, la même géométrie est dupliquée par
+      rotation régulière autour du centre du document (2 à 12 axes,
+      réglable), poussées en une seule commande d'undo
+      (`commit_symmetry_stroke`, `Command::AddMany`). Symétrie par
+      **réflexion** (vrai effet miroir, pas seulement rotatif) laissée au
+      backlog — demanderait de dupliquer aussi la largeur/pression point par
+      point avec un signe inversé, actuellement hors scope MVP. ✅
+- [x] **11.7 Dégradé interactif** — S/M, ⭐⭐
+      `ActiveTool::Gradient` : glisser sur le canevas pose directement
+      `Gradient.from`/`to` sur chaque forme pleine sélectionnée (au lieu des
+      valeurs par défaut calculées depuis la boîte englobante par **Édition ›
+      Dégradé** existant, qui reste disponible). Option Linéaire/Radial dans
+      la barre d'options. Undo simplifié (`history.touch()`, même mécanisme
+      que l'application depuis le menu — un vrai `Command` dédié reste au
+      backlog si ce point de friction remonte à l'usage). ✅
+
+Icônes : les 10 outils utilisent les tuiles colorées `egui-phosphor` (police
+"Fill" embarquée) déjà en place pour le reste de la barre d'outils — pas de
+nouvel émoji, pas de dépendance graphique supplémentaire.
+
+**Limites connues (documentées plutôt que cachées)** :
+- Pas de raccourci clavier dédié par défaut pour ces 10 outils (la table
+  `ShortcutAction` du Sprint 7.2 n'a pas été étendue) — accès uniquement par
+  clic dans la barre d'outils pour l'instant. Le mécanisme de personnalisation
+  existant s'y prêterait directement si demandé.
+- Flou/netteté/estompe sont des approximations « pinceau », pas des filtres
+  de convolution plein cadre ni un vrai solveur de fluide — cohérent avec le
+  reste de la base (courbes 3 points, correcteur = décalage de couleur
+  constant) : un compromis pragmatique documenté plutôt qu'un algorithme
+  académique complet.
+
+**Jalon 11** : la boîte à outils couvre désormais tout le vocabulaire
+courant de retouche locale (au niveau Photoshop Elements/GIMP) en plus de la
+composition (miroir, dégradé interactif, mesure) — 100 % local, aucune
+nouvelle dépendance.
+
+**Audit post-livraison (2026-07-03)** : passage outil par outil avant mise en
+production, 4 bugs réels trouvés et corrigés (pas seulement des warnings de
+compilation — comportement visiblement faux à l'usage) :
+- **Éponge (saturer)** teintait de rouge tout pixel gris/blanc/noir au lieu de
+  le laisser intact — `rgb_to_hsl` renvoie une teinte arbitraire (0°) pour un
+  pixel achromatique, que le code réutilisait pour ré-saturer. Corrigé par une
+  garde (`s < 0.01` → no-op), test de régression ajouté.
+- **Flou / netteté** assombrissaient artificiellement le contour de chaque
+  coup de pinceau : le voisinage 3×3 lisait hors de l'instantané pris pour ce
+  tampon et traitait ces pixels comme transparents. Corrigé en élargissant
+  l'instantané d'1 px de marge.
+- **Estompe** ne snapshotait, pour l'undo, que le point d'arrivée de chaque
+  frame plutôt que tout le segment glissé — un geste rapide pouvait modifier
+  des tuiles jamais sauvegardées côté undo. Corrigé en échantillonnant le
+  segment comme les autres outils raster.
+- **Dégradé interactif** vidait tout le cache de maillages (`cache.clear()`)
+  à chaque frame du glissé au lieu d'invalider seulement les traits
+  concernés (`cache.invalidate`) — correct visuellement mais coûteux sur un
+  document chargé ; aligné sur le même choix que `align`/`MoveEach`.
+- **Règle** : l'aperçu de mesure restait affiché à l'écran après avoir changé
+  d'outil (jamais nettoyé). Corrigé en l'effaçant au changement d'outil, même
+  mécanisme que la fermeture de l'édition de texte.
+- **Bug plus grave, préexistant (pas introduit ce sprint)** découvert en
+  généralisant `touch_raster_tiles`/`commit_raster_stroke` : ces deux
+  fonctions lisaient `self.editing_mask` pour décider quelle surface
+  snapshoter/committer (contenu ou masque), alors que le **Tampon de
+  clonage** et le **Correcteur** (roadmap P0 #5, Sprint 8.3) écrivent
+  toujours dans `layer.raster` (le contenu), jamais dans le masque. Avec
+  « Éditer le masque » coché, ces deux outils peignaient donc bien le
+  contenu à l'écran, mais l'undo comparait l'état du **masque**
+  (jamais touché) avant/après, le trouvait identique et ne poussait
+  **aucune commande d'annulation** — une perte de travail silencieuse. Les 7
+  nouveaux outils du Sprint 11 auraient hérité du même défaut en réutilisant
+  ces fonctions telles quelles. Corrigé en explicitant la surface ciblée
+  (`mask: bool` passé par l'appelant plutôt que lu implicitement) : le
+  Pinceau/Gomme pixel (les deux seuls outils qui écrivent réellement dans le
+  masque) passent `self.editing_mask`, tous les autres (clonage, correcteur,
+  et les 7 outils Sprint 11) passent toujours `false`.
+
+6 tests unitaires supplémentaires couvrent les cas de retouche locale (dont
+une régression dédiée au bug de teinte grise) ; le bug clonage/masque touche
+la plomberie d'intégration (`egui::Response` en paramètre) et n'est pas
+couvert par un test unitaire dédié — vérifié par relecture du chemin
+touch→paint→commit pour chaque outil raster. Tous les tests (96) et le build
+release passent après correction.
+
+---
+
+## Sprint 12+ (proposé, pas encore engagé)
+
+Objectif : à partir des limites notées au Sprint 11 et du backlog déjà
+identifié dans [ROADMAP.md](ROADMAP.md), voici la suite logique. Priorités
+indicatives (⭐ impact) — à confirmer avant de démarrer, pas un engagement.
+
+- [ ] **12.1 Raccourcis clavier pour les outils Sprint 11** — S, ⭐⭐ :
+      étendre `ShortcutAction`/`KeyBindings` ([keybindings.rs](src/keybindings.rs))
+      aux 10 nouveaux outils, personnalisables comme les 12 existants
+      (Sprint 7.2). Le panneau **Préférences › Raccourcis clavier** n'a rien
+      à changer, juste la liste `ALL` à compléter.
+- [ ] **12.2 Symétrie par réflexion (vrai miroir)** — M, ⭐⭐ : en plus de la
+      rotation régulière (11.6), ajouter un mode réflexion (axe vertical/
+      horizontal/diagonal) — utile pour des visages, logos, motifs non
+      purement radiaux.
+- [ ] **12.3 Dégradé sur le texte** — M, ⭐ : backlog déjà noté au P1 #11 de
+      ROADMAP.md, nécessite un shader par glyphe dans `raster_text`.
+- [ ] **12.4 Segmentation par modèle embarqué (détourage IA)** — L, ⭐⭐⭐ :
+      toujours reporté depuis Sprint 9.2 (ROADMAP.md), nécessite un fichier
+      de poids `.onnx` fourni/validé par l'utilisateur.
+- [ ] **12.5 Format projet v2** — M, ⭐⭐ : images en fichiers séparés dans un
+      conteneur zip plutôt qu'en base64 dans le `.json` (déjà noté transversal
+      dans ROADMAP.md) — réduit fortement la taille des projets avec beaucoup
+      d'images importées.
+- [ ] **12.6 Import PSD (lecture)** — L, ⭐ : ROADMAP.md #16, toujours backlog,
+      interop d'appel plutôt qu'une priorité produit.
+- [ ] **12.7 Pression réelle du stylet** — L, ⭐⭐ : ré-évaluer seulement si
+      un fork/patch du pipeline `egui-winit` devient justifié par l'usage
+      (voir l'investigation détaillée à ROADMAP.md #15).
+- [ ] **Mac App Store** — M, ⭐⭐⭐ : toujours le plus gros levier de
+      découvrabilité non tiré, indépendant des outils ci-dessus.
+
+**Ordre suggéré** : 12.1 (rapide, complète le Sprint 11) → 12.5 (dette
+technique qui grossit avec chaque nouvelle bibliothèque d'assets/templates) →
+12.2/12.3 (finitions outils) → Mac App Store → 12.4/12.6/12.7 (gros chantiers,
+au choix selon la demande utilisateur).
+
+---
+
+## Ordre d'attaque conseillé (sprints 7–11, historique)
 
 **7.1 → 7.2 → 7.3** (confort, rapide, aucune dépendance) puis
 **8.1 → 8.2 → 9.1** (retouche + détourage rapide, cœur PhotoFiltre) puis
 **9.2** (détourage IA local, le plus gros chantier technique) puis
-**10.1 → 10.2 → 10.3 → 9.3 → 8.3** (finitions Canva + polish).
+**10.1 → 10.2 → 10.3 → 9.3 → 8.3** (finitions Canva + polish) puis
+**11.1 → 11.5 → 11.6 → 11.7 → 11.2 → 11.3 → 11.4** (retouche locale + composition).
 
 - **Jalon A — « Confort d'abord »** : Sprint 7 complet.
 - **Jalon B — « PhotoFiltre+ »** : Sprint 8 + 9.1.
 - **Jalon C — « Détourage local »** : 9.2 + 9.3 livrés et validés (qualité vs.
   poids du binaire).
 - **Jalon D — « Canva hors-ligne »** : Sprint 10 complet.
+- **Jalon E — « Boîte à outils complète »** : Sprint 11 complet.
 
 ---
 

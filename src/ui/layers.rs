@@ -4,61 +4,25 @@
 use crate::app::PaintApp;
 use crate::i18n::t;
 use crate::model::Layer;
-use egui::{pos2, Color32, Rect, Sense, Stroke, Ui, Vec2};
+use egui::{Sense, Ui, Vec2};
 
-/// Petit bouton carré avec icône vectorielle (remplace les émojis d'état —
-/// rendu incohérent selon l'OS — par un dessin net et fixe).
-fn icon_button(ui: &mut Ui, active: bool, draw: impl FnOnce(&egui::Painter, Rect, Color32)) -> egui::Response {
+/// Petit bouton carré avec glyphe Phosphor (remplace les émojis d'état —
+/// rendu incohérent selon l'OS — par une icône vectorielle nette et fixe).
+fn icon_button(ui: &mut Ui, active: bool, glyph: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
     if active {
         ui.painter().rect_filled(rect.shrink(1.0), 4.0, ui.visuals().selection.bg_fill);
     } else if resp.hovered() {
         ui.painter().rect_filled(rect.shrink(1.0), 4.0, ui.visuals().widgets.hovered.weak_bg_fill);
     }
-    draw(ui.painter(), rect, ui.visuals().text_color());
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        glyph,
+        egui::FontId::proportional(15.0),
+        ui.visuals().text_color(),
+    );
     resp
-}
-
-/// Œil ouvert (visible) ou fermé (masqué) — état de visibilité d'un calque.
-fn draw_eye(p: &egui::Painter, rect: Rect, visible: bool, col: Color32) {
-    let c = rect.center();
-    let w = rect.width() * 0.3;
-    let h = rect.height() * 0.18;
-    let st = Stroke::new(1.5, col);
-    if visible {
-        let n = 14;
-        let mut pts: Vec<egui::Pos2> = (0..=n)
-            .map(|i| {
-                let t = i as f32 / n as f32;
-                let x = c.x - w + 2.0 * w * t;
-                let y = c.y - h * (1.0 - (2.0 * t - 1.0).powi(2)).sqrt();
-                pos2(x, y)
-            })
-            .collect();
-        pts.extend((0..=n).rev().map(|i| {
-            let t = i as f32 / n as f32;
-            let x = c.x - w + 2.0 * w * t;
-            let y = c.y + h * (1.0 - (2.0 * t - 1.0).powi(2)).sqrt();
-            pos2(x, y)
-        }));
-        p.add(egui::Shape::closed_line(pts, st));
-        p.circle_filled(c, h * 0.5, col);
-    } else {
-        p.line_segment([pos2(c.x - w, c.y), pos2(c.x + w, c.y)], st);
-    }
-}
-
-/// Dossier — bascule de visibilité d'un groupe de calques.
-fn draw_folder(p: &egui::Painter, rect: Rect, col: Color32) {
-    let r = rect.shrink(5.0);
-    let st = Stroke::new(1.4, col);
-    let tab_h = r.height() * 0.22;
-    let body = Rect::from_min_max(pos2(r.min.x, r.min.y + tab_h), r.max);
-    p.rect_stroke(body, 1.5, st);
-    let tab_w = r.width() * 0.5;
-    p.line_segment([pos2(r.min.x, r.min.y + tab_h), pos2(r.min.x, r.min.y)], st);
-    p.line_segment([pos2(r.min.x, r.min.y), pos2(r.min.x + tab_w, r.min.y)], st);
-    p.line_segment([pos2(r.min.x + tab_w, r.min.y), pos2(r.min.x + tab_w + tab_h, r.min.y + tab_h)], st);
 }
 
 pub fn show(ui: &mut Ui, app: &mut PaintApp) {
@@ -66,11 +30,12 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     ui.add_space(4.0);
 
     ui.horizontal(|ui| {
-        if ui.button(t("Ajouter", "Add")).clicked() {
+        use egui_phosphor::regular as ic;
+        if ui.button(format!("{} {}", ic::PLUS, t("Ajouter", "Add"))).clicked() {
             app.add_layer();
         }
         if ui
-            .button(t("Dupliquer", "Duplicate"))
+            .button(format!("{} {}", ic::COPY, t("Dupliquer", "Duplicate")))
             .on_hover_text(t("Dupliquer le calque actif", "Duplicate the active layer"))
             .clicked()
         {
@@ -78,7 +43,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
         let can_delete = app.doc.layers.len() > 1;
         if ui
-            .add_enabled(can_delete, egui::Button::new(t("Supprimer", "Delete")))
+            .add_enabled(can_delete, egui::Button::new(format!("{} {}", ic::TRASH, t("Supprimer", "Delete"))))
             .clicked()
         {
             app.delete_active_layer();
@@ -132,7 +97,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         if group != prev_group {
             if let Some(name) = &group {
                 ui.horizontal(|ui| {
-                    if icon_button(ui, false, draw_folder)
+                    if icon_button(ui, false, egui_phosphor::regular::FOLDER)
                         .on_hover_text(t("Afficher / masquer le groupe", "Show / hide the group"))
                         .clicked()
                     {
@@ -149,8 +114,8 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             if group.is_some() {
                 ui.add_space(12.0); // indentation des calques groupés
             }
-            let visible = layer.visible;
-            if icon_button(ui, false, move |p, r, c| draw_eye(p, r, visible, c))
+            let eye = if layer.visible { egui_phosphor::regular::EYE } else { egui_phosphor::regular::EYE_SLASH };
+            if icon_button(ui, false, eye)
                 .on_hover_text(t("Afficher / masquer", "Show / hide"))
                 .clicked()
             {

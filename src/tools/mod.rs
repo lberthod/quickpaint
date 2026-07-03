@@ -49,6 +49,34 @@ pub enum ActiveTool {
     /// flood-fill + adoucissement des bords, écrit dans le masque de calque
     /// peint (100 % local, sans modèle ni réseau — voir aussi SPRINTS.md 9.2).
     Cutout,
+    /// Densité - (Sprint 11) : pinceau qui éclaircit progressivement les
+    /// pixels de la couche raster sous le curseur.
+    Dodge,
+    /// Densité + (Sprint 11) : symétrique de Dodge, assombrit.
+    Burn,
+    /// Éponge — augmente la saturation locale (Sprint 11).
+    Saturate,
+    /// Éponge — diminue la saturation locale (Sprint 11).
+    Desaturate,
+    /// Flou localisé (Sprint 11) : moyenne 3×3 mélangée au pixel d'origine,
+    /// répétable pour un flou plus prononcé.
+    Blur,
+    /// Netteté localisée (Sprint 11) : accentue l'écart à la moyenne 3×3
+    /// voisine (masque flou simplifié).
+    Sharpen,
+    /// Estompe / doigt (Sprint 11) : pousse la couleur échantillonnée le long
+    /// du glissé, mélangée à ce qui s'y trouve déjà.
+    Smudge,
+    /// Règle / mesure (Sprint 11) : glisser affiche distance (px) et angle,
+    /// pur survol — ne modifie jamais le document.
+    Measure,
+    /// Miroir / symétrie (Sprint 11) : pinceau vectoriel dupliqué en miroir
+    /// autour du centre du document (2/4/6/8 axes réglables).
+    Symmetry,
+    /// Dégradé interactif (Sprint 11) : glisser sur une forme pleine
+    /// sélectionnée pose les deux points du dégradé directement sur le
+    /// canevas, au lieu de valeurs par défaut via le menu Édition.
+    Gradient,
 }
 
 /// Sous-mode de l'outil Sélection (Sprint 1). Détermine le geste « glisser sur

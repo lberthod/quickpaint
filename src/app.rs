@@ -309,6 +309,19 @@ pub struct PaintApp {
     // figé au début du geste courant (source suit la destination en parallèle).
     pub clone_source: Option<(f32, f32)>,
     clone_offset: Option<(f32, f32)>,
+    // --- Retouche locale (Sprint 11) : densité +/-, éponge, flou, netteté,
+    // estompe — partagent l'intensité par coup de pinceau (0..=1).
+    pub effect_strength: f32,
+    /// Miroir/symétrie (Sprint 11) : nombre d'axes (copies rotées autour du
+    /// centre du document).
+    pub symmetry_axes: u32,
+    /// Dégradé interactif (Sprint 11) : type posé par défaut sur les formes
+    /// qui n'ont pas encore de dégradé.
+    pub gradient_kind: crate::model::GradientKind,
+    gradient_drag_start: Option<(f32, f32)>,
+    /// Règle / mesure (Sprint 11) : segment affiché pendant le glissé
+    /// (distance px + angle), jamais écrit dans le document.
+    pub measure: Option<((f32, f32), (f32, f32))>,
 }
 
 impl Default for PaintApp {
@@ -402,6 +415,11 @@ impl Default for PaintApp {
             raster_touch: std::collections::HashMap::new(),
             clone_source: None,
             clone_offset: None,
+            effect_strength: 0.5,
+            symmetry_axes: 4,
+            gradient_kind: crate::model::GradientKind::Linear,
+            gradient_drag_start: None,
+            measure: None,
         }
     }
 }
@@ -409,6 +427,17 @@ impl Default for PaintApp {
 impl PaintApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        // Variante "Fill" (silhouettes pleines) enregistrée à part sous un nom
+        // de famille dédié : utilisée pour les icônes d'outils (tuiles
+        // colorées, style boîte à outils), plus contrastée que Regular qui
+        // reste la famille par défaut pour les menus/texte.
+        fonts.font_data.insert("phosphor-fill".into(), egui_phosphor::Variant::Fill.font_data());
+        fonts
+            .families
+            .insert(egui::FontFamily::Name("phosphor-fill".into()), vec!["phosphor-fill".into()]);
+        cc.egui_ctx.set_fonts(fonts);
         Self::default()
     }
 
@@ -3424,6 +3453,28 @@ impl PaintApp {
         }
     }
 
+    /// Segment de mesure (Sprint 11, outil Règle) : ligne + étiquette
+    /// distance/angle, jamais écrit dans le document — cf. `handle_measure`.
+    fn paint_measure(&self, painter: &egui::Painter, view: &ViewTransform) {
+        let Some((a, b)) = self.measure else { return };
+        let (sa, sb) = (view.doc_to_screen(a), view.doc_to_screen(b));
+        let col = Color32::from_rgb(40, 200, 160);
+        painter.line_segment([sa, sb], egui::Stroke::new(1.5, col));
+        painter.circle_filled(sa, 3.0, col);
+        painter.circle_filled(sb, 3.0, col);
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let angle = dy.atan2(dx).to_degrees();
+        let mid = sa + (sb - sa) * 0.5;
+        painter.text(
+            mid + Vec2::new(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            format!("{:.0} px · {:.1}°", dist, angle),
+            egui::FontId::proportional(13.0),
+            col,
+        );
+    }
+
     /// Anneau de prévisualisation de la taille de l'outil sous le curseur
     /// (repère ergonomique « vrai Paint »). Bichromie pour rester visible sur
     /// tout fond.
@@ -3431,9 +3482,17 @@ impl PaintApp {
         let Some(p) = response.hover_pos() else { return };
         let radius = match self.active_tool {
             ActiveTool::Eraser => self.eraser.width * 0.5 * self.zoom,
-            ActiveTool::Brush | ActiveTool::Line | ActiveTool::Rectangle | ActiveTool::Ellipse => {
-                self.brush.width * 0.5 * self.zoom
-            }
+            ActiveTool::Brush
+            | ActiveTool::Line
+            | ActiveTool::Rectangle
+            | ActiveTool::Ellipse
+            | ActiveTool::Dodge
+            | ActiveTool::Burn
+            | ActiveTool::Saturate
+            | ActiveTool::Desaturate
+            | ActiveTool::Blur
+            | ActiveTool::Sharpen
+            | ActiveTool::Smudge => self.brush.width * 0.5 * self.zoom,
             _ => return,
         };
         if radius < 1.0 {
@@ -3718,15 +3777,24 @@ impl PaintApp {
                     // on referme quand même le trait, sinon la peinture déjà
                     // appliquée au document resterait sans entrée d'annulation.
                     self.raster_stroke_last = None;
-                    self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush });
+                    self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush }, self.editing_mask);
                 }
                 if response.drag_stopped() {
                     self.raster_stroke_last = None;
-                    self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush });
+                    self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush }, self.editing_mask);
                 }
             }
             ActiveTool::CloneStamp => self.handle_clone_stamp(ctx, response, view, false),
             ActiveTool::Healing => self.handle_clone_stamp(ctx, response, view, true),
+            ActiveTool::Dodge => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Lighten, RasterOp::Dodge),
+            ActiveTool::Burn => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Darken, RasterOp::Burn),
+            ActiveTool::Saturate => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Saturate, RasterOp::Saturate),
+            ActiveTool::Desaturate => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Desaturate, RasterOp::Desaturate),
+            ActiveTool::Blur => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Blur, RasterOp::Blur),
+            ActiveTool::Sharpen => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Sharpen, RasterOp::Sharpen),
+            ActiveTool::Smudge => self.handle_smudge(response, view),
+            ActiveTool::Measure => self.handle_measure(ctx, response, view),
+            ActiveTool::Gradient => self.handle_gradient_drag(response, view),
             _ => self.handle_draw(ctx, response, view),
         }
     }
@@ -3753,11 +3821,16 @@ impl PaintApp {
     }
 
     /// Snapshotte (une seule fois par geste) l'état "avant" des tuiles
-    /// recoupées par un tampon, pour l'undo par tuile.
-    fn touch_raster_tiles(&mut self, cx: f32, cy: f32, radius: f32) {
+    /// recoupées par un tampon, pour l'undo par tuile. `mask` doit refléter
+    /// **la surface réellement peinte** par l'appelant (pas forcément
+    /// `self.editing_mask` — les outils de retouche locale, Sprint 11,
+    /// n'écrivent jamais dans le masque et doivent donc toujours passer
+    /// `false`, sans quoi le snapshot et l'écriture cibleraient deux
+    /// surfaces différentes et l'undo perdrait silencieusement le geste).
+    fn touch_raster_tiles(&mut self, cx: f32, cy: f32, radius: f32, mask: bool) {
         let layer_id = self.doc.active_id();
         let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
-        let existing = Self::active_raster(layer, self.editing_mask);
+        let existing = Self::active_raster(layer, mask);
         for key in crate::model::RasterLayer::tiles_touched(cx, cy, radius) {
             self.raster_touch
                 .entry(key)
@@ -3771,7 +3844,7 @@ impl PaintApp {
 
     fn paint_raster_point(&mut self, d: (f32, f32), erase: bool) {
         let radius = self.pixel_radius(erase);
-        self.touch_raster_tiles(d.0, d.1, radius);
+        self.touch_raster_tiles(d.0, d.1, radius, self.editing_mask);
         let color = self.brush.color;
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
@@ -3789,7 +3862,7 @@ impl PaintApp {
         let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
-            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius);
+            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius, self.editing_mask);
         }
         let color = self.brush.color;
         let hardness = self.pixel_hardness;
@@ -3803,15 +3876,17 @@ impl PaintApp {
 
     /// Fin du geste : pousse UNE commande d'undo couvrant toutes les tuiles
     /// touchées (comme Photoshop/GIMP — un trait = un cran d'annulation).
-    fn commit_raster_stroke(&mut self, op: RasterOp) {
+    /// `mask` doit être la même surface que celle passée à `touch_raster_tiles`
+    /// pour ce geste (voir sa doc).
+    fn commit_raster_stroke(&mut self, op: RasterOp, mask: bool) {
         if self.raster_touch.is_empty() {
             return;
         }
         let layer_id = self.doc.active_id();
-        let target = if self.editing_mask { RasterTarget::Mask } else { RasterTarget::Content };
+        let target = if mask { RasterTarget::Mask } else { RasterTarget::Content };
         let before = std::mem::take(&mut self.raster_touch);
         let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
-        let current = Self::active_raster(layer, self.editing_mask);
+        let current = Self::active_raster(layer, mask);
         let mut tiles = Vec::with_capacity(before.len());
         let mut changed = false;
         for (key, b) in before {
@@ -3883,17 +3958,17 @@ impl PaintApp {
             }
         } else if self.raster_stroke_last.is_some() {
             self.raster_stroke_last = None;
-            self.commit_raster_stroke(op);
+            self.commit_raster_stroke(op, false);
         }
         if response.drag_stopped() {
             self.raster_stroke_last = None;
-            self.commit_raster_stroke(op);
+            self.commit_raster_stroke(op, false);
         }
     }
 
     fn paint_clone_point(&mut self, d: (f32, f32), heal: bool) {
         let radius = self.brush.width * 0.5;
-        self.touch_raster_tiles(d.0, d.1, radius);
+        self.touch_raster_tiles(d.0, d.1, radius, false);
         let offset = self.clone_offset.unwrap_or((0.0, 0.0));
         let opacity = self.brush.color[3] as f32 / 255.0;
         let hardness = self.pixel_hardness;
@@ -3914,7 +3989,7 @@ impl PaintApp {
         let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
-            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius);
+            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius, false);
         }
         let offset = self.clone_offset.unwrap_or((0.0, 0.0));
         let opacity = self.brush.color[3] as f32 / 255.0;
@@ -3928,6 +4003,219 @@ impl PaintApp {
             }
         }
         self.history.touch();
+    }
+
+    // --- Retouche locale : densité +/-, éponge, flou, netteté (Sprint 11) ---
+    //
+    // Les six outils partagent un seul geste (glisser sur la couche raster,
+    // intensité = `effect_strength`) et une seule fonction pixel
+    // (`RasterLayer::effect_segment` / `PixelEffect`) — seul l'enum passé en
+    // paramètre change le résultat.
+
+    fn handle_pixel_effect(
+        &mut self,
+        response: &egui::Response,
+        view: &ViewTransform,
+        effect: crate::model::PixelEffect,
+        op: RasterOp,
+    ) {
+        if response.drag_started() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                self.paint_effect_point(d, effect);
+                self.raster_stroke_last = Some(d);
+            }
+        }
+        if response.dragged() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                match self.raster_stroke_last {
+                    Some(last) => self.paint_effect_segment(last, d, effect),
+                    None => self.paint_effect_point(d, effect),
+                }
+                self.raster_stroke_last = Some(d);
+            }
+        } else if self.raster_stroke_last.is_some() {
+            self.raster_stroke_last = None;
+            self.commit_raster_stroke(op, false);
+        }
+        if response.drag_stopped() {
+            self.raster_stroke_last = None;
+            self.commit_raster_stroke(op, false);
+        }
+    }
+
+    fn paint_effect_point(&mut self, d: (f32, f32), effect: crate::model::PixelEffect) {
+        let radius = self.brush.width * 0.5;
+        self.touch_raster_tiles(d.0, d.1, radius, false);
+        let strength = self.effect_strength;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.effect_segment(d, d, radius, hardness, strength, effect);
+        }
+        self.history.touch();
+    }
+
+    fn paint_effect_segment(&mut self, from: (f32, f32), to: (f32, f32), effect: crate::model::PixelEffect) {
+        let radius = self.brush.width * 0.5;
+        let dist = ((to.0 - from.0).powi(2) + (to.1 - from.1).powi(2)).sqrt();
+        let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            self.touch_raster_tiles(from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, radius, false);
+        }
+        let strength = self.effect_strength;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.effect_segment(from, to, radius, hardness, strength, effect);
+        }
+        self.history.touch();
+    }
+
+    /// Estompe (smudge, Sprint 11) : même geste, mais l'algorithme "pousse" la
+    /// couleur plutôt que de la mélanger à une cible fixe — fonction dédiée
+    /// dans `RasterLayer::smudge_segment`.
+    fn handle_smudge(&mut self, response: &egui::Response, view: &ViewTransform) {
+        if response.drag_started() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                self.touch_raster_tiles(d.0, d.1, self.brush.width * 0.5, false);
+                self.raster_stroke_last = Some(d);
+            }
+        }
+        if response.dragged() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                if let Some(last) = self.raster_stroke_last {
+                    let radius = self.brush.width * 0.5;
+                    // Échantillonne le long du segment (pas seulement le point
+                    // d'arrivée) : un glissé rapide entre deux frames doit
+                    // snapshoter toutes les tuiles traversées, sinon l'undo
+                    // manquerait certaines tuiles modifiées par `smudge_segment`.
+                    let dist = ((d.0 - last.0).powi(2) + (d.1 - last.1).powi(2)).sqrt();
+                    let steps = (dist / radius.max(1.0)).ceil().max(1.0) as i32;
+                    for i in 0..=steps {
+                        let t = i as f32 / steps as f32;
+                        self.touch_raster_tiles(last.0 + (d.0 - last.0) * t, last.1 + (d.1 - last.1) * t, radius, false);
+                    }
+                    let strength = self.effect_strength;
+                    let hardness = self.pixel_hardness;
+                    let layer_id = self.doc.active_id();
+                    if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+                        layer.raster.smudge_segment(last, d, radius, hardness, strength);
+                    }
+                    self.history.touch();
+                }
+                self.raster_stroke_last = Some(d);
+            }
+        } else if self.raster_stroke_last.is_some() {
+            self.raster_stroke_last = None;
+            self.commit_raster_stroke(RasterOp::Smudge, false);
+        }
+        if response.drag_stopped() {
+            self.raster_stroke_last = None;
+            self.commit_raster_stroke(RasterOp::Smudge, false);
+        }
+    }
+
+    /// Règle / mesure (Sprint 11) : pur survol, ne touche jamais au document
+    /// ni à l'historique — seul `self.measure` est mis à jour pour l'aperçu
+    /// peint par `paint_measure_overlay`.
+    fn handle_measure(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
+        if response.drag_started() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                self.measure = Some((d, d));
+            }
+        }
+        if response.dragged() {
+            if let (Some((s, _)), Some(p)) = (self.measure, response.interact_pointer_pos()) {
+                self.measure = Some((s, view.screen_to_doc(p)));
+            }
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.measure = None;
+        }
+    }
+
+    /// Dégradé interactif (Sprint 11) : glisser sur le canevas pose les deux
+    /// points du dégradé directement sur chaque forme pleine sélectionnée —
+    /// alternative au menu **Édition › Dégradé** qui ne propose que des
+    /// valeurs par défaut calculées depuis la boîte englobante.
+    fn handle_gradient_drag(&mut self, response: &egui::Response, view: &ViewTransform) {
+        if response.drag_started() {
+            if let Some(p) = response.interact_pointer_pos() {
+                self.gradient_drag_start = Some(view.screen_to_doc(p));
+            }
+        }
+        if response.dragged() {
+            if let (Some(from), Some(p)) = (self.gradient_drag_start, response.interact_pointer_pos()) {
+                let to = view.screen_to_doc(p);
+                let (kind, color_a) = (self.gradient_kind, self.brush.color);
+                let color_b = [255, 255, 255, color_a[3]];
+                let active = self.doc.active_layer;
+                let sel = self.selection.clone();
+                for s in &mut self.doc.layers[active].strokes {
+                    if sel.contains(&s.id) && s.fill {
+                        match &mut s.gradient {
+                            Some(g) => {
+                                g.from = from;
+                                g.to = to;
+                            }
+                            None => {
+                                s.gradient = Some(crate::model::Gradient {
+                                    kind,
+                                    from,
+                                    to,
+                                    stops: vec![(0.0, color_a), (1.0, color_b)],
+                                });
+                            }
+                        }
+                    }
+                }
+                // Invalidation ciblée (pas `cache.clear()`) : ce bloc tourne à
+                // chaque frame du glissé, vider tout le cache de maillages à
+                // chaque frame serait coûteux sur un document avec beaucoup
+                // de traits — cf. le même choix pour `align` (`MoveEach`).
+                self.cache.invalidate(sel.iter());
+            }
+        }
+        if response.drag_stopped() {
+            self.gradient_drag_start = None;
+            if !self.selection.is_empty() {
+                self.history.touch();
+            }
+        }
+    }
+
+    /// Pousse une copie miroir/symétrie (Sprint 11) : `symmetry_axes` copies
+    /// du trait, réparties par rotation régulière autour du centre du
+    /// document, en une seule commande d'undo (comme `duplicate_selection`).
+    fn commit_symmetry_stroke(&mut self, stroke: Stroke) {
+        if stroke.points.is_empty() {
+            return;
+        }
+        let axes = self.symmetry_axes.max(1);
+        let center = (self.doc.size.0 as f32 / 2.0, self.doc.size.1 as f32 / 2.0);
+        let mut strokes = Vec::with_capacity(axes as usize);
+        for k in 0..axes {
+            let angle = k as f32 * std::f32::consts::TAU / axes as f32;
+            let (ca, sa) = (angle.cos(), angle.sin());
+            let mut c = stroke.clone();
+            c.id = self.next_id;
+            self.next_id += 1;
+            c.z = self.bump_z();
+            for p in &mut c.points {
+                let (dx, dy) = (p.pos.0 - center.0, p.pos.1 - center.1);
+                p.pos = (center.0 + dx * ca - dy * sa, center.1 + dx * sa + dy * ca);
+            }
+            strokes.push(c);
+        }
+        self.push_recent_color(stroke.color);
+        let layer = self.doc.active_id();
+        self.history.push(&mut self.doc, Command::AddMany { layer, strokes });
     }
 
     fn handle_draw(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
@@ -3970,7 +4258,11 @@ impl PaintApp {
                     self.commit_stroke(stroke);
                 }
             } else if let Some(stroke) = self.capture.finish() {
-                self.commit_stroke(stroke);
+                if self.active_tool == ActiveTool::Symmetry {
+                    self.commit_symmetry_stroke(stroke);
+                } else {
+                    self.commit_stroke(stroke);
+                }
             }
         }
     }
@@ -3984,6 +4276,11 @@ impl eframe::App for PaintApp {
         // Quitter l'édition de texte si on change d'outil.
         if self.active_tool != ActiveTool::Text && self.editing_text.is_some() {
             self.finish_text_editing();
+        }
+        // Efface l'aperçu de mesure en changeant d'outil, sinon le segment
+        // resterait affiché indéfiniment par-dessus un autre outil.
+        if self.active_tool != ActiveTool::Measure && self.measure.is_some() {
+            self.measure = None;
         }
 
         let panel_frame = egui::Frame::default()
@@ -4178,6 +4475,7 @@ impl eframe::App for PaintApp {
             self.paint_pen_edit(&content, &view);
             self.paint_crop(&painter, &view);
             self.paint_marquee(&painter, &view);
+            self.paint_measure(&painter, &view);
             self.paint_cursor(&painter, &response);
             if self.show_rulers {
                 self.paint_rulers(&painter, &view);

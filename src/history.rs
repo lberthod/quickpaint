@@ -17,6 +17,17 @@ pub enum RasterOp {
     Clone,
     Heal,
     Cutout,
+    /// Retouche locale (Sprint 11) : densité +/- (dodge/burn), éponge
+    /// (saturation +/-), flou, netteté, estompe — chacun une seule variante
+    /// pour l'étiquette d'undo, la peinture elle-même vit dans
+    /// `model::raster::PixelEffect` / `RasterLayer::smudge_segment`.
+    Dodge,
+    Burn,
+    Saturate,
+    Desaturate,
+    Blur,
+    Sharpen,
+    Smudge,
 }
 
 /// Surface raster ciblée par une opération de peinture (roadmap P2 #14) :
@@ -156,6 +167,13 @@ impl Command {
             Command::PaintRaster { op: RasterOp::Clone, .. } => t("Tampon de clonage", "Clone stamp"),
             Command::PaintRaster { op: RasterOp::Heal, .. } => t("Correcteur", "Healing brush"),
             Command::PaintRaster { op: RasterOp::Cutout, .. } => t("Détourage", "Cutout"),
+            Command::PaintRaster { op: RasterOp::Dodge, .. } => t("Densité -", "Dodge"),
+            Command::PaintRaster { op: RasterOp::Burn, .. } => t("Densité +", "Burn"),
+            Command::PaintRaster { op: RasterOp::Saturate, .. } => t("Éponge (saturer)", "Sponge (saturate)"),
+            Command::PaintRaster { op: RasterOp::Desaturate, .. } => t("Éponge (désaturer)", "Sponge (desaturate)"),
+            Command::PaintRaster { op: RasterOp::Blur, .. } => t("Flou localisé", "Local blur"),
+            Command::PaintRaster { op: RasterOp::Sharpen, .. } => t("Netteté localisée", "Local sharpen"),
+            Command::PaintRaster { op: RasterOp::Smudge, .. } => t("Estompe", "Smudge"),
         }
     }
 }

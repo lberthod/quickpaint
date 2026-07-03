@@ -11,6 +11,9 @@ license = "MIT"
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
+# Icônes vectorielles (barre d'outils, calques, menus) — police Phosphor
+# embarquée, rendu net à toute taille, sans dépendre des emojis du système.
+egui-phosphor = { version = "0.7", features = ["fill"] }
 # Encodage images pour l'export (PNG/JPG/WebP). default-features off = build léger.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 # Sauvegarde / ouverture de projet vectoriel (.json, étape 7).

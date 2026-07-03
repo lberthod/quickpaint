@@ -21,6 +21,17 @@ pub const TILE: i32 = 256;
 /// Coordonnées d'une tuile (indices de grille, pas des pixels).
 pub type TileKey = (i32, i32);
 
+/// Effet de retouche locale (Sprint 11) — cf. `RasterLayer::apply_effect`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PixelEffect {
+    Lighten,
+    Darken,
+    Saturate,
+    Desaturate,
+    Blur,
+    Sharpen,
+}
+
 /// Une tuile de pixels RGBA8 non prémultipliés.
 #[derive(Clone)]
 pub struct Tile {
@@ -288,6 +299,184 @@ impl RasterLayer {
         for i in 0..=n {
             let t = i as f32 / n as f32;
             self.heal_stamp(from.0 + dx * t, from.1 + dy * t, radius, hardness, offset, opacity);
+        }
+    }
+
+    /// Effet appliqué au doigté (Sprint 11) : les 4 pinceaux de retouche
+    /// locale (densité +/-, éponge, flou/netteté) partagent le même parcours
+    /// de disque doux que `stamp`/`clone_stamp` — seule la fonction pixel
+    /// change. `strength` (0..=1) module l'intensité par coup de pinceau
+    /// (répétable en repassant plusieurs fois, comme Photoshop/GIMP).
+    fn apply_effect(&mut self, cx: f32, cy: f32, radius: f32, hardness: f32, strength: f32, effect: PixelEffect) {
+        if radius <= 0.0 {
+            return;
+        }
+        let hardness = hardness.clamp(0.0, 1.0);
+        let edge = hardness * radius;
+        let (x0, x1) = ((cx - radius).floor() as i32, (cx + radius).ceil() as i32);
+        let (y0, y1) = ((cy - radius).floor() as i32, (cy + radius).ceil() as i32);
+        // Instantané avant écriture : le flou/netteté échantillonnent le
+        // voisinage, il ne faut pas lire des pixels déjà modifiés par ce même
+        // coup de tampon (sinon la moyenne dérive en balayant le disque).
+        // Marge de 1 px au-delà de la boîte englobante : le flou/netteté
+        // regardent les 8 voisins de chaque pixel du disque, y compris ceux
+        // tout juste sur son bord — sans cette marge, ces voisins tombaient
+        // hors de l'instantané et étaient traités comme transparents,
+        // assombrissant artificiellement le contour de chaque coup de
+        // pinceau (faux halo sombre).
+        let snapshot: HashMap<(i32, i32), [u8; 4]> = (y0 - 1..=y1 + 1)
+            .flat_map(|y| (x0 - 1..=x1 + 1).map(move |x| (x, y)))
+            .map(|(x, y)| ((x, y), self.get_pixel(x, y)))
+            .collect();
+        let sample = |x: i32, y: i32| -> [u8; 4] { snapshot.get(&(x, y)).copied().unwrap_or([0, 0, 0, 0]) };
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let src = snapshot[&(x, y)];
+                if src[3] == 0 {
+                    continue;
+                }
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                if d > radius {
+                    continue;
+                }
+                let cov = if radius <= edge || d <= edge { 1.0 } else { 1.0 - (d - edge) / (radius - edge) };
+                let amount = (cov * strength).clamp(0.0, 1.0);
+                if amount <= 0.0 {
+                    continue;
+                }
+                let out = match effect {
+                    PixelEffect::Lighten => {
+                        let mix = |c: u8| (c as f32 + (255.0 - c as f32) * amount).round() as u8;
+                        [mix(src[0]), mix(src[1]), mix(src[2]), src[3]]
+                    }
+                    PixelEffect::Darken => {
+                        let mix = |c: u8| (c as f32 * (1.0 - amount)).round() as u8;
+                        [mix(src[0]), mix(src[1]), mix(src[2]), src[3]]
+                    }
+                    PixelEffect::Saturate | PixelEffect::Desaturate => {
+                        let (h, s, l) = crate::tools::filter::rgb_to_hsl(src[0], src[1], src[2]);
+                        // Un pixel (quasi) gris n'a pas de teinte
+                        // significative — `rgb_to_hsl` renvoie 0.0 par
+                        // convention, ce qui introduirait une dérive vers le
+                        // rouge si on l'utilisait pour ré-saturer. Rien à
+                        // saturer : seul un pixel déjà teinté (s > 0) peut
+                        // voir sa teinte accentuée.
+                        if effect == PixelEffect::Saturate && s < 0.01 {
+                            src
+                        } else {
+                            let sign = if effect == PixelEffect::Saturate { 1.0 } else { -1.0 };
+                            let ns = (s + sign * amount).clamp(0.0, 1.0);
+                            let (r, g, b) = crate::tools::filter::hsl_to_rgb(h, ns, l);
+                            [r, g, b, src[3]]
+                        }
+                    }
+                    PixelEffect::Blur => {
+                        let mut sum = [0f32; 3];
+                        let mut n = 0f32;
+                        for ny in -1..=1 {
+                            for nx in -1..=1 {
+                                let p = sample(x + nx, y + ny);
+                                if p[3] == 0 {
+                                    continue;
+                                }
+                                for c in 0..3 {
+                                    sum[c] += p[c] as f32;
+                                }
+                                n += 1.0;
+                            }
+                        }
+                        if n == 0.0 {
+                            src
+                        } else {
+                            let avg = [sum[0] / n, sum[1] / n, sum[2] / n];
+                            let mix = |c: u8, a: f32| (c as f32 + (a - c as f32) * amount).round() as u8;
+                            [mix(src[0], avg[0]), mix(src[1], avg[1]), mix(src[2], avg[2]), src[3]]
+                        }
+                    }
+                    PixelEffect::Sharpen => {
+                        let mut sum = [0f32; 3];
+                        let mut n = 0f32;
+                        for ny in -1..=1 {
+                            for nx in -1..=1 {
+                                if nx == 0 && ny == 0 {
+                                    continue;
+                                }
+                                let p = sample(x + nx, y + ny);
+                                for c in 0..3 {
+                                    sum[c] += p[c] as f32;
+                                }
+                                n += 1.0;
+                            }
+                        }
+                        let avg = [sum[0] / n.max(1.0), sum[1] / n.max(1.0), sum[2] / n.max(1.0)];
+                        // Pousse chaque canal à l'opposé de sa moyenne
+                        // voisine — accentue le contraste local (masque flou
+                        // simplifié).
+                        let mix = |c: u8, a: f32| (c as f32 + (c as f32 - a) * amount).round().clamp(0.0, 255.0) as u8;
+                        [mix(src[0], avg[0]), mix(src[1], avg[1]), mix(src[2], avg[2]), src[3]]
+                    }
+                };
+                self.set_pixel(x, y, out);
+            }
+        }
+    }
+
+    /// Trace un effet de retouche locale le long d'un segment (trait continu).
+    pub fn effect_segment(
+        &mut self,
+        from: (f32, f32),
+        to: (f32, f32),
+        radius: f32,
+        hardness: f32,
+        strength: f32,
+        effect: PixelEffect,
+    ) {
+        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let step = (radius * 0.3).max(1.0);
+        let n = (dist / step).ceil().max(1.0) as i32;
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            self.apply_effect(from.0 + dx * t, from.1 + dy * t, radius, hardness, strength, effect);
+        }
+    }
+
+    /// Estompe (smudge) : pousse la couleur échantillonnée à `from` vers
+    /// `to`, mélangée à ce qui s'y trouve déjà — comme tirer le doigt dans de
+    /// la peinture fraîche. `strength` (0..=1) module la part reprise de la
+    /// couleur poussée à chaque pas (1 = remplace complètement, valeurs
+    /// basses = traînée progressive sur plusieurs pas).
+    pub fn smudge_segment(&mut self, from: (f32, f32), to: (f32, f32), radius: f32, hardness: f32, strength: f32) {
+        let hardness = hardness.clamp(0.0, 1.0);
+        let edge = hardness * radius;
+        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let step = (radius * 0.3).max(1.0);
+        let n = (dist / step).ceil().max(1.0) as i32;
+        let mut carried = self.get_pixel(from.0.round() as i32, from.1.round() as i32);
+        for i in 1..=n {
+            let t0 = (i - 1) as f32 / n as f32;
+            let t1 = i as f32 / n as f32;
+            let (px, py) = (from.0 + dx * t0, from.1 + dy * t0);
+            let (cx, cy) = (from.0 + dx * t1, from.1 + dy * t1);
+            let picked_up = self.get_pixel(px.round() as i32, py.round() as i32);
+            for c in 0..4 {
+                carried[c] = ((picked_up[c] as u16 + carried[c] as u16) / 2) as u8;
+            }
+            let (x0, x1) = ((cx - radius).floor() as i32, (cx + radius).ceil() as i32);
+            let (y0, y1) = ((cy - radius).floor() as i32, (cy + radius).ceil() as i32);
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let (ddx, ddy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                    let d = (ddx * ddx + ddy * ddy).sqrt();
+                    if d > radius {
+                        continue;
+                    }
+                    let cov = if radius <= edge || d <= edge { 1.0 } else { 1.0 - (d - edge) / (radius - edge) };
+                    self.blend_pixel(x, y, carried, cov * strength.clamp(0.0, 1.0));
+                }
+            }
         }
     }
 
@@ -673,5 +862,101 @@ mod tests {
         assert!(!enc.png_b64.is_empty());
         let r2 = decode(&enc);
         assert_eq!(r2.get_pixel(20, 20), [7, 8, 9, 200]);
+    }
+
+    // --- Retouche locale (Sprint 11) -----------------------------------
+
+    #[test]
+    fn lighten_moves_channels_toward_white() {
+        let mut r = RasterLayer::default();
+        r.stamp(10.0, 10.0, 6.0, 1.0, [100, 100, 100, 255], false);
+        r.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Lighten);
+        let p = r.get_pixel(10, 10);
+        assert!(p[0] > 100, "expected lighter channel, got {p:?}");
+    }
+
+    #[test]
+    fn darken_moves_channels_toward_black() {
+        let mut r = RasterLayer::default();
+        r.stamp(10.0, 10.0, 6.0, 1.0, [200, 200, 200, 255], false);
+        r.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Darken);
+        let p = r.get_pixel(10, 10);
+        assert!(p[0] < 200, "expected darker channel, got {p:?}");
+    }
+
+    #[test]
+    fn saturate_and_desaturate_move_saturation_opposite_ways() {
+        let mut base = RasterLayer::default();
+        base.stamp(10.0, 10.0, 6.0, 1.0, [180, 120, 120, 255], false);
+
+        let mut sat = base.clone();
+        sat.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Saturate);
+        let (_, s_sat, _) =
+            crate::tools::filter::rgb_to_hsl(sat.get_pixel(10, 10)[0], sat.get_pixel(10, 10)[1], sat.get_pixel(10, 10)[2]);
+
+        let mut desat = base.clone();
+        desat.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Desaturate);
+        let (_, s_desat, _) = crate::tools::filter::rgb_to_hsl(
+            desat.get_pixel(10, 10)[0],
+            desat.get_pixel(10, 10)[1],
+            desat.get_pixel(10, 10)[2],
+        );
+
+        assert!(s_sat > s_desat, "saturate ({s_sat}) should exceed desaturate ({s_desat})");
+    }
+
+    /// Régression : `rgb_to_hsl` renvoie une teinte arbitraire (0.0) pour un
+    /// pixel gris — sans garde, `Saturate` le teintait de rouge au lieu de le
+    /// laisser gris (aucune teinte n'existe à accentuer).
+    #[test]
+    fn saturate_does_not_tint_a_gray_pixel() {
+        let mut r = RasterLayer::default();
+        r.stamp(10.0, 10.0, 6.0, 1.0, [128, 128, 128, 255], false);
+        r.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Saturate);
+        let p = r.get_pixel(10, 10);
+        assert_eq!(&p[0..3], &[128, 128, 128], "gray pixel should stay gray, got {p:?}");
+    }
+
+    #[test]
+    fn blur_pulls_a_lone_bright_pixel_toward_its_dark_neighbors() {
+        let mut r = RasterLayer::default();
+        for y in 8..13 {
+            for x in 8..13 {
+                r.set_pixel(x, y, [0, 0, 0, 255]);
+            }
+        }
+        r.set_pixel(10, 10, [255, 255, 255, 255]);
+        r.effect_segment((10.0, 10.0), (10.0, 10.0), 3.0, 1.0, 1.0, PixelEffect::Blur);
+        let p = r.get_pixel(10, 10);
+        assert!(p[0] < 255, "expected blurred center to darken toward neighbors, got {p:?}");
+    }
+
+    #[test]
+    fn sharpen_pushes_bright_pixel_further_from_dark_neighbors() {
+        let mut r = RasterLayer::default();
+        for y in 8..13 {
+            for x in 8..13 {
+                r.set_pixel(x, y, [100, 100, 100, 255]);
+            }
+        }
+        r.set_pixel(10, 10, [150, 150, 150, 255]);
+        r.effect_segment((10.0, 10.0), (10.0, 10.0), 3.0, 1.0, 1.0, PixelEffect::Sharpen);
+        let p = r.get_pixel(10, 10);
+        assert!(p[0] > 150, "expected sharpened center to brighten further, got {p:?}");
+    }
+
+    #[test]
+    fn smudge_pulls_source_color_toward_destination() {
+        let mut r = RasterLayer::default();
+        r.stamp(5.0, 50.0, 6.0, 1.0, [255, 0, 0, 255], false);
+        for y in 44..56 {
+            for x in 44..56 {
+                r.set_pixel(x, y, [0, 0, 255, 255]);
+            }
+        }
+        r.smudge_segment((5.0, 50.0), (50.0, 50.0), 5.0, 1.0, 1.0);
+        let p = r.get_pixel(50, 50);
+        // Un peu de rouge doit avoir migré vers la destination bleue.
+        assert!(p[0] > 0, "expected some red channel picked up along the drag, got {p:?}");
     }
 }
