@@ -12,9 +12,10 @@
 │ ui/          toolbar, layers, footer            (egui)     │
 ├────────────────────────────────────────────────────────────┤
 │ app/         état global (mod.rs), machine à états des     │
-│              outils, sélection/transformation, dialogues ; │
-│              pen_edit.rs = édition de nœuds Bézier après    │
-│              coup, extrait en sous-module (ANALYSE.md §12.5)│
+│              outils, sélection, dialogues ; sous-modules    │
+│              extraits (ANALYSE.md §12.5, SPRINTS.md 13.8) : │
+│              pen_edit.rs (édition de nœuds Bézier après     │
+│              coup), transform.rs (échelle/rotation glissée) │
 ├────────────────────────────────────────────────────────────┤
 │ tools/       brush, eraser, pen, shape, bucket, boolean,   │
 │              guides, filter, assets, eyedropper, hit       │

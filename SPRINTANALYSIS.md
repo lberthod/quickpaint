@@ -199,29 +199,41 @@ et nécessite aussi un compte développeur + des décisions de conformité
 
 ## 12.5 — Maintenabilité : démembrer `app.rs`
 
-**Statut : ✅ première extraction faite (édition de plume) ; sélection/
-transformation restante documentée pour un prochain sprint.**
+**Statut : ✅ deux extractions faites (édition de plume, puis transformation
+de sélection — cette seconde sous SPRINTS.md 13.8).**
 
-`app.rs` faisait 4 617 lignes (+1000/sprint). Extrait dans ce sprint :
+`app.rs` faisait 4 617 lignes (+1000/sprint). Extrait :
 
-- **`app/pen_edit.rs`** (232 lignes) : `app.rs` devient `app/mod.rs`
-  (4 444 lignes) + ce sous-module — la machine à états de réédition des
-  nœuds de plume après coup (`try_start_pen_edit`, `hit_test_pen_node`,
-  `apply_pen_drag`, `commit_pen_edit`, `handle_pen_node_edit`,
-  `paint_pen_edit`, le type `PenNodeTarget`) — un sous-système autonome
-  (état + geste + rendu) qui ne partage que `Document`/`Stroke` avec le
-  reste de `app`. Méthodes `pub(super)` (visibles du module parent `app`
-  uniquement, comme avant l'extraction — pas un élargissement de l'API
-  publique). Devient testable indépendamment : 2 tests unitaires ajoutés sur
-  le hit-test de nœud (choix du nœud le plus proche sous le seuil, rejet
-  hors seuil), qui n'existaient qu'indirectement avant.
+- **`app/pen_edit.rs`** (232 lignes, ce sprint) : la machine à états de
+  réédition des nœuds de plume après coup (`try_start_pen_edit`,
+  `hit_test_pen_node`, `apply_pen_drag`, `commit_pen_edit`,
+  `handle_pen_node_edit`, `paint_pen_edit`, le type `PenNodeTarget`) — un
+  sous-système autonome (état + geste + rendu) qui ne partage que
+  `Document`/`Stroke` avec le reste de `app`. Méthodes `pub(super)` (visibles
+  du module parent `app` uniquement, comme avant l'extraction — pas un
+  élargissement de l'API publique). Devient testable indépendamment : 2 tests
+  unitaires ajoutés sur le hit-test de nœud (choix du nœud le plus proche
+  sous le seuil, rejet hors seuil), qui n'existaient qu'indirectement avant.
+- **`app/transform.rs`** (211 lignes, sprint suivant, SPRINTS.md 13.8) : la
+  machine à états de transformation interactive de la sélection (poignées
+  d'échelle/rotation de la boîte englobante, glissé, aperçu, undo dédié —
+  `transform_handles`, `start_transform_if_handle`, `update_transform`,
+  `commit_transform`, `xform_preview`, les types `XformKind`/`TransformDrag`),
+  même schéma `pub(super)` que `pen_edit`. 1 test unitaire ajouté (un
+  scale/rotate sous le seuil de bruit — clic sans glissé réel — ne pousse pas
+  de commande d'undo).
 
-**Non fait ici, noté pour la suite** : la machine à états de
-sélection/transformation (`XformKind`, le drag de redimensionnement/rotation,
-~600 lignes) est le prochain candidat naturel — plus risqué à extraire en une
-passe (elle touche `selection`, `history`, `guides` et le rendu des poignées
-en même temps) ; mieux vaut la sortir seule, avec sa propre revue, plutôt que
-de la bundler avec ce sprint de robustesse/perf.
+Au total, `app.rs` → `app/mod.rs` (4 297 lignes) + 2 sous-modules
+(443 lignes) — une réduction réelle mais modeste de l'orchestrateur central ;
+la partie qui grossit encore le plus vite (nouveaux outils Sprint 11/13) n'est
+pas dans ce périmètre.
+
+**Non fait ici, noté pour la suite** (SPRINTS.md 13.8, mis à jour) : la
+sélection proprement dite (marquee/lasso/baguette magique, déplacement,
+aligner/répartir, copier/coller de style) est un sous-système encore plus
+large et plus transverse que la transformation — touche `history`, `guides`
+et le rendu des poignées en même temps. Un futur sprint dédié plutôt qu'une
+extraction rapide.
 
 ---
 
@@ -233,7 +245,7 @@ de la bundler avec ce sprint de robustesse/perf.
 | 12.2 | Export natif via compositeur | M | Moyen (chemin d'export) | ✅ |
 | 12.3 | Bornes + version + erreurs explicites | S | Faible | ✅ |
 | 12.4 | Tag + release signée | — | — | ⛔ action manuelle requise |
-| 12.5 | Extraction `app/pen_edit.rs` | S | Faible | ✅ (partiel, suite documentée) |
+| 12.5 | Extraction `app/pen_edit.rs` + `app/transform.rs` | S+S | Faible | ✅ (sélection proprement dite restante, notée 13.8) |
 
 Validation : `cargo test --release` (voir le journal git pour le compte de
 tests avant/après) et `cargo clippy --release -- -D warnings` doivent rester

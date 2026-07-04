@@ -363,17 +363,23 @@ indicatives (⭐ impact) — à confirmer avant de démarrer, pas un engagement.
 - [ ] **13.7 Pression réelle du stylet** — L, ⭐⭐ : ré-évaluer seulement si
       un fork/patch du pipeline `egui-winit` devient justifié par l'usage
       (voir l'investigation détaillée à ROADMAP.md #15).
-- [ ] **13.8 Suite du découpage de `app.rs`** — M, ⭐⭐ : le Sprint 12 n'a
-      extrait que l'édition de nœuds de plume (`app/pen_edit.rs`) ; la machine
-      à états de sélection/transformation (`XformKind`, ~600 lignes) est le
-      prochain candidat, à sortir seule (voir ANALYSE.md §12.5/§10 P1 #8).
+- [x] **13.8 Suite du découpage de `app.rs`** — M, ⭐⭐ : le Sprint 12 n'avait
+      extrait que l'édition de nœuds de plume (`app/pen_edit.rs`). Fait ici :
+      la machine à états de transformation interactive de la sélection
+      (poignées d'échelle/rotation, glissé, aperçu, undo — `XformKind`,
+      `TransformDrag`) sort dans `app/transform.rs` (211 lignes), même schéma
+      `pub(super)` que `pen_edit`. `app/mod.rs` : 4 444 → 4 297 lignes. Reste
+      au backlog : la sélection proprement dite (marquee/lasso/baguette,
+      déplacement, aligner/répartir) est un sous-système encore plus large et
+      plus transverse (touche `history`, `guides`, le rendu des poignées) —
+      candidat pour un futur sprint dédié plutôt qu'une extraction rapide.
 - [ ] **Mac App Store** — M, ⭐⭐⭐ : toujours le plus gros levier de
       découvrabilité non tiré, indépendant des outils ci-dessus.
 
 **Ordre suggéré** : 13.1 (rapide, complète le Sprint 11) → 13.5 (dette
 technique qui grossit avec chaque nouvelle bibliothèque d'assets/templates) →
-13.2/13.3 (finitions outils) → Mac App Store → 13.4/13.6/13.7/13.8 (gros
-chantiers, au choix selon la demande utilisateur).
+13.2/13.3 (finitions outils) → Mac App Store → 13.4/13.6/13.7 (gros chantiers,
+au choix selon la demande utilisateur).
 
 ---
 

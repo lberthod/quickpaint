@@ -8,6 +8,10 @@
 // (ANALYSE.md §12.5) : sous-système autonome (état + geste + rendu) qui ne
 // partage que `Document`/`Stroke` avec le reste de `app`.
 mod pen_edit;
+// Transformation interactive de la sélection (échelle/rotation) — extrait en
+// sous-module (SPRINTS.md 13.8, suite d'ANALYSE.md §12.5) pour la même raison
+// que `pen_edit` : état + geste + rendu autonomes, undo dédié.
+mod transform;
 
 use crate::history::{Command, History, RasterOp, RasterTarget};
 use crate::i18n::t;
@@ -20,6 +24,7 @@ use crate::ui::{footer, layers, toolbar};
 use egui::{Color32, Margin, Pos2, Rect, Sense, Vec2};
 use pen_edit::PenNodeTarget;
 use std::collections::HashSet;
+use transform::TransformDrag;
 
 /// Borne des dimensions de document à `model::image::MAX_IMAGE_SIDE`
 /// (ANALYSE.md §8.2) — nouveau document, redimensionnement d'image ou de
@@ -92,20 +97,6 @@ struct TextStyleClip {
     align: crate::model::text::TextAlign,
     outline_w: f32,
     outline_color: [u8; 4],
-}
-
-/// Transformation interactive de la sélection (échelle ou rotation).
-enum XformKind {
-    Scale { anchor: (f32, f32) },           // coin opposé fixe
-    Rotate { center: (f32, f32), start: f32 }, // pivot + angle initial du pointeur
-}
-
-struct TransformDrag {
-    kind: XformKind,
-    bbox: ((f32, f32), (f32, f32)), // boîte de sélection au départ (doc)
-    sx: f32,
-    sy: f32,
-    angle: f32,
 }
 
 /// Dialogue « Redimensionner l'image » / « Taille du canevas » (roadmap P0 #4).
@@ -925,124 +916,6 @@ impl PaintApp {
             1 => t("1 élément sélectionné.", "1 element selected.").into(),
             _ => format!("{n} {}", t("éléments sélectionnés.", "elements selected.")),
         });
-    }
-
-    /// 4 coins + poignée de rotation de la boîte de sélection (écran).
-    fn transform_handles(&self, view: &ViewTransform) -> Option<([Pos2; 4], Pos2)> {
-        let (mn, mx) = self.selection_bounds()?;
-        let corners = [
-            view.doc_to_screen((mn.0, mn.1)),
-            view.doc_to_screen((mx.0, mn.1)),
-            view.doc_to_screen((mx.0, mx.1)),
-            view.doc_to_screen((mn.0, mx.1)),
-        ];
-        let top = view.doc_to_screen(((mn.0 + mx.0) * 0.5, mn.1));
-        let rot = Pos2::new(top.x, top.y - 22.0);
-        Some((corners, rot))
-    }
-
-    /// Démarre une transformation si le clic tombe sur une poignée.
-    fn start_transform_if_handle(&mut self, p: Pos2, view: &ViewTransform) -> bool {
-        if self.selection.is_empty() {
-            return false;
-        }
-        let Some((corners, rot_handle)) = self.transform_handles(view) else { return false };
-        let Some((mn, mx)) = self.selection_bounds() else { return false };
-        let center = ((mn.0 + mx.0) * 0.5, (mn.1 + mx.1) * 0.5);
-        // Rotation en priorité.
-        if (rot_handle - p).length() <= 10.0 {
-            let pc = view.doc_to_screen(center);
-            let start = (p.y - pc.y).atan2(p.x - pc.x);
-            self.xform = Some(TransformDrag {
-                kind: XformKind::Rotate { center, start },
-                bbox: (mn, mx),
-                sx: 1.0,
-                sy: 1.0,
-                angle: 0.0,
-            });
-            return true;
-        }
-        // Coins → échelle.
-        let doc_corners = [(mn.0, mn.1), (mx.0, mn.1), (mx.0, mx.1), (mn.0, mx.1)];
-        for (ci, cs) in corners.iter().enumerate() {
-            if (*cs - p).length() <= 10.0 {
-                let anchor = doc_corners[(ci + 2) % 4];
-                self.xform = Some(TransformDrag {
-                    kind: XformKind::Scale { anchor },
-                    bbox: (mn, mx),
-                    sx: 1.0,
-                    sy: 1.0,
-                    angle: 0.0,
-                });
-                return true;
-            }
-        }
-        false
-    }
-
-    /// Met à jour les paramètres de la transformation pendant le glissé.
-    fn update_transform(&mut self, p: Pos2, view: &ViewTransform, uniform: bool) {
-        let Some(x) = &mut self.xform else { return };
-        match x.kind {
-            XformKind::Scale { anchor } => {
-                let d = view.screen_to_doc(p);
-                let (w, h) = (x.bbox.1 .0 - anchor.0, x.bbox.1 .1 - anchor.1);
-                // Largeur/hauteur signées entre l'ancre et le coin tiré.
-                let denom_x = if w.abs() < 1e-3 { x.bbox.0 .0 - anchor.0 } else { w };
-                let denom_y = if h.abs() < 1e-3 { x.bbox.0 .1 - anchor.1 } else { h };
-                let mut sx = if denom_x.abs() > 1e-3 { (d.0 - anchor.0) / denom_x } else { 1.0 };
-                let mut sy = if denom_y.abs() > 1e-3 { (d.1 - anchor.1) / denom_y } else { 1.0 };
-                if uniform {
-                    let s = sx.abs().max(sy.abs());
-                    sx = s * sx.signum();
-                    sy = s * sy.signum();
-                }
-                x.sx = sx.clamp(-20.0, 20.0);
-                x.sy = sy.clamp(-20.0, 20.0);
-            }
-            XformKind::Rotate { center, start } => {
-                let pc = view.doc_to_screen(center);
-                let a = (p.y - pc.y).atan2(p.x - pc.x);
-                let mut da = a - start;
-                if uniform {
-                    // Maj : par pas de 15°.
-                    let step = std::f32::consts::FRAC_PI_8 * 0.5;
-                    da = (da / step).round() * step;
-                }
-                x.angle = da;
-            }
-        }
-    }
-
-    /// Valide la transformation en cours (annulable).
-    fn commit_transform(&mut self) {
-        let Some(x) = self.xform.take() else { return };
-        let (strokes, texts, images) = self.selection_ids();
-        let layer = self.doc.active_id();
-        match x.kind {
-            XformKind::Scale { anchor } => {
-                if (x.sx - 1.0).abs() < 1e-3 && (x.sy - 1.0).abs() < 1e-3 {
-                    return;
-                }
-                if x.sx.abs() < 1e-2 || x.sy.abs() < 1e-2 {
-                    return;
-                }
-                self.history.push(
-                    &mut self.doc,
-                    Command::Scale { layer, strokes: strokes.clone(), texts, images, pivot: anchor, sx: x.sx, sy: x.sy },
-                );
-            }
-            XformKind::Rotate { center, .. } => {
-                if x.angle.abs() < 1e-3 {
-                    return;
-                }
-                self.history.push(
-                    &mut self.doc,
-                    Command::Rotate { layer, strokes: strokes.clone(), texts, images, pivot: center, angle: x.angle },
-                );
-            }
-        }
-        self.cache.invalidate(strokes.iter());
     }
 
     // --- Recadrage d'image --------------------------------------------------
@@ -3199,28 +3072,8 @@ impl PaintApp {
         let blue = Color32::from_rgb(40, 110, 220);
 
         // En cours de transformation : aperçu de la boîte transformée.
-        if let Some(x) = &self.xform {
-            let (mn, mx) = x.bbox;
-            let corners0 = [(mn.0, mn.1), (mx.0, mn.1), (mx.0, mx.1), (mn.0, mx.1)];
-            let pts: Vec<Pos2> = corners0
-                .iter()
-                .map(|c| {
-                    let t = match x.kind {
-                        XformKind::Scale { anchor } => (
-                            anchor.0 + (c.0 - anchor.0) * x.sx,
-                            anchor.1 + (c.1 - anchor.1) * x.sy,
-                        ),
-                        XformKind::Rotate { center, .. } => {
-                            let (co, si) = (x.angle.cos(), x.angle.sin());
-                            let (dx, dy) = (c.0 - center.0, c.1 - center.1);
-                            (center.0 + dx * co - dy * si, center.1 + dx * si + dy * co)
-                        }
-                    };
-                    view.doc_to_screen(t)
-                })
-                .collect();
-            let mut poly = pts.clone();
-            poly.push(pts[0]);
+        if let Some(mut poly) = self.xform_preview(view) {
+            poly.push(poly[0]);
             painter.add(egui::Shape::line(poly, egui::Stroke::new(1.5, blue)));
             return;
         }

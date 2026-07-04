@@ -3,6 +3,15 @@
 Versions alignées sur les sprints. Détail complet : [SPRINTS.md](SPRINTS.md)
 et le journal git.
 
+## 0.12.1 — juillet 2026 (Sprint 13.8 — suite du découpage de `app.rs`)
+
+- `app/mod.rs` → `app/mod.rs` + `app/transform.rs` : la machine à états de
+  transformation interactive de la sélection (poignées d'échelle/rotation,
+  glissé, aperçu, undo dédié) extraite en sous-module, même schéma que
+  `app/pen_edit.rs` (Sprint 12). `app/mod.rs` passe de 4 444 à 4 297 lignes.
+  1 nouveau test unitaire (un scale/rotate en dessous du seuil de bruit ne
+  pousse pas de commande d'undo).
+
 ## 0.12.0 — juillet 2026 (Sprint 12 — qualité, à partir de l'audit ANALYSE.md)
 
 Détail complet et mesures : [SPRINTANALYSIS.md](SPRINTANALYSIS.md).
