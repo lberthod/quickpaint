@@ -374,6 +374,14 @@ fn style_presets_window(ctx: &egui::Context, app: &mut PaintApp) {
                 let name = app.style_presets[i].name.clone();
                 app.delete_style_preset(&name);
             }
+            // Bouton de fermeture explicite (UX-5.2) : cohérence avec les
+            // autres fenêtres modales du projet, qui offrent toutes croix
+            // *et* bouton plutôt qu'un mélange des deux (constat relevé en
+            // auditant les 5 fenêtres, UX_SPRINTS.md).
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_style_presets = false;
+            }
         });
     if !open {
         app.show_style_presets = false;
@@ -479,6 +487,12 @@ fn shortcuts_prefs_window(ctx: &egui::Context, app: &mut PaintApp) {
                 app.keybindings.reset_defaults();
                 app.capturing_shortcut = None;
             }
+            // Bouton de fermeture explicite (UX-5.2), voir style_presets_window.
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_shortcuts_prefs = false;
+                app.capturing_shortcut = None;
+            }
         });
     if !open {
         app.show_shortcuts_prefs = false;
@@ -567,6 +581,25 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.open_project();
                 ui.close_menu();
             }
+            // Fichiers récents (UX-4.3) : avant, rouvrir le projet d'hier
+            // repartait toujours d'un dialogue de fichiers vide (constat C10,
+            // UX_SPRINTS.md), alors que settings.json persiste déjà d'autres
+            // préférences locales de la même façon.
+            let recent = crate::i18n::load_recent_projects();
+            ui.add_enabled_ui(!recent.is_empty(), |ui| {
+                ui.menu_button(t("Ouvrir récent", "Open recent"), |ui| {
+                    for path in &recent {
+                        let name = std::path::Path::new(path)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.clone());
+                        if ui.button(name).on_hover_text(path.as_str()).clicked() {
+                            app.open_recent_project(path);
+                            ui.close_menu();
+                        }
+                    }
+                });
+            });
             if ui.button(mtitle(ic::FLOPPY_DISK, t("Enregistrer le projet (⌘S)", "Save project (⌘S)"))).clicked() {
                 app.save_project();
                 ui.close_menu();
@@ -736,6 +769,38 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     ui.close_menu();
                 }
             });
+            // Fusionné depuis un ancien menu « Aligner » séparé au niveau
+            // racine (UX-5.3) : ces actions portent sur la sélection, comme
+            // « Disposition » juste au-dessus — les regrouper réduit le
+            // nombre de menus de premier niveau (9 → 8) plutôt que de les
+            // laisser dispersés (décision documentée dans UX_SPRINTS.md,
+            // item UX-5.3 : fusion dans Édition retenue plutôt qu'un
+            // troisième menu « Objet »).
+            ui.menu_button(mtitle(ic::FRAME_CORNERS, t("Aligner", "Align")), |ui| {
+                let items: &[(&str, AlignMode)] = &[
+                    (t("Bords gauches", "Left edges"), AlignMode::Left),
+                    (t("centres (H)", "centers (H)"), AlignMode::CenterH),
+                    (t("Bords droits", "Right edges"), AlignMode::Right),
+                    (t("Bords hauts", "Top edges"), AlignMode::Top),
+                    (t("centres (V)", "centers (V)"), AlignMode::MiddleV),
+                    (t("Bords bas", "Bottom edges"), AlignMode::Bottom),
+                ];
+                for (label, mode) in items {
+                    if ui.button(*label).clicked() {
+                        app.align(*mode);
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+                if ui.button(t("Répartir horizontalement", "Distribute horizontally")).clicked() {
+                    app.align(AlignMode::DistributeH);
+                    ui.close_menu();
+                }
+                if ui.button(t("Répartir verticalement", "Distribute vertically")).clicked() {
+                    app.align(AlignMode::DistributeV);
+                    ui.close_menu();
+                }
+            });
             if ui.button(t("Effacer le calque", "Clear layer")).clicked() {
                 app.clear_active_layer();
                 ui.close_menu();
@@ -823,32 +888,6 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
         });
 
-        ui.menu_button(mtitle(ic::FRAME_CORNERS, t("Aligner", "Align")), |ui| {
-            let items: &[(&str, AlignMode)] = &[
-                (t("Bords gauches", "Left edges"), AlignMode::Left),
-                (t("centres (H)", "centers (H)"), AlignMode::CenterH),
-                (t("Bords droits", "Right edges"), AlignMode::Right),
-                (t("Bords hauts", "Top edges"), AlignMode::Top),
-                (t("centres (V)", "centers (V)"), AlignMode::MiddleV),
-                (t("Bords bas", "Bottom edges"), AlignMode::Bottom),
-            ];
-            for (label, mode) in items {
-                if ui.button(*label).clicked() {
-                    app.align(*mode);
-                    ui.close_menu();
-                }
-            }
-            ui.separator();
-            if ui.button(t("Répartir horizontalement", "Distribute horizontally")).clicked() {
-                app.align(AlignMode::DistributeH);
-                ui.close_menu();
-            }
-            if ui.button(t("Répartir verticalement", "Distribute vertically")).clicked() {
-                app.align(AlignMode::DistributeV);
-                ui.close_menu();
-            }
-        });
-
         ui.menu_button(mtitle(ic::EYE, t("Vue", "View")), |ui| {
             ui.horizontal(|ui| {
                 if ui.button(egui::RichText::new("−").monospace()).clicked() {
@@ -871,6 +910,18 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             ui.add(
                 egui::DragValue::new(&mut app.grid_size).speed(1.0).range(5.0..=200.0).prefix(t("pas ", "step ")),
             );
+            ui.separator();
+            // Couleur de fond du document (UX-4.2) : propriété du document,
+            // pas de l'outil actif — vivait avant dans la barre d'options,
+            // invisible dès qu'un outil autre que peinture était actif
+            // (constat C8, UX_SPRINTS.md).
+            ui.horizontal(|ui| {
+                ui.label(t("Fond du document :", "Document background:"));
+                let mut bg = [app.bg.r(), app.bg.g(), app.bg.b()];
+                if ui.color_edit_button_srgb(&mut bg).changed() {
+                    app.bg = Color32::from_rgb(bg[0], bg[1], bg[2]);
+                }
+            });
         });
 
         ui.menu_button(mtitle(ic::SLIDERS, t("Filtres", "Filters")), |ui| {
@@ -906,15 +957,19 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             ui.separator();
             ui.label(format!("{} {:.0} %", t("Zoom", "Zoom"), app.zoom * 100.0));
             ui.separator();
+            // Icônes Phosphor (UX-1.3) : le reste de l'interface (outils,
+            // calques, menus) utilise déjà cette police vectorielle —
+            // undo/redo étaient les deux seuls boutons en glyphes Unicode
+            // bruts, moins nets et visuellement détonnants (constat C9).
             if ui
-                .add_enabled(app.history.can_redo(), egui::Button::new("↷"))
+                .add_enabled(app.history.can_redo(), egui::Button::new(ic::ARROW_U_UP_RIGHT))
                 .on_hover_text(t("Rétablir (⌘⇧Z)", "Redo (⌘⇧Z)"))
                 .clicked()
             {
                 app.redo();
             }
             if ui
-                .add_enabled(app.history.can_undo(), egui::Button::new("↶"))
+                .add_enabled(app.history.can_undo(), egui::Button::new(ic::ARROW_U_UP_LEFT))
                 .on_hover_text(t("Annuler (⌘Z)", "Undo (⌘Z)"))
                 .clicked()
             {
@@ -936,16 +991,111 @@ fn language_switch(ui: &mut Ui) {
     }
 }
 
+/// Clé stable (jamais traduite — persistée dans `settings.json`) d'un groupe
+/// de `tool_groups()`, dans le même ordre. UX-2.1.
+fn tool_group_key(gi: usize) -> &'static str {
+    const KEYS: &[&str] = &["navigation", "drawing", "photo_retouch", "shapes", "pen_text", "local_effects", "composition"];
+    KEYS.get(gi).copied().unwrap_or("other")
+}
+
+/// Libellé affiché (traduit) d'un groupe de `tool_groups()`, même ordre.
+fn tool_group_label(gi: usize) -> &'static str {
+    match gi {
+        0 => t("Navigation", "Navigation"),
+        1 => t("Dessin", "Drawing"),
+        2 => t("Retouche photo", "Photo retouch"),
+        3 => t("Formes", "Shapes"),
+        4 => t("Plume & Texte", "Pen & Text"),
+        5 => t("Effets locaux", "Local effects"),
+        _ => t("Composition", "Composition"),
+    }
+}
+
+/// Barre d'outils regroupée par catégorie, repliable (UX-2.1) : avant, 29
+/// outils s'affichaient toujours à plat et débordaient sur une deuxième
+/// rangée quasi vide (constat C3, UX_SPRINTS.md). Navigation/Dessin/Plume &
+/// Texte restent toujours visibles ; Retouche photo/Effets locaux/
+/// Composition démarrent repliés (état persisté). La famille Formes utilise
+/// un sélecteur secondaire dédié (`shape_family_selector`, UX-2.2) plutôt
+/// que le repli générique.
 fn tools_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
         for (gi, group) in tool_groups().iter().enumerate() {
             if gi > 0 {
                 ui.separator();
             }
-            for (tool, name, hint) in group {
+            let key = tool_group_key(gi);
+            if key == "shapes" {
+                shape_family_selector(ui, app, group);
+                continue;
+            }
+            let label = tool_group_label(gi);
+            let collapsed = app.collapsed_toolbar_groups.contains(key);
+            let chevron = if collapsed { egui_phosphor::regular::CARET_RIGHT } else { egui_phosphor::regular::CARET_DOWN };
+            if ui
+                .small_button(chevron)
+                .on_hover_text(format!("{label} {}", if collapsed { t("(replié)", "(collapsed)") } else { "" }))
+                .clicked()
+            {
+                app.toggle_toolbar_group(key);
+            }
+            if !collapsed {
+                for (tool, name, hint) in group {
+                    tool_button(ui, app, *tool, name, hint);
+                }
+            } else if let Some((tool, name, hint)) = group.iter().find(|(t, _, _)| *t == app.active_tool) {
+                // L'outil actif appartient à ce groupe replié : ne jamais le
+                // masquer, même replié (sinon rien n'indique l'outil en cours).
                 tool_button(ui, app, *tool, name, hint);
             }
         }
+    });
+}
+
+/// Sélecteur secondaire de la famille Formes (UX-2.2) : un seul bouton
+/// visible (l'outil actif de la famille, ou Rectangle par défaut) plutôt que
+/// les 6 boutons de la famille toujours affichés. Un clic ouvre un popup
+/// listant les 6 formes ; en choisir une la sélectionne et referme le popup.
+fn shape_family_selector(ui: &mut Ui, app: &mut PaintApp, group: &[(ActiveTool, &'static str, &'static str)]) {
+    let active_in_family = group.iter().find(|(tool, _, _)| *tool == app.active_tool).copied();
+    let selected = active_in_family.is_some();
+    // Rectangle (index 2) comme représentant neutre quand aucune forme de la
+    // famille n'est l'outil actif.
+    let (face_tool, face_name, face_hint) = active_in_family.unwrap_or(group[2]);
+    let accent = tool_accent(face_tool);
+
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 30.0), Sense::click());
+    let (bg, icon_col) = if selected {
+        (accent, Color32::WHITE)
+    } else if resp.hovered() {
+        (accent.gamma_multiply(0.45), Color32::WHITE)
+    } else {
+        (accent.gamma_multiply(0.16), accent)
+    };
+    ui.painter().rect_filled(rect.shrink(1.0), 6.0, bg);
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tool_glyph(face_tool), fill_font(18.0), icon_col);
+    // Petit chevron en coin : signale un sélecteur à options multiples
+    // (distinct du badge damier des outils pixel).
+    ui.painter().text(
+        rect.right_bottom() - Vec2::new(3.0, 2.0),
+        egui::Align2::CENTER_CENTER,
+        egui_phosphor::regular::CARET_DOWN,
+        egui::FontId::proportional(8.0),
+        icon_col,
+    );
+
+    let popup_id = ui.make_persistent_id("shape_family_popup");
+    if resp.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup_id));
+    }
+    let resp = resp.on_hover_text(format!("{face_name} — {face_hint}"));
+
+    egui::popup_below_widget(ui, popup_id, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        ui.horizontal(|ui| {
+            for (tool, name, hint) in group {
+                tool_button(ui, app, *tool, name, hint);
+            }
+        });
     });
 }
 
@@ -1158,6 +1308,76 @@ fn font_family_picker(ui: &mut Ui, app: &mut PaintApp) -> bool {
     changed
 }
 
+/// Actions sur les éléments sélectionnés — ordre (z-order), alignement des
+/// images, recadrage — dans la barre d'options de l'outil Sélection (UX-3.4).
+/// Vivaient avant dans le panneau des calques, qui n'a désormais plus que
+/// des actions sur des calques (constat C6, UX_SPRINTS.md).
+fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
+    use crate::app::ZMove;
+    ui.separator();
+    let has = !app.selection.is_empty();
+    ui.label(t("Ordre :", "Order:"));
+    if ui
+        .add_enabled(has, egui::Button::new(t("Devant", "Front")))
+        .on_hover_text(t("Premier plan (⌘⇧])", "Bring to front (⌘⇧])"))
+        .clicked()
+    {
+        app.reorder(ZMove::Front);
+    }
+    if ui
+        .add_enabled(has, egui::Button::new(t("Avancer", "Forward")))
+        .on_hover_text(t("Avancer (⌘])", "Bring forward (⌘])"))
+        .clicked()
+    {
+        app.reorder(ZMove::Forward);
+    }
+    if ui
+        .add_enabled(has, egui::Button::new(t("Reculer", "Backward")))
+        .on_hover_text(t("Reculer (⌘[)", "Send backward (⌘[)"))
+        .clicked()
+    {
+        app.reorder(ZMove::Backward);
+    }
+    if ui
+        .add_enabled(has, egui::Button::new(t("Fond", "Back")))
+        .on_hover_text(t("Arrière-plan (⌘⇧[)", "Send to back (⌘⇧[)"))
+        .clicked()
+    {
+        app.reorder(ZMove::Back);
+    }
+
+    ui.separator();
+    if ui
+        .button(t("Aligner", "Align"))
+        .on_hover_text(t("Images côte à côte (comparer)", "Images side by side (compare)"))
+        .clicked()
+    {
+        app.align_images_row();
+    }
+    if ui
+        .button(t("Rogner", "Crop"))
+        .on_hover_text(t("Recadrer l'image sélectionnée", "Crop the selected image"))
+        .clicked()
+    {
+        app.start_crop();
+    }
+    // Contrainte de ratio du recadrage, proposée pendant le mode rognage.
+    if app.is_cropping() {
+        ui.separator();
+        ui.label(t("Ratio :", "Ratio:"));
+        let choices: &[(&str, Option<f32>)] = &[
+            (t("Libre", "Free"), None),
+            ("1:1", Some(1.0)),
+            ("4:3", Some(4.0 / 3.0)),
+            ("16:9", Some(16.0 / 9.0)),
+            ("A4", Some(210.0 / 297.0)),
+        ];
+        for (label, ratio) in choices {
+            ui.selectable_value(&mut app.crop_ratio, *ratio, *label);
+        }
+    }
+}
+
 fn options_row(ui: &mut Ui, app: &mut PaintApp) {
     ui.horizontal_wrapped(|ui| {
         // Outil Sélection : choix du mode (rectangle / lasso / baguette).
@@ -1176,6 +1396,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             ui.separator();
             ui.label(t("Couleur :", "Color:"));
             brush_color_edit(ui, app);
+            selection_actions(ui, app);
             return;
         }
         // Outil Texte : taille + style riche (police, gras, alignement, contour).
@@ -1316,13 +1537,6 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         })
         .response
         .on_hover_text(t("Presets de pinceau", "Brush presets"));
-
-        ui.separator();
-        ui.label(t("Fond :", "Background:"));
-        let mut bg = [app.bg.r(), app.bg.g(), app.bg.b()];
-        if ui.color_edit_button_srgb(&mut bg).changed() {
-            app.bg = Color32::from_rgb(bg[0], bg[1], bg[2]);
-        }
 
         ui.separator();
         for preset in PRESET_COLORS {

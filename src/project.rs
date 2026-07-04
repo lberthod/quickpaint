@@ -27,15 +27,24 @@ pub fn save_dialog(doc: &Document) -> Option<PathBuf> {
 /// Ouvre un sélecteur « Ouvrir » et charge un document JSON.
 ///
 /// `None` : dialogue annulé par l'utilisateur (pas une erreur).
-/// `Some(Err(message))` : fichier illisible, JSON invalide, version de
-/// format trop récente, ou dimensions hors bornes — message localisé prêt à
-/// afficher (ANALYSE.md §8.2 : plus d'échec silencieux au chargement).
-/// `Some(Ok(doc))` : succès.
-pub fn open_dialog() -> Option<Result<Document, String>> {
+/// `Some((path, Err(message)))` : fichier illisible, JSON invalide, version
+/// de format trop récente, ou dimensions hors bornes — message localisé prêt
+/// à afficher (ANALYSE.md §8.2 : plus d'échec silencieux au chargement).
+/// `Some((path, Ok(doc)))` : succès. Le chemin est toujours renvoyé (succès
+/// ou échec) pour que l'appelant puisse alimenter/nettoyer les fichiers
+/// récents (UX-4.3).
+pub fn open_dialog() -> Option<(PathBuf, Result<Document, String>)> {
     let path = rfd::FileDialog::new()
         .add_filter(t("Projet QuickPaint", "QuickPaint project"), &["json"])
         .pick_file()?;
-    Some(load_from_path(&path))
+    let result = load_from_path(&path);
+    Some((path, result))
+}
+
+/// Charge un document JSON depuis un chemin déjà connu (UX-4.3, fichiers
+/// récents) — pas de dialogue, mêmes règles de validation que [`open_dialog`].
+pub fn open_path(path: &std::path::Path) -> Result<Document, String> {
+    load_from_path(path)
 }
 
 fn load_from_path(path: &std::path::Path) -> Result<Document, String> {

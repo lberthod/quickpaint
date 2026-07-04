@@ -3,9 +3,9 @@
 use crate::app::PaintApp;
 use crate::i18n::t;
 use crate::tools::ActiveTool;
-use egui::{Align, Layout, Ui};
+use egui::{Align, Color32, Layout, Ui};
 
-pub fn show(ui: &mut Ui, app: &PaintApp) {
+pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     let (tool_name, size) = match app.active_tool {
         ActiveTool::Select => (t("↖ Sélection", "↖ Select"), app.brush.width),
         ActiveTool::Brush => (t("Pinceau", "Brush"), app.brush.width),
@@ -48,19 +48,68 @@ pub fn show(ui: &mut Ui, app: &PaintApp) {
         ui.separator();
         ui.label(format!("{} {} · {w}×{h}", t("Calque", "Layer"), layer + 1));
         ui.separator();
-        ui.label(format!("{} {:.0} %", t("Zoom", "Zoom"), app.zoom * 100.0));
+        zoom_controls(ui, app);
 
-        // À droite : message d'état si présent, sinon l'aide raccourcis.
+        // Zone de droite : message de statut (coloré par sévérité — UX-1.2),
+        // sinon l'aide raccourcis. Repliée en icône ⓘ si la fenêtre est trop
+        // étroite pour afficher le pavé d'aide en entier : les deux blocs se
+        // chevauchaient et devenaient illisibles avant ce correctif (constat
+        // C1, UX_SPRINTS.md).
+        let remaining = ui.available_width();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &app.status {
             Some(msg) => {
-                ui.colored_label(egui::Color32::from_rgb(40, 130, 60), msg);
+                let color = if app.status_error {
+                    Color32::from_rgb(200, 60, 55) // échec
+                } else {
+                    Color32::from_rgb(40, 130, 60) // succès / information
+                };
+                ui.colored_label(color, msg);
             }
             None => {
-                ui.label(t(
+                let hint = t(
                     "V/B/E/L/R/O/T/I/H · Suppr efface · ⌘D duplique · Espace=pan · ⌘±/0 zoom · ⌘Z · ⌘N/O/S/E",
                     "V/B/E/L/R/O/T/I/H · Del erases · ⌘D duplicate · Space=pan · ⌘±/0 zoom · ⌘Z · ⌘N/O/S/E",
-                ));
+                );
+                // Largeur de police par défaut ≈ 6px/caractère : pas une
+                // mesure exacte (indisponible avant le rendu du label), mais
+                // un seuil prudent qui évite le chevauchement à toute
+                // largeur de fenêtre usuelle.
+                if remaining > hint.len() as f32 * 6.0 {
+                    ui.label(hint);
+                } else {
+                    ui.label(egui_phosphor::regular::INFO).on_hover_text(hint);
+                }
             }
         });
     });
+}
+
+/// Contrôles de zoom persistants (UX-4.1) : `−` / pourcentage cliquable
+/// (remet à 100 %) / `+`, plus un bouton « Ajuster ». Avant, le zoom n'était
+/// réglable qu'en ouvrant le menu Vue (2 clics) ou au clavier — friction
+/// disproportionnée pour un geste aussi fréquent, notamment sur l'origine
+/// tactile du projet (constat C4, UX_SPRINTS.md). Le menu Vue garde les
+/// mêmes actions (`zoom_in`/`zoom_out`/`reset_view`/`fit_view`) : aucune
+/// régression, juste un deuxième accès plus rapide.
+fn zoom_controls(ui: &mut Ui, app: &mut PaintApp) {
+    if ui.small_button("−").on_hover_text(t("Zoom arrière", "Zoom out")).clicked() {
+        app.zoom_out();
+    }
+    if ui
+        .small_button(format!("{:.0} %", app.zoom * 100.0))
+        .on_hover_text(t("Réinitialiser le zoom (100 %)", "Reset zoom (100%)"))
+        .clicked()
+    {
+        app.reset_view();
+    }
+    if ui.small_button("+").on_hover_text(t("Zoom avant", "Zoom in")).clicked() {
+        app.zoom_in();
+    }
+    if ui
+        .small_button(egui_phosphor::regular::FRAME_CORNERS)
+        .on_hover_text(t("Ajuster à la fenêtre", "Fit to window"))
+        .clicked()
+    {
+        app.fit_view();
+    }
 }

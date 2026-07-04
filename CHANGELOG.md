@@ -2,6 +2,35 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.13.0 — juillet 2026 (UX-1 à UX-5 — optimisation UI/UX & fonctionnalité)
+
+Détail complet, constats et critères d'acceptation : [UX_SPRINTS.md](UX_SPRINTS.md).
+
+- **Bugs visibles corrigés** : chevauchement de texte dans le footer,
+  messages de statut désormais colorés par sévérité (rouge = échec, vert =
+  succès — avant toujours vert), icônes undo/redo alignées sur le reste de
+  l'interface (Phosphor).
+- **Barre d'outils regroupée** : 7 catégories repliables (état persisté),
+  14 icônes visibles par défaut au lieu de 29 ; la famille Formes devient un
+  sélecteur secondaire à un seul bouton + popup.
+- **Panneau des calques modernisé** : glisser-déposer pour réordonner
+  (identifié par id de calque, pas par index), largeur ajustable et
+  persistée, renommage inline par double-clic. Les actions de sélection
+  (aligner/rogner/ordre) migrent vers la barre d'options de l'outil
+  Sélection — le panneau ne porte plus que des actions sur des calques.
+- **Menu contextuel** : clic droit sur un élément sélectionné du canevas
+  (dupliquer, supprimer, copier/coller le style, ordre) — première apparition
+  de ce pattern dans l'app.
+- **Zoom et navigation** : contrôles persistants dans le footer (avant :
+  enterrés dans le menu Vue) ; couleur de fond du document déplacée vers le
+  menu Vue (propriété de document, pas d'outil) ; liste de fichiers récents
+  dans le menu Fichier.
+- **Premier lancement** : ouvre la galerie de modèles plutôt qu'un canevas
+  vide. Fenêtres modales harmonisées (croix + bouton Fermer partout). Menu
+  Aligner fusionné dans Édition (9 → 8 menus de premier niveau).
+- 4 nouveaux tests unitaires (arithmétique du glisser-déposer de calques) ;
+  115 tests au total, 0 warning clippy.
+
 ## 0.12.2 — juillet 2026 (Sprint 13.9 — démarrage Mac App Store)
 
 - [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements) :

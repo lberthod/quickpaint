@@ -92,6 +92,9 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     let mut select: Option<usize> = None;
     let mut toggle_group: Option<String> = None;
     let mut prev_group: Option<String> = None;
+    let mut reorder: Option<(u64, u64)> = None;
+    let mut start_rename: Option<(u64, String)> = None;
+    let mut commit_rename = false;
     for idx in (0..count).rev() {
         let group = app.doc.layers[idx].group.clone();
         if group != prev_group {
@@ -110,38 +113,87 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
         let layer: &mut Layer = &mut app.doc.layers[idx];
         let is_active = idx == app.doc.active_layer;
-        ui.horizontal(|ui| {
-            if group.is_some() {
-                ui.add_space(12.0); // indentation des calques groupés
-            }
-            let eye = if layer.visible { egui_phosphor::regular::EYE } else { egui_phosphor::regular::EYE_SLASH };
-            if icon_button(ui, false, eye)
-                .on_hover_text(t("Afficher / masquer", "Show / hide"))
-                .clicked()
-            {
-                layer.visible = !layer.visible;
-            }
-            let dim = if layer.opacity < 0.999 {
-                format!(" · {:.0}%", layer.opacity * 100.0)
-            } else {
-                String::new()
-            };
-            let clip = if layer.clip { "[clip] " } else { "" };
-            let label = if layer.adjustment.is_some() {
-                format!("{}{} ({}){}", clip, layer.name, t("réglage", "adjustment"), dim)
-            } else {
-                format!("{}{} ({}){}", clip, layer.name, layer.strokes.len(), dim)
-            };
-            if ui.selectable_label(is_active, label).clicked() {
-                select = Some(idx);
-            }
+        let renaming = app.layer_rename.as_ref().is_some_and(|(id, _)| *id == layer.id);
+
+        // Glisser-déposer pour réordonner (UX-3.1) : chaque ligne est à la
+        // fois une source (payload = l'id du calque — pas son index, qui
+        // pourrait dater d'une frame précédente) et une zone de dépôt ; un
+        // dépôt sur la ligne du calque `layer_id` l'y déplace. Avant, seuls
+        // les boutons ▲ Monter / ▼ Descendre existaient (un clic par
+        // position à franchir, constat C5, UX_SPRINTS.md).
+        let layer_id = layer.id;
+        let row_id = egui::Id::new("layer_row").with(layer_id);
+        let frame = egui::Frame::default().inner_margin(2.0);
+        let (_, dropped) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
+            ui.dnd_drag_source(row_id, layer_id, |ui| {
+                ui.horizontal(|ui| {
+                    if group.is_some() {
+                        ui.add_space(12.0); // indentation des calques groupés
+                    }
+                    ui.label(egui_phosphor::regular::DOTS_SIX_VERTICAL)
+                        .on_hover_text(t("Glisser pour réordonner", "Drag to reorder"));
+                    let eye = if layer.visible { egui_phosphor::regular::EYE } else { egui_phosphor::regular::EYE_SLASH };
+                    if icon_button(ui, false, eye)
+                        .on_hover_text(t("Afficher / masquer", "Show / hide"))
+                        .clicked()
+                    {
+                        layer.visible = !layer.visible;
+                    }
+                    let dim = if layer.opacity < 0.999 {
+                        format!(" · {:.0}%", layer.opacity * 100.0)
+                    } else {
+                        String::new()
+                    };
+                    let clip = if layer.clip { "[clip] " } else { "" };
+                    if renaming {
+                        let (_, buf) = app.layer_rename.as_mut().expect("renaming checked above");
+                        let resp = ui.add(egui::TextEdit::singleline(buf).desired_width(100.0));
+                        resp.request_focus();
+                        if resp.lost_focus() {
+                            commit_rename = true;
+                        }
+                    } else {
+                        let suffix = if layer.adjustment.is_some() {
+                            format!("({}){dim}", t("réglage", "adjustment"))
+                        } else {
+                            format!("({}){dim}", layer.strokes.len())
+                        };
+                        let label = ui.selectable_label(is_active, format!("{clip}{} {suffix}", layer.name));
+                        if label.clicked() {
+                            select = Some(idx);
+                        }
+                        if label.double_clicked() {
+                            start_rename = Some((layer.id, layer.name.clone()));
+                        }
+                    }
+                });
+            });
         });
+        if let Some(from_id) = dropped {
+            reorder = Some((*from_id, layer_id));
+        }
     }
     if let Some(idx) = select {
         app.doc.active_layer = idx;
     }
     if let Some(name) = toggle_group {
         app.toggle_group(&name);
+    }
+    if let Some((from, to)) = reorder {
+        app.reorder_layer(from, to);
+    }
+    if let Some(pair) = start_rename {
+        app.layer_rename = Some(pair);
+    }
+    if commit_rename {
+        if let Some((id, new_name)) = app.layer_rename.take() {
+            let trimmed = new_name.trim();
+            if !trimmed.is_empty() {
+                if let Some(l) = app.doc.layers.iter_mut().find(|l| l.id == id) {
+                    l.name = trimmed.to_string();
+                }
+            }
+        }
     }
 
     // --- Réglages du calque actif (non destructif, façon Photoshop/GIMP) ---
@@ -278,83 +330,15 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
     });
 
+    // Les actions sur les ÉLÉMENTS sélectionnés (aligner/rogner/ordre)
+    // vivaient ici avant UX-3.4 — déplacées dans la barre d'options de
+    // l'outil Sélection (`toolbar::options_row`), qui n'apparaît que
+    // pertinent : ce panneau ne porte plus que des actions sur des calques
+    // (constat C6, UX_SPRINTS.md).
+
     // --- Liste des éléments du calque actif (voir / sélectionner) -----------
     ui.separator();
-    ui.horizontal(|ui| {
-        let active = app.doc.active_layer;
-        let l = &app.doc.layers[active];
-        ui.label(format!(
-            "{} ({}) :",
-            t("Éléments", "Elements"),
-            l.images.len() + l.texts.len() + l.strokes.len()
-        ));
-        if ui
-            .button(t("Aligner", "Align"))
-            .on_hover_text(t("Images côte à côte (comparer)", "Images side by side (compare)"))
-            .clicked()
-        {
-            app.align_images_row();
-        }
-        if ui
-            .button(t("Rogner", "Crop"))
-            .on_hover_text(t("Recadrer l'image sélectionnée", "Crop the selected image"))
-            .clicked()
-        {
-            app.start_crop();
-        }
-    });
-
-    // Contrainte de ratio du recadrage (proposée pendant le mode rognage).
-    if app.is_cropping() {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(t("Ratio :", "Ratio:"));
-            let choices: &[(&str, Option<f32>)] = &[
-                (t("Libre", "Free"), None),
-                ("1:1", Some(1.0)),
-                ("4:3", Some(4.0 / 3.0)),
-                ("16:9", Some(16.0 / 9.0)),
-                ("A4", Some(210.0 / 297.0)),
-            ];
-            for (label, ratio) in choices {
-                ui.selectable_value(&mut app.crop_ratio, *ratio, *label);
-            }
-        });
-    }
-
-    // Disposition (z-order) de la sélection — boutons directs.
-    ui.horizontal_wrapped(|ui| {
-        use crate::app::ZMove;
-        let has = !app.selection.is_empty();
-        ui.label(t("Ordre :", "Order:"));
-        if ui
-            .add_enabled(has, egui::Button::new(t("Devant", "Front")))
-            .on_hover_text(t("Premier plan (⌘⇧])", "Bring to front (⌘⇧])"))
-            .clicked()
-        {
-            app.reorder(ZMove::Front);
-        }
-        if ui
-            .add_enabled(has, egui::Button::new(t("Avancer", "Forward")))
-            .on_hover_text(t("Avancer (⌘])", "Bring forward (⌘])"))
-            .clicked()
-        {
-            app.reorder(ZMove::Forward);
-        }
-        if ui
-            .add_enabled(has, egui::Button::new(t("Reculer", "Backward")))
-            .on_hover_text(t("Reculer (⌘[)", "Send backward (⌘[)"))
-            .clicked()
-        {
-            app.reorder(ZMove::Backward);
-        }
-        if ui
-            .add_enabled(has, egui::Button::new(t("Fond", "Back")))
-            .on_hover_text(t("Arrière-plan (⌘⇧[)", "Send to back (⌘⇧[)"))
-            .clicked()
-        {
-            app.reorder(ZMove::Back);
-        }
-    });
+    ui.label(format!("{} :", t("Éléments du calque", "Layer elements")));
 
     // Liste virtualisée (show_rows) : seules les lignes visibles sont
     // construites → reste rapide même avec des milliers d'éléments.

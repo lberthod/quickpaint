@@ -85,11 +85,45 @@ struct Settings {
     /// + dégradé optionnel, réutilisables en un clic.
     #[serde(default)]
     style_presets: Vec<crate::model::StylePreset>,
+    /// Groupes de la barre d'outils repliés (UX-2.1). `#[serde(default =
+    /// ...)]`, pas `Default::default()` : un fichier qui n'a jamais eu ce
+    /// champ (installation existante) obtient les groupes secondaires
+    /// repliés par défaut ; un fichier qui l'a déjà écrit une fois (même
+    /// vide, tout déplié par l'utilisateur) est respecté tel quel.
+    #[serde(default = "default_collapsed_toolbar_groups")]
+    collapsed_toolbar_groups: Vec<String>,
+    /// Largeur du panneau des calques (UX-3.2), en points egui.
+    #[serde(default = "default_layers_panel_width")]
+    layers_panel_width: f32,
+    /// Projets récents (UX-4.3), le plus récent en tête, bornés à
+    /// `MAX_RECENT_PROJECTS`.
+    #[serde(default)]
+    recent_projects: Vec<String>,
+}
+
+/// Groupes de la barre d'outils repliés par défaut (UX-2.1) : les familles
+/// spécialisées, moins utilisées au quotidien que Navigation/Dessin/Formes/
+/// Texte. Clés stables (pas de texte traduit — voir `tool_group_key` dans
+/// `ui/toolbar.rs`), pour rester valides quelle que soit la langue courante.
+fn default_collapsed_toolbar_groups() -> Vec<String> {
+    vec!["photo_retouch".into(), "local_effects".into(), "composition".into()]
+}
+
+fn default_layers_panel_width() -> f32 {
+    170.0
 }
 
 fn settings_path() -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(PathBuf::from(home).join("Library/Application Support/QuickPaint/settings.json"))
+}
+
+/// `true` si aucun `settings.json` n'existe encore (UX-5.1, écran d'accueil).
+/// N'a de sens qu'appelé avant toute écriture de préférence dans la session
+/// courante — c'est le cas à la construction de `PaintApp`, avant toute
+/// interaction utilisateur.
+pub fn is_first_launch() -> bool {
+    settings_path().map(|p| !p.exists()).unwrap_or(false)
 }
 
 /// À appeler une fois au démarrage : charge la préférence persistée, sinon
@@ -190,6 +224,46 @@ pub fn load_style_presets() -> Vec<crate::model::StylePreset> {
 pub fn save_style_presets(presets: &[crate::model::StylePreset]) {
     let mut settings = read_settings();
     settings.style_presets = presets.to_vec();
+    write_settings(&settings);
+}
+
+/// Groupes de la barre d'outils repliés (UX-2.1), même fichier local.
+pub fn load_collapsed_toolbar_groups() -> Vec<String> {
+    read_settings().collapsed_toolbar_groups
+}
+
+pub fn save_collapsed_toolbar_groups(groups: &[String]) {
+    let mut settings = read_settings();
+    settings.collapsed_toolbar_groups = groups.to_vec();
+    write_settings(&settings);
+}
+
+/// Largeur du panneau des calques (UX-3.2), même fichier local.
+pub fn load_layers_panel_width() -> f32 {
+    read_settings().layers_panel_width
+}
+
+pub fn save_layers_panel_width(width: f32) {
+    let mut settings = read_settings();
+    settings.layers_panel_width = width;
+    write_settings(&settings);
+}
+
+/// Nombre maximal de projets récents conservés (UX-4.3).
+pub const MAX_RECENT_PROJECTS: usize = 8;
+
+/// Projets récents, le plus récent en tête, même fichier local.
+pub fn load_recent_projects() -> Vec<String> {
+    read_settings().recent_projects
+}
+
+/// Ajoute (ou remonte en tête) un chemin de projet, borné à
+/// `MAX_RECENT_PROJECTS`. Appelé après chaque sauvegarde/ouverture réussie.
+pub fn push_recent_project(path: &str) {
+    let mut settings = read_settings();
+    settings.recent_projects.retain(|p| p != path);
+    settings.recent_projects.insert(0, path.to_string());
+    settings.recent_projects.truncate(MAX_RECENT_PROJECTS);
     write_settings(&settings);
 }
 
