@@ -13,9 +13,9 @@
 ├────────────────────────────────────────────────────────────┤
 │ app/         état global (mod.rs), machine à états des     │
 │              outils, sélection, dialogues ; sous-modules    │
-│              extraits (ANALYSE.md §12.5, SPRINTS.md 13.8) : │
-│              pen_edit.rs (édition de nœuds Bézier après     │
-│              coup), transform.rs (échelle/rotation glissée) │
+│              extraits : pen_edit.rs (édition de nœuds       │
+│              Bézier après coup), transform.rs (échelle/     │
+│              rotation glissée de la sélection)              │
 ├────────────────────────────────────────────────────────────┤
 │ tools/       brush, eraser, pen, shape, bucket, boolean,   │
 │              guides, filter, assets, eyedropper, hit       │
@@ -69,8 +69,8 @@ variable est rendu comme un **ruban** (deux bords décalés de ±épaisseur/2,
 bouts ronds) — [render/ribbon.rs](src/render/ribbon.rs).
 
 La vraie pression stylet (tablettes Wacom…) nécessiterait de contourner
-winit/egui-winit (NSEvent custom) — investigué, scopé « L », en backlog
-(SPRINTS.md 13.7).
+winit/egui-winit (NSEvent custom) — investigué, scopé comme un chantier
+lourd (fork/patch du pipeline d'évènements), pas engagé.
 
 ## 4. Rendu
 
@@ -81,15 +81,16 @@ winit/egui-winit (NSEvent custom) — investigué, scopé « L », en backlog
   d'ajustement, avec **cache bitmap par calque** invalidé sélectivement.
   Seul le trait en cours est recalculé à chaque frame. Le contenu peint
   (pinceau/gomme pixel...) d'un calque « sale » est lui-même patché **tuile
-  par tuile** dans un cache persistant plutôt que ré-aplati en entier à
-  chaque dab (`RasterTileCache`, ANALYSE.md §12.1 — ≈103× plus rapide sur un
-  calque déjà bien rempli, mesuré). Reste au backlog : propager ce
-  découpage jusqu'au compositing multi-calques (fusion/écrêtage séquentiels).
+  par tuile** dans un cache persistant (`RasterTileCache`) plutôt que
+  ré-aplati en entier à chaque dab — ≈103× plus rapide sur un calque déjà
+  bien rempli (mesuré, `cargo test --release bench_full_layer_repaint_cost
+  -- --ignored --nocapture`). Reste au backlog : propager ce découpage
+  jusqu'au compositing multi-calques (fusion/écrêtage séquentiels).
 - **Export** ([`Compositor::render_to_rgba`](src/render/compositor.rs)) :
   rend le document à sa résolution **native** (`doc.size`) via ce même
   chemin de composition, indépendamment du zoom/de la taille de la fenêtre à
-  l'écran (ANALYSE.md §12.2 — remplace l'ancien export par capture d'écran
-  du viewport, qui plafonnait la résolution exportée à celle de la fenêtre).
+  l'écran — remplace l'ancien export par capture d'écran du viewport, qui
+  plafonnait la résolution exportée à celle de la fenêtre.
 
 ## 5. Undo / redo (pattern Command)
 
@@ -109,9 +110,9 @@ n'importe lequel.
 
 - **Projet** : `.json` (serde) — images et raster embarqués en PNG base64.
   Format v2 prévu (zip JSON + PNG séparés, façon .ora) : le base64 gonfle
-  les fichiers (SPRINTS.md 13.5). Version de format déjà en place
-  (`Document::format_version`, ANALYSE.md §12.3) pour préparer cette
-  migration.
+  les fichiers. `Document::format_version` déjà en place pour préparer
+  cette migration (un projet plus récent que ce que le binaire connaît est
+  refusé explicitement, pas mal interprété en silence).
 - **Export** : PNG/JPEG/WebP, PDF mono-page (writer minimal maison,
   DCTDecode), SVG vectoriel, export par lots multi-tailles.
 - **Préférences** : `~/Library/Application Support/QuickPaint/settings.json`
@@ -133,6 +134,13 @@ système au démarrage, préférence persistée. Arbitrage assumé : optimal pou
 5. `xcrun notarytool submit … --wait` puis `xcrun stapler staple`
 
 Le DMG signé/notarisé est publié via les GitHub Releases.
+
+Piste Mac App Store (démarrée, pas encore soumise) : entitlements App
+Sandbox minimaux dans [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements)
+(sandbox + accès fichiers via les panneaux natifs `rfd`, aucune entitlement
+réseau), validés par signature ad-hoc et un diagnostic embarqué
+(`quickpaint --sandbox-selftest`) — détail dans
+[packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md).
 
 ## 9. Contraintes produit (non négociables)
 

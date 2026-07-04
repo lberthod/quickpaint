@@ -80,16 +80,15 @@ window needed — the model, tools and history layers are UI-independent).
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — layers, data model, input pipeline,
   rendering, undo/redo design.
-- [ROADMAP.md](ROADMAP.md) — the "why": feature matrix vs
-  PhotoFiltre/Canva/Photoshop, the 3 borrowed foundations, priorities.
-- [SPRINTS.md](SPRINTS.md) — the "what & how": sprint-by-sprint delivery log
-  and the proposed next sprint.
-- [ANALYSE.md](ANALYSE.md) — full project audit (stack, quality, security,
-  performance) with prioritized recommendations (point-in-time snapshot).
-- [SPRINTANALYSIS.md](SPRINTANALYSIS.md) — Sprint 12: execution of the
-  audit's recommendations (compositor performance, native-resolution export,
-  input robustness, `app.rs` breakup) with before/after measurements.
+- [UX_SPRINTS.md](UX_SPRINTS.md) — UI/UX and functionality audit with a
+  5-sprint execution plan, grounded in real screenshots and code review.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
+- [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md) — Mac App Store
+  sandbox validation notes.
+
+Older planning documents (feature roadmap, sprint-by-sprint log, the initial
+technical audit) were retired once acted upon — see the git log for that
+history.
 
 ## License
 

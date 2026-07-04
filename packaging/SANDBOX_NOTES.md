@@ -1,10 +1,11 @@
-# App Sandbox — notes de validation (Sprint 13.9)
+# App Sandbox — notes de validation
 
-> Suite du chantier « Mac App Store » (SPRINTS.md 13+, ROADMAP.md). Objectif :
-> lever tôt les mauvaises surprises de sandbox, **avant** la soumission qui
-> nécessite le compte développeur. Tout ce qui suit a été vérifié en local,
-> par signature ad-hoc, sur cette machine — pas encore avec un vrai
-> certificat Developer ID / profil de provisioning.
+> Suite du chantier « Mac App Store », le plus gros levier de découvrabilité
+> non tiré du projet. Objectif : lever tôt les mauvaises surprises de
+> sandbox, **avant** la soumission qui nécessite le compte développeur. Tout
+> ce qui suit a été vérifié en local, par signature ad-hoc, sur cette
+> machine — pas encore avec un vrai certificat Developer ID / profil de
+> provisioning.
 
 ## Fichier d'entitlements
 
@@ -17,8 +18,8 @@ couvre les usages réels de l'app :
   dossier pour l'export par lots)
 
 Volontairement **absente** : toute entitlement réseau — aucune dépendance
-réseau dans le projet (ANALYSE.md §8), le sandbox le rend vérifiable par
-Apple à la revue, pas seulement affirmé dans le README.
+réseau dans le projet, le sandbox le rend vérifiable par Apple à la revue,
+pas seulement affirmé dans le README.
 
 ## Méthode de test
 
@@ -116,10 +117,11 @@ chemin vers l'App Store est plus court que redouté.
       ad-hoc (`--sign -`) par la vraie identité dans le script de build.
 - [ ] **App Store Connect** : fiche produit (captures d'écran, description,
       catégorie « Graphisme et design »), réponse au questionnaire de
-      confidentialité (aucune collecte de données — cohérent avec « 100 %
-      local », voir ANALYSE.md/SPRINTS.md).
+      confidentialité (aucune collecte de données — cohérent avec le
+      principe « 100 % local » du projet, aucune dépendance réseau).
 - [ ] **cargo-bundle** ne pose pas les entitlements lui-même : le
       `codesign --entitlements` reste une étape manuelle après
-      `cargo bundle --release`, à intégrer dans le script de release final
-      (voir SPRINTANALYSIS.md §12.4 pour la commande de signature/notarisation
-      complète — à adapter avec `--entitlements packaging/QuickPaint.entitlements`).
+      `cargo bundle --release`, à intégrer dans le script de release final —
+      voir la section « Packaging & distribution » d'ARCHITECTURE.md pour la
+      commande de signature/notarisation complète, à adapter avec
+      `--entitlements packaging/QuickPaint.entitlements`.

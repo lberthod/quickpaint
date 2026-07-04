@@ -1,7 +1,6 @@
 # Changelog — QuickPaint
 
-Versions alignées sur les sprints. Détail complet : [SPRINTS.md](SPRINTS.md)
-et le journal git.
+Versions alignées sur les sprints. Détail complet : le journal git.
 
 ## 0.12.2 — juillet 2026 (Sprint 13.9 — démarrage Mac App Store)
 
@@ -13,8 +12,7 @@ et le journal git.
   écriture/lecture disque fonctionnent sous sandbox.
 - Validé par signature ad-hoc + inspection du journal système : tous les
   sous-systèmes non interactifs testés fonctionnent **sans entitlement
-  supplémentaire**. Détail et reste à faire (signature réelle, test
-  interactif des dialogues) : [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md).
+  supplémentaire**. Détail et reste à faire : [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md).
 
 ## 0.12.1 — juillet 2026 (Sprint 13.8 — suite du découpage de `app.rs`)
 
@@ -25,9 +23,7 @@ et le journal git.
   1 nouveau test unitaire (un scale/rotate en dessous du seuil de bruit ne
   pousse pas de commande d'undo).
 
-## 0.12.0 — juillet 2026 (Sprint 12 — qualité, à partir de l'audit ANALYSE.md)
-
-Détail complet et mesures : [SPRINTANALYSIS.md](SPRINTANALYSIS.md).
+## 0.12.0 — juillet 2026 (Sprint 12 — qualité, à partir d'un audit technique)
 
 - **Fluidité** : le compositeur ne re-rastérise plus la surface peinte
   entière à chaque coup de pinceau pixel — cache incrémental par tuile
@@ -49,8 +45,8 @@ Détail complet et mesures : [SPRINTANALYSIS.md](SPRINTANALYSIS.md).
   règle/mesure, dessin en miroir rotatif, dégradé interactif au glisser.
 - Icônes vectorielles Phosphor (nettes à toute taille) en remplacement des
   emojis système.
-- Docs : ARCHITECTURE.md réécrit (état réel), ANALYSE.md (audit complet),
-  LICENSE (MIT), CHANGELOG, CI GitHub Actions.
+- Docs : ARCHITECTURE.md réécrit (état réel), LICENSE (MIT), CHANGELOG,
+  CI GitHub Actions.
 
 ## 0.10.0 (Sprint 10)
 
