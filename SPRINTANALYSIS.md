@@ -168,12 +168,12 @@ Ce que je **ne peux pas faire depuis cet environnement** : signer et notariser
 le `.dmg` (nécessite le trousseau macOS avec le certificat Developer ID du
 compte Apple de Loïc Berthod, et une session `xcrun notarytool` authentifiée
 — identifiants qui n'existent pas dans ce dépôt ni dans cet environnement
-d'exécution). Publier un DMG non signé sous un tag `v0.12.0` serait pire que
+d'exécution). Publier un DMG non signé sous un tag `v0.12.2` serait pire que
 ne rien publier : Gatekeeper bloquerait les utilisateurs et le tag laisserait
 croire qu'une release existe.
 
 **Ce qui a été préparé** pour que l'étape manuelle soit la plus courte
-possible : version Cargo alignée (`0.12.0`), CHANGELOG à jour, README pointant
+possible : version Cargo alignée (`0.12.2`), CHANGELOG à jour, README pointant
 déjà vers `github.com/lberthod/quickpaint/releases`, CI verte sur `main`.
 
 **Reste à faire, par toi, en local (macOS avec ton certificat Developer ID)** :
@@ -185,15 +185,34 @@ codesign --deep --options runtime -s "Developer ID Application: Loïc Berthod (T
 create-dmg QuickPaint.app                   # ou hdiutil create
 xcrun notarytool submit QuickPaint.dmg --keychain-profile "AC_PASSWORD" --wait
 xcrun stapler staple QuickPaint.dmg
-git tag v0.12.0 && git push origin v0.12.0
-gh release create v0.12.0 QuickPaint.dmg --title "QuickPaint 0.12.0" \
+git tag v0.12.2 && git push origin v0.12.2
+gh release create v0.12.2 QuickPaint.dmg --title "QuickPaint 0.12.2" \
   --notes-file CHANGELOG.md
 ```
 
-Le chantier **Mac App Store** (sandbox + entitlements) reste au backlog
-produit (SPRINTS.md 13+) — plus gros que cette étape de distribution ad hoc,
-et nécessite aussi un compte développeur + des décisions de conformité
-(entitlements minimaux, revue Apple) hors du périmètre d'un audit technique.
+Note : cette commande (distribution **Developer ID hors App Store**) ne pose
+**pas** d'App Sandbox — le sandbox est spécifique au canal App Store, pas une
+exigence de la notarisation classique.
+
+Le chantier **Mac App Store** a démarré en parallèle (Sprint 13.9, avant
+même la première release signée) — voir [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md) :
+entitlements minimaux définis et validés (sans compte développeur, via
+signature ad-hoc + inspection du journal système), diagnostic embarqué
+(`quickpaint --sandbox-selftest`). Pour une **soumission App Store** (compte
+déjà disponible), la commande de signature devient :
+
+```bash
+codesign --deep --options runtime \
+  --entitlements packaging/QuickPaint.entitlements \
+  -s "3rd Party Mac Developer Application: Loïc Berthod (TEAMID)" QuickPaint.app
+xcrun productbuild --component QuickPaint.app /Applications \
+  --sign "3rd Party Mac Developer Installer: Loïc Berthod (TEAMID)" QuickPaint.pkg
+# puis validation/soumission via Transporter ou `xcrun altool`/App Store Connect.
+```
+
+Reste (voir SANDBOX_NOTES.md « reste à faire ») : test interactif des
+dialogues `rfd`/presse-papiers sous sandbox, provisioning profile réel, fiche
+App Store Connect.
 
 ---
 

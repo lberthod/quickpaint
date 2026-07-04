@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements App Sandbox (Mac App Store) — SPRINTS.md 13.9 / ROADMAP.md.
+
+  Principe : le plus petit jeu d'entitlements qui couvre les usages réels de
+  QuickPaint, pas un template générique. Chaque entrée est justifiée par un
+  chemin de code précis ; toute entitlement non listée ici a été testée
+  comme inutile (voir packaging/SANDBOX_NOTES.md pour le détail des essais).
+
+  Volontairement ABSENTE : com.apple.security.network.client (et toute
+  entitlement réseau) — aucune dépendance réseau dans le projet (ANALYSE.md
+  §8), la sandbox le rend vérifiable par Apple au moment de la revue, pas
+  seulement affirmé dans le README.
+-->
+<plist version="1.0">
+<dict>
+    <!-- Obligatoire pour toute soumission Mac App Store. -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!--
+      rfd (src/project.rs, src/export.rs) ouvre les panneaux natifs
+      NSOpenPanel/NSSavePanel pour : ouvrir/enregistrer un projet .json,
+      importer une image, exporter (PNG/JPEG/WebP/PDF/SVG), choisir un
+      dossier pour l'export par lots. Cette entitlement donne accès en
+      lecture/écriture aux seuls fichiers/dossiers choisis explicitement par
+      l'utilisateur dans ces panneaux — pas d'accès disque étendu.
+    -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

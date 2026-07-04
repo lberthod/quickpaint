@@ -3,6 +3,19 @@
 Versions alignées sur les sprints. Détail complet : [SPRINTS.md](SPRINTS.md)
 et le journal git.
 
+## 0.12.2 — juillet 2026 (Sprint 13.9 — démarrage Mac App Store)
+
+- [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements) :
+  jeu minimal d'entitlements App Sandbox (accès fichiers via les panneaux
+  natifs uniquement, aucune entitlement réseau).
+- Diagnostic embarqué `quickpaint --sandbox-selftest` : vérifie sans
+  interface que polices système, sous-processus de détection de langue et
+  écriture/lecture disque fonctionnent sous sandbox.
+- Validé par signature ad-hoc + inspection du journal système : tous les
+  sous-systèmes non interactifs testés fonctionnent **sans entitlement
+  supplémentaire**. Détail et reste à faire (signature réelle, test
+  interactif des dialogues) : [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md).
+
 ## 0.12.1 — juillet 2026 (Sprint 13.8 — suite du découpage de `app.rs`)
 
 - `app/mod.rs` → `app/mod.rs` + `app/transform.rs` : la machine à états de

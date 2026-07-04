@@ -373,13 +373,28 @@ indicatives (⭐ impact) — à confirmer avant de démarrer, pas un engagement.
       déplacement, aligner/répartir) est un sous-système encore plus large et
       plus transverse (touche `history`, `guides`, le rendu des poignées) —
       candidat pour un futur sprint dédié plutôt qu'une extraction rapide.
-- [ ] **Mac App Store** — M, ⭐⭐⭐ : toujours le plus gros levier de
-      découvrabilité non tiré, indépendant des outils ci-dessus.
+- [x] **13.9 Mac App Store — entitlements & validation sandbox (démarré)** —
+      M, ⭐⭐⭐ : toujours le plus gros levier de découvrabilité non tiré.
+      Première étape faite **sans compte développeur** (compte disponible
+      depuis, mais signature/notarisation réelle pas encore autorisées) :
+      [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements)
+      (jeu minimal — sandbox + accès fichiers via les panneaux natifs `rfd`,
+      volontairement aucune entitlement réseau) validé par signature ad-hoc
+      + inspection du journal système (`log show`), plus un diagnostic
+      embarqué `quickpaint --sandbox-selftest`. Résultat : énumération et
+      chargement des polices système, sous-processus de détection de langue,
+      et lecture/écriture disque fonctionnent tous **sans entitlement
+      supplémentaire** sous App Sandbox — meilleure nouvelle que redoutée.
+      Détail complet, piège rencontré (tester hors d'un vrai bundle `.app`
+      fait planter l'initialisation du sandbox lui-même, indépendamment du
+      code) et reste à faire (test interactif `rfd`/presse-papiers,
+      signature réelle, fiche App Store Connect) :
+      [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md).
 
 **Ordre suggéré** : 13.1 (rapide, complète le Sprint 11) → 13.5 (dette
 technique qui grossit avec chaque nouvelle bibliothèque d'assets/templates) →
-13.2/13.3 (finitions outils) → Mac App Store → 13.4/13.6/13.7 (gros chantiers,
-au choix selon la demande utilisateur).
+13.2/13.3 (finitions outils) → suite de 13.9 (App Store) → 13.4/13.6/13.7
+(gros chantiers, au choix selon la demande utilisateur).
 
 ---
 
