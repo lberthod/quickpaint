@@ -15,6 +15,15 @@ use crate::ui::{footer, layers, toolbar};
 use egui::{Color32, Margin, Pos2, Rect, Sense, Vec2};
 use std::collections::HashSet;
 
+/// Borne des dimensions de document à `model::image::MAX_IMAGE_SIDE`
+/// (ANALYSE.md §8.2) — nouveau document, redimensionnement d'image ou de
+/// canevas : aucune de ces entrées utilisateur ne doit pouvoir déclencher une
+/// allocation sans limite.
+fn clamp_doc_dims(w: u32, h: u32) -> (u32, u32) {
+    let max = crate::model::image::MAX_IMAGE_SIDE;
+    (w.clamp(1, max), h.clamp(1, max))
+}
+
 /// (id d'élément, boîte englobante (min, max)) en coordonnées document.
 type ElemBounds = (u64, ((f32, f32), (f32, f32)));
 
@@ -256,14 +265,6 @@ pub struct PaintApp {
     pub text_outline_color: [u8; 4],
     editing_text: Option<u64>,
     text_focus_pending: bool,
-    // Export bitmap (capture d'écran différée d'une frame) + format demandé.
-    export_requested: bool,
-    export_format: crate::export::ExportFormat,
-    // Export par lots / tailles multiples (Sprint 7.3) : capture différée
-    // d'une frame, comme l'export simple, mais écrit N fichiers au lieu d'un.
-    batch_export_requested: bool,
-    batch_export_format: crate::export::ExportFormat,
-    batch_export_sizes: Vec<(u32, u32)>,
     /// Panneau « Exporter en plusieurs tailles » ouvert ?
     pub show_batch_export: bool,
     /// État des cases à cocher du panneau d'export par lots.
@@ -390,11 +391,6 @@ impl Default for PaintApp {
             text_outline_color: [255, 255, 255, 255],
             editing_text: None,
             text_focus_pending: false,
-            export_requested: false,
-            export_format: crate::export::ExportFormat::Png,
-            batch_export_requested: false,
-            batch_export_format: crate::export::ExportFormat::Png,
-            batch_export_sizes: Vec::new(),
             show_batch_export: false,
             batch_export: BatchExportState::default(),
             bucket_click: None,
@@ -459,7 +455,8 @@ impl PaintApp {
     /// Nouveau document vierge à une taille donnée (roadmap P1 #9, galerie
     /// de modèles) — contrairement à `set_canvas_size`, repart de zéro.
     pub fn new_document_sized(&mut self, w: u32, h: u32) {
-        self.apply_loaded(Document::new((w.max(1), h.max(1))));
+        let (w, h) = clamp_doc_dims(w, h);
+        self.apply_loaded(Document::new((w, h)));
         self.status = Some(format!("{} {w}×{h}.", t("Nouveau document", "New document")));
     }
 
@@ -1274,9 +1271,16 @@ impl PaintApp {
 
     /// Importe une image depuis un fichier.
     pub fn import_image(&mut self) {
-        let Some((w, h, rgba)) = crate::project::import_image_dialog() else { return };
-        self.place_image(w, h, rgba);
-        self.status = Some(t("Image importée — déplacez-la (outil Sélection).", "Image imported — move it (Select tool).").into());
+        match crate::project::import_image_dialog() {
+            Some(Ok((w, h, rgba))) => {
+                self.place_image(w, h, rgba);
+                self.status = Some(t("Image importée — déplacez-la (outil Sélection).", "Image imported — move it (Select tool).").into());
+            }
+            Some(Err(msg)) => {
+                self.status = Some(format!("{} : {msg}", t("Image refusée", "Image rejected")));
+            }
+            None => {}
+        }
     }
 
     /// Colle une image depuis le presse-papiers (⌘V) — cœur du cas « comparer ».
@@ -1284,6 +1288,12 @@ impl PaintApp {
         match arboard::Clipboard::new().and_then(|mut c| c.get_image()) {
             Ok(img) => {
                 let (w, h) = (img.width as u32, img.height as u32);
+                // Bornage (ANALYSE.md §8.2) : le presse-papiers est une entrée
+                // externe comme un fichier, à ne pas allouer sans limite.
+                if let Err(e) = crate::model::image::check_dims(w, h) {
+                    self.status = Some(format!("{} : {e}", t("Image du presse-papiers refusée", "Clipboard image rejected")));
+                    return;
+                }
                 self.place_image(w, h, img.bytes.into_owned());
                 self.status = Some(t("Image collée depuis le presse-papiers.", "Image pasted from clipboard.").into());
             }
@@ -2229,7 +2239,7 @@ impl PaintApp {
     /// sont mis à l'échelle. Non destructif pour les images (leur bitmap source
     /// est conservé, seule la taille affichée change).
     pub fn resize_document(&mut self, w: u32, h: u32) {
-        let (w, h) = (w.max(1), h.max(1));
+        let (w, h) = clamp_doc_dims(w, h);
         let (ow, oh) = self.doc.size;
         if (w, h) == (ow, oh) {
             return;
@@ -2244,7 +2254,7 @@ impl PaintApp {
     /// Change la taille du canevas sans mettre le contenu à l'échelle :
     /// l'ancre (colonne, ligne ∈ 0..=2) fixe le côté du document conservé.
     pub fn resize_canvas(&mut self, w: u32, h: u32, anchor: (u8, u8)) {
-        let (w, h) = (w.max(1), h.max(1));
+        let (w, h) = clamp_doc_dims(w, h);
         let (ow, oh) = self.doc.size;
         if (w, h) == (ow, oh) {
             return;
@@ -2375,9 +2385,15 @@ impl PaintApp {
     }
 
     pub fn open_project(&mut self) {
-        if let Some(doc) = crate::project::open_dialog() {
-            self.apply_loaded(doc);
-            self.status = Some(t("Projet ouvert.", "Project opened.").into());
+        match crate::project::open_dialog() {
+            Some(Ok(doc)) => {
+                self.apply_loaded(doc);
+                self.status = Some(t("Projet ouvert.", "Project opened.").into());
+            }
+            Some(Err(msg)) => {
+                self.status = Some(format!("{} : {msg}", t("Impossible d'ouvrir le projet", "Couldn't open the project")));
+            }
+            None => {}
         }
     }
 
@@ -2421,14 +2437,27 @@ impl PaintApp {
         self.doc.next_z = maxz + 1.0;
     }
 
-    // --- Export PNG (idée précédente) ---------------------------------------
+    // --- Export bitmap -------------------------------------------------------
 
-    /// Demande un export bitmap au format `format` : déclenche une capture
-    /// d'écran différée, traitée par `handle_screenshot`.
+    /// Rendu du document à sa résolution native pour l'export (roadmap
+    /// ANALYSE.md §12.2) — via le compositeur, jamais via une capture d'écran
+    /// du viewport : la résolution exportée est toujours `doc.size`, quels
+    /// que soient le zoom et la taille de la fenêtre à l'écran.
+    fn render_for_export(&mut self, ctx: &egui::Context) -> Option<(u32, u32, Vec<u8>)> {
+        self.compositor.render_to_rgba(ctx, &self.doc, self.bg)
+    }
+
+    /// Exporte le document au format `format`, à sa résolution native.
     pub fn request_export(&mut self, ctx: &egui::Context, format: crate::export::ExportFormat) {
-        self.export_requested = true;
-        self.export_format = format;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        let Some((w, h, rgba)) = self.render_for_export(ctx) else {
+            self.status = Some(t("Échec du rendu à l'export.", "Export render failed.").into());
+            return;
+        };
+        self.status = Some(match crate::export::save_dialog(w, h, &rgba, format) {
+            Ok(p) => format!("{} {} : {}", format.label(), t("enregistré", "saved"), p.display()),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => t("Export annulé.", "Export cancelled.").into(),
+            Err(e) => format!("{} : {e}", t("Échec de l'export", "Export failed")),
+        });
     }
 
     /// Tailles cochées dans le panneau d'export par lots, en pixels, dérivées
@@ -2470,20 +2499,27 @@ impl PaintApp {
         sizes
     }
 
-    /// Déclenche l'export par lots (Sprint 7.3) : une capture d'écran comme
-    /// l'export simple, mais écrite en N fichiers (un dossier choisi une
-    /// seule fois) dans `handle_screenshot`.
+    /// Déclenche l'export par lots (Sprint 7.3) : rendu natif unique (§12.2),
+    /// puis redimensionné (Lanczos3) vers chaque taille cochée — la base 1×
+    /// n'est plus une capture d'écran, donc les tailles 2×/3× ne ré-agrandissent
+    /// plus une image déjà sous-échantillonnée.
     pub fn request_batch_export(&mut self, ctx: &egui::Context) {
         let sizes = self.batch_export_target_sizes();
         if sizes.is_empty() {
             self.status = Some(t("Aucune taille sélectionnée.", "No size selected.").into());
             return;
         }
-        self.batch_export_sizes = sizes;
-        self.batch_export_format = self.batch_export.format;
-        self.batch_export_requested = true;
         self.show_batch_export = false;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        let format = self.batch_export.format;
+        let Some((w, h, rgba)) = self.render_for_export(ctx) else {
+            self.status = Some(t("Échec du rendu à l'export.", "Export render failed.").into());
+            return;
+        };
+        self.status = Some(match crate::export::save_batch(w, h, &rgba, format, &sizes) {
+            Ok(n) => format!("{n} {} ({}).", t("fichiers exportés", "files exported"), format.label()),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => t("Export annulé.", "Export cancelled.").into(),
+            Err(e) => format!("{} : {e}", t("Échec de l'export", "Export failed")),
+        });
     }
 
     /// Export SVG vectoriel (opacité de calque correcte via `<g opacity>`).
@@ -2496,6 +2532,10 @@ impl PaintApp {
         });
     }
 
+    /// Capture d'écran différée : ne sert plus qu'au pot de peinture et au
+    /// détourage (qui échantillonnent les pixels *affichés*, y compris les
+    /// modes de fusion, sous le clic) — l'export bitmap ne dépend plus d'une
+    /// capture d'écran depuis §12.2, voir `render_for_export`.
     fn handle_screenshot(&mut self, ctx: &egui::Context) {
         let shot = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {
@@ -2506,45 +2546,9 @@ impl PaintApp {
         let Some(image) = shot else { return };
         if let Some(click) = self.bucket_click.take() {
             self.do_bucket_fill(ctx, &image, click);
-            return;
-        }
-        if let Some((click, restore)) = self.cutout_click.take() {
+        } else if let Some((click, restore)) = self.cutout_click.take() {
             self.do_cutout(ctx, &image, click, restore);
-            return;
         }
-        let ppp = ctx.pixels_per_point();
-        // On exporte la zone du document, bornée à la partie visible.
-        let r = self.last_doc_rect.intersect(self.last_canvas_rect);
-        let crop = (
-            (r.min.x * ppp).round().max(0.0) as usize,
-            (r.min.y * ppp).round().max(0.0) as usize,
-            (r.width() * ppp).round().max(0.0) as usize,
-            (r.height() * ppp).round().max(0.0) as usize,
-        );
-
-        if self.batch_export_requested {
-            self.batch_export_requested = false;
-            let format = self.batch_export_format;
-            let sizes = std::mem::take(&mut self.batch_export_sizes);
-            self.status = Some(match crate::export::save_batch(&image, crop, format, &sizes) {
-                Ok(n) => format!("{n} {} ({}).", t("fichiers exportés", "files exported"), format.label()),
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => t("Export annulé.", "Export cancelled.").into(),
-                Err(e) => format!("{} : {e}", t("Échec de l'export", "Export failed")),
-            });
-            return;
-        }
-
-        if !self.export_requested {
-            return;
-        }
-        self.export_requested = false;
-
-        let format = self.export_format;
-        self.status = Some(match crate::export::save_dialog(&image, crop, format) {
-            Ok(p) => format!("{} {} : {}", format.label(), t("enregistré", "saved"), p.display()),
-            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => t("Export annulé.", "Export cancelled.").into(),
-            Err(e) => format!("{} : {e}", t("Échec de l'export", "Export failed")),
-        });
     }
 
     /// Aligne un point document sur la grille si le magnétisme est actif.

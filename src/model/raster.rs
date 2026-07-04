@@ -669,6 +669,12 @@ pub fn decode(enc: &RasterEncoded) -> RasterLayer {
     let Ok(img) = image::load_from_memory(&bytes) else { return RasterLayer::default() };
     let img = img.to_rgba8();
     let (w, h) = (img.width(), img.height());
+    // Plafond de sécurité (ANALYSE.md §8.2) : un fichier projet corrompu ou
+    // malveillant peut déclarer des dimensions énormes (decompression bomb) —
+    // même garde-fou que `model::image::check_dims` côté import.
+    if crate::model::image::check_dims(w, h).is_err() {
+        return RasterLayer::default();
+    }
     RasterLayer::from_flat(enc.origin.0, enc.origin.1, w, h, img.as_raw())
 }
 
@@ -862,6 +868,25 @@ mod tests {
         assert!(!enc.png_b64.is_empty());
         let r2 = decode(&enc);
         assert_eq!(r2.get_pixel(20, 20), [7, 8, 9, 200]);
+    }
+
+    /// Régression sécurité (ANALYSE.md §8.2), même garde-fou que
+    /// `model::image::decode_png_b64` : un calque raster encodé avec une
+    /// dimension au-delà de `MAX_IMAGE_SIDE` (fichier projet corrompu ou
+    /// malveillant) doit être rejeté plutôt qu'allouer sans plafond.
+    #[test]
+    fn decode_rejects_dimensions_above_the_cap() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let w = crate::model::image::MAX_IMAGE_SIDE + 1;
+        let img = image::RgbaImage::from_pixel(w, 1, image::Rgba([1, 2, 3, 255]));
+        let mut buf = Vec::new();
+        use image::ImageEncoder;
+        image::codecs::png::PngEncoder::new(&mut buf)
+            .write_image(img.as_raw(), w, 1, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let enc = RasterEncoded { png_b64: STANDARD.encode(buf), origin: (0, 0) };
+        let r = decode(&enc);
+        assert!(r.is_empty(), "oversized raster should decode to an empty layer, not allocate");
     }
 
     // --- Retouche locale (Sprint 11) -----------------------------------

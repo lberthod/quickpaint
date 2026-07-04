@@ -84,9 +84,82 @@ fn encode_png_b64(w: u32, h: u32, rgba: &[u8]) -> Option<String> {
     Some(STANDARD.encode(buf))
 }
 
+/// Côté maximal accepté pour une image ou un document (projet ouvert, import,
+/// collage, redimensionnement) — audit sécurité (ANALYSE.md §8.2) : sans
+/// plafond, un fichier corrompu ou malveillant peut déclarer des dimensions
+/// énormes (decompression bomb PNG) et faire allouer `w*h*4` octets sans
+/// limite, jusqu'à épuiser la mémoire. 16 384 px de côté couvre tout usage
+/// réel (bien au-delà d'un scan A0 à 300 dpi).
+pub const MAX_IMAGE_SIDE: u32 = 16_384;
+
+/// Plafond de surface totale, en plus du plafond par côté : bloque un ratio
+/// d'aspect extrême (ex. 16000×2000 est sous le plafond par côté mais reste
+/// 128 Mpx — un cas légitime rare, mais 16000×16000 ne l'est pas et doit
+/// être refusé même si chaque côté pris isolément est sous `MAX_IMAGE_SIDE`).
+/// 64 Mpx ≈ un scan A2 à 300 dpi, largement au-dessus d'un usage courant.
+pub const MAX_IMAGE_PIXELS: u64 = 64_000_000;
+
+/// Valide des dimensions avant toute allocation (`w * h * 4` octets) — import,
+/// collage, chargement de projet, ou dialogue de redimensionnement. Renvoie
+/// un message localisé prêt à afficher en cas de refus.
+pub fn check_dims(w: u32, h: u32) -> Result<(), String> {
+    use crate::i18n::t;
+    if w == 0 || h == 0 {
+        return Err(t("dimensions vides", "empty dimensions").to_string());
+    }
+    if w > MAX_IMAGE_SIDE || h > MAX_IMAGE_SIDE {
+        return Err(format!(
+            "{} ({w}×{h}, {} {MAX_IMAGE_SIDE}px)",
+            t("dimensions trop grandes", "dimensions too large"),
+            t("max", "max"),
+        ));
+    }
+    if (w as u64) * (h as u64) > MAX_IMAGE_PIXELS {
+        return Err(format!(
+            "{} ({w}×{h} = {} Mpx, {} {} Mpx)",
+            t("image trop grande", "image too large"),
+            (w as u64 * h as u64) / 1_000_000,
+            t("max", "max"),
+            MAX_IMAGE_PIXELS / 1_000_000,
+        ));
+    }
+    Ok(())
+}
+
 fn decode_png_b64(b64: &str) -> Option<(u32, u32, Vec<u8>)> {
     let bytes = STANDARD.decode(b64).ok()?;
     let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
     let (w, h) = (img.width(), img.height());
+    if check_dims(w, h).is_err() {
+        return None;
+    }
     Some((w, h, img.into_raw()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Régression sécurité (ANALYSE.md §8.2) : une image dont une dimension
+    /// dépasse `MAX_IMAGE_SIDE` doit être rejetée plutôt que d'allouer
+    /// `w*h*4` octets sans plafond (protection contre une decompression bomb
+    /// PNG dans un fichier projet corrompu ou malveillant).
+    #[test]
+    fn decode_rejects_dimensions_above_the_cap() {
+        // Image volontairement fine (1 px de haut) mais trop large — coûte
+        // peu à construire/encoder tout en dépassant le plafond.
+        let w = MAX_IMAGE_SIDE + 1;
+        let img = image::RgbaImage::from_pixel(w, 1, image::Rgba([1, 2, 3, 255]));
+        let b64 = encode_png_b64(w, 1, img.as_raw()).unwrap();
+        assert!(decode_png_b64(&b64).is_none());
+    }
+
+    #[test]
+    fn decode_accepts_dimensions_within_the_cap() {
+        let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255]));
+        let b64 = encode_png_b64(4, 4, img.as_raw()).unwrap();
+        let (w, h, rgba) = decode_png_b64(&b64).unwrap();
+        assert_eq!((w, h), (4, 4));
+        assert_eq!(rgba.len(), 4 * 4 * 4);
+    }
 }

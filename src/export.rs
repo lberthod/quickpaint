@@ -1,15 +1,14 @@
-//! Export bitmap (Sprint 2). On réutilise la capture d'écran du viewport fournie
-//! par egui/eframe (`Event::Screenshot`), recadrée sur la zone du document, puis
-//! on encode au format choisi : PNG, JPG, WebP ou PDF (mono-page).
+//! Export bitmap. Le document est rendu à sa résolution **native** via le
+//! compositeur tiny-skia ([`render::compositor::Compositor::render_to_rgba`],
+//! roadmap ANALYSE.md §12.2) — plus de dépendance à une capture d'écran du
+//! viewport, donc plus de perte de résolution liée au zoom ou à la taille de
+//! la fenêtre. Ce module se contente d'encoder le buffer RGBA reçu au format
+//! choisi : PNG, JPG, WebP ou PDF (mono-page).
 
 use crate::i18n::t;
-use egui::ColorImage;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Région de recadrage en pixels physiques : (x, y, largeur, hauteur).
-pub type Crop = (usize, usize, usize, usize);
 
 /// Formats d'export bitmap proposés dans le menu Fichier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,35 +39,18 @@ impl ExportFormat {
     }
 }
 
-/// Recadre la capture sur la zone canvas et renvoie `(largeur, hauteur, RGBA)`.
-fn crop_rgba(image: &ColorImage, crop: Crop) -> (u32, u32, Vec<u8>) {
-    let (cx, cy, cw, ch) = crop;
-    let [iw, ih] = image.size;
-    let x0 = cx.min(iw);
-    let y0 = cy.min(ih);
-    let w = cw.min(iw.saturating_sub(x0));
-    let h = ch.min(ih.saturating_sub(y0));
-    let mut rgba = Vec::with_capacity(w * h * 4);
-    for y in y0..y0 + h {
-        for x in x0..x0 + w {
-            rgba.extend_from_slice(&image[(x, y)].to_srgba_unmultiplied());
-        }
-    }
-    (w as u32, h as u32, rgba)
-}
-
 /// Exporte simultanément plusieurs tailles dans un dossier choisi une seule
 /// fois (Sprint 7.3) — un clic pour couvrir web + print plutôt qu'un export
-/// par taille. Renvoie le nombre de fichiers écrits.
-pub fn save_batch(image: &ColorImage, crop: Crop, format: ExportFormat, sizes: &[(u32, u32)]) -> std::io::Result<usize> {
-    let (w, h, rgba) = crop_rgba(image, crop);
+/// par taille. Renvoie le nombre de fichiers écrits. `rgba` doit faire
+/// exactement `w * h * 4` octets (rendu natif du document, roadmap §12.2).
+pub fn save_batch(w: u32, h: u32, rgba: &[u8], format: ExportFormat, sizes: &[(u32, u32)]) -> std::io::Result<usize> {
     if w == 0 || h == 0 || sizes.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             t("zone d'export vide", "empty export area"),
         ));
     }
-    let base = image::RgbaImage::from_raw(w, h, rgba)
+    let base = image::RgbaImage::from_raw(w, h, rgba.to_vec())
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "buffer invalide"))?;
     let Some(dir) = rfd::FileDialog::new().pick_folder() else {
         return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
@@ -88,9 +70,9 @@ pub fn save_batch(image: &ColorImage, crop: Crop, format: ExportFormat, sizes: &
 }
 
 /// Ouvre un sélecteur « Enregistrer » et écrit l'export au format demandé.
-/// Renvoie le chemin écrit, ou `None` si annulé / erreur.
-pub fn save_dialog(image: &ColorImage, crop: Crop, format: ExportFormat) -> std::io::Result<PathBuf> {
-    let (w, h, rgba) = crop_rgba(image, crop);
+/// Renvoie le chemin écrit, ou `None` si annulé / erreur. `rgba` doit faire
+/// exactement `w * h * 4` octets (rendu natif du document, roadmap §12.2).
+pub fn save_dialog(w: u32, h: u32, rgba: &[u8], format: ExportFormat) -> std::io::Result<PathBuf> {
     if w == 0 || h == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -105,7 +87,7 @@ pub fn save_dialog(image: &ColorImage, crop: Crop, format: ExportFormat) -> std:
     else {
         return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
     };
-    encode_to(&path, w, h, &rgba, format)?;
+    encode_to(&path, w, h, rgba, format)?;
     Ok(path)
 }
 

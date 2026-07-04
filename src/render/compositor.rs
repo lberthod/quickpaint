@@ -5,17 +5,41 @@
 //! fusion** et leur **opacité de groupe** (vrai compositing, pas par-trait). Le
 //! résultat est mis en cache comme texture egui, invalidé par une signature.
 //!
-//! Limite v1 : le **texte** n'est pas rastérisé ici (pas de rasteriseur de
-//! polices) — il est dessiné par egui par-dessus. Activé seulement quand un
-//! calque a un mode ≠ Normal ou une opacité < 1 (sinon rendu vectoriel net).
+//! À l'écran (`texture()`), le texte d'un calque « Normal » à opacité pleine
+//! n'est pas rastérisé ici : il est dessiné par egui par-dessus, plus net à
+//! l'écran (le compositeur n'est sollicité que si un calque a un mode de
+//! fusion, une opacité < 1, un masque ou du contenu peint). À l'export
+//! (`render_to_rgba()`, roadmap §12.2), tous les calques passent par ce même
+//! chemin, texte inclus — nécessaire puisqu'il n'y a alors pas de passe egui
+//! par-dessus pour le dessiner.
 
+use crate::model::raster::{Tile, TileKey, TILE};
 use crate::model::{BlendMode, Document, ImageItem, Stroke, Tool};
 use crate::render::ribbon;
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
+use std::collections::HashMap;
 use tiny_skia::{
     BlendMode as SkBlend, Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint,
     PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient, Shader, SpreadMode, Transform,
 };
+
+/// Cache incrémental du contenu peint d'un calque (roadmap ANALYSE.md §12.1) :
+/// un `Pixmap` **persistant** entre les appels, retouché tuile par tuile au
+/// lieu d'être reconstruit en entier à chaque dab. Voir `blit_raster_tiles`.
+struct RasterTileCache {
+    pm: Pixmap,
+    /// Dernier hash connu de chaque tuile déjà blittée dans `pm`.
+    tiles: HashMap<TileKey, u64>,
+}
+
+impl Default for RasterTileCache {
+    fn default() -> Self {
+        // Pixmap 1×1 provisoire : `blit_raster_tiles` détecte la taille
+        // erronée dès le premier appel et réalloue à la taille du document.
+        // `tiny_skia::Pixmap` n'implémente pas `Default`, d'où cet impl manuel.
+        Self { pm: Pixmap::new(1, 1).expect("pixmap 1×1"), tiles: HashMap::new() }
+    }
+}
 
 #[derive(Default)]
 pub struct Compositor {
@@ -23,7 +47,10 @@ pub struct Compositor {
     sig: u64,
     /// Cache par calque : id → (hash de contenu, pixmap rastérisé). Évite de
     /// re-rastériser les calques inchangés (perf en mode fusion multi-calques).
-    layers: std::collections::HashMap<u64, (u64, Pixmap)>,
+    layers: HashMap<u64, (u64, Pixmap)>,
+    /// Cache par calque du contenu peint (pinceau/gomme pixel...) seul, séparé
+    /// du pixmap composé ci-dessus — patché tuile par tuile (roadmap §12.1).
+    raster_cache: HashMap<u64, RasterTileCache>,
 }
 
 impl Compositor {
@@ -41,7 +68,7 @@ impl Compositor {
         skip_text: Option<u64>,
     ) -> Option<&TextureHandle> {
         if self.tex.is_none() || self.sig != sig {
-            if let Some(ci) = self.rebuild(ctx, doc, skip_text) {
+            if let Some(ci) = self.rebuild(ctx, doc, skip_text, None) {
                 self.tex = Some(ctx.load_texture("composite", ci, TextureOptions::LINEAR));
             }
             self.sig = sig;
@@ -49,15 +76,67 @@ impl Compositor {
         self.tex.as_ref()
     }
 
+    /// Rendu du document à sa résolution **native** (`doc.size`), pour
+    /// l'export (roadmap ANALYSE.md §12.2). Réutilise le même chemin de
+    /// composition que l'affichage (calques, modes de fusion, masques,
+    /// ajustements, texte) au lieu de dépendre d'une capture d'écran du
+    /// viewport — la résolution exportée ne dépend donc plus de la taille de
+    /// la fenêtre ni du zoom courant. `bg` est peint en fond opaque avant la
+    /// composition, comme le fait le canevas à l'écran (`painter.rect_filled`) :
+    /// un export garde donc le même rendu visuel (fond plein, pas de zones
+    /// transparentes imprévues) qu'avant ce changement.
+    pub fn render_to_rgba(&mut self, ctx: &egui::Context, doc: &Document, bg: Color32) -> Option<(u32, u32, Vec<u8>)> {
+        let ci = self.rebuild(ctx, doc, None, Some(bg))?;
+        let [w, h] = ci.size;
+        let mut rgba = Vec::with_capacity(w * h * 4);
+        for px in &ci.pixels {
+            rgba.extend_from_slice(&px.to_srgba_unmultiplied());
+        }
+        Some((w as u32, h as u32, rgba))
+    }
+
     /// Compose le document : ne rastérise que les calques dont le hash a changé.
-    fn rebuild(&mut self, ctx: &egui::Context, doc: &Document, skip_text: Option<u64>) -> Option<ColorImage> {
+    /// `bg` : fond peint avant la composition — `None` (affichage normal,
+    /// transparent, la texture est posée sur le canevas déjà peint) ou
+    /// `Some(color)` (export, roadmap §12.2 : fond opaque autonome).
+    fn rebuild(&mut self, ctx: &egui::Context, doc: &Document, skip_text: Option<u64>, bg: Option<Color32>) -> Option<ColorImage> {
         let (w, h) = doc.size;
         let mut base = Pixmap::new(w, h)?;
+        if let Some(c) = bg {
+            base.fill(Color::from_rgba8(c.r(), c.g(), c.b(), 255));
+        }
+        // Pré-passe glyphes : `layout()` alloue les glyphes manquants dans
+        // l'atlas *réel* d'egui (effet de bord de la mise en page). Il faut
+        // que ça arrive avant de capturer un instantané de cet atlas plus
+        // bas, sans quoi un texte encore jamais mis en page dans ce contexte
+        // (typiquement : le tout premier export d'un document, ou un calque
+        // qui vient de passer en mode composite) verrait ses glyphes absents
+        // de l'instantané et resterait invisible — bug constaté en testant
+        // `render_to_rgba` isolément (un seul passage de rendu, sans les
+        // frames précédentes qui « réchauffaient » l'atlas par accident).
+        for layer in &doc.layers {
+            if !layer.visible || layer.opacity <= 0.0 || layer.adjustment.is_some() {
+                continue;
+            }
+            let stale = self
+                .layers
+                .get(&layer.id)
+                .map(|(h, _)| *h != layer_hash(layer, skip_text))
+                .unwrap_or(true);
+            if !stale {
+                continue;
+            }
+            for t in &layer.texts {
+                if Some(t.id) != skip_text && !t.text.trim().is_empty() {
+                    let _ = crate::render::text::layout(ctx, t, 1.0);
+                }
+            }
+        }
         // `ctx.fonts(|f| f.image())` clone tout l'atlas de glyphes (plusieurs Mo,
         // en f32) — coûteux et inutile tant qu'aucun calque redevenu obsolète ne
         // contient réellement du texte. Récupéré paresseusement, une seule fois
-        // par appel, au premier texte effectivement rastérisé (perf : ce chemin
-        // s'exécute à chaque frame pendant la peinture raster/pixel).
+        // par appel, une fois la pré-passe ci-dessus garantie complète (perf :
+        // ce chemin s'exécute à chaque frame pendant la peinture raster/pixel).
         let mut atlas: Option<egui::epaint::FontImage> = None;
         let mut live = std::collections::HashSet::new();
         // Pixmap du dernier calque NON écrêté : base d'écrêtage des suivants.
@@ -81,8 +160,12 @@ impl Compositor {
             if stale {
                 let mut lp = Pixmap::new(w, h)?;
                 // Contenu peint (pinceau/gomme pixel, F1) : rendu en premier,
-                // sous les éléments vectoriels du calque.
-                raster_content(&mut lp, &layer.raster);
+                // sous les éléments vectoriels du calque, depuis un cache
+                // persistant retouché tuile par tuile (roadmap §12.1) plutôt
+                // que ré-aplati en entier à chaque dab.
+                let raster_pm = self.raster_cache.entry(layer.id).or_default();
+                blit_raster_tiles(raster_pm, &layer.raster, w, h);
+                lp.data_mut().copy_from_slice(raster_pm.pm.data());
                 for r in layer.z_order() {
                     match r {
                         crate::model::ElemRef::Stroke(i) => raster_stroke(&mut lp, &layer.strokes[i]),
@@ -133,6 +216,7 @@ impl Compositor {
             }
         }
         self.layers.retain(|id, _| live.contains(id));
+        self.raster_cache.retain(|id, _| live.contains(id));
 
         let pixels = base
             .data()
@@ -482,27 +566,80 @@ fn apply_adjustment(
     }
 }
 
-/// Blitte le contenu peint (pinceau/gomme pixel, F1) tel quel (1 px document
-/// = 1 px raster, pas d'échelle) à son origine.
-fn raster_content(pm: &mut Pixmap, raster: &crate::model::RasterLayer) {
-    let Some((ox, oy, w, h, rgba)) = raster.flatten() else { return };
-    if w == 0 || h == 0 {
-        return;
+/// Patch tuile par tuile le cache persistant `cache.pm` pour qu'il reflète
+/// l'état actuel de `raster` — coût proportionnel au nombre de tuiles
+/// **modifiées** depuis le dernier appel, pas à la surface totale peinte.
+/// Roadmap ANALYSE.md §12.1 : remplace l'ancien `raster_content`, qui
+/// ré-aplatissait (`RasterLayer::flatten`) puis reconvertissait en
+/// prémultiplié **toute** la boîte englobante peinte à chaque appel — donc à
+/// chaque dab d'un coup de pinceau, même sur un document déjà bien rempli.
+fn blit_raster_tiles(cache: &mut RasterTileCache, raster: &crate::model::RasterLayer, w: u32, h: u32) {
+    if cache.pm.width() != w || cache.pm.height() != h {
+        let Some(pm) = Pixmap::new(w, h) else { return };
+        cache.pm = pm;
+        cache.tiles.clear();
     }
-    let mut premul = Vec::with_capacity(rgba.len());
-    for c in rgba.chunks_exact(4) {
+    // Tuiles disparues depuis le dernier passage (ex. undo d'un premier coup
+    // de pinceau qui venait d'allouer la tuile) : effacées en transparent.
+    let gone: Vec<TileKey> = cache.tiles.keys().filter(|k| !raster.tiles.contains_key(k)).copied().collect();
+    for key in gone {
+        clear_tile_region(&mut cache.pm, key);
+        cache.tiles.remove(&key);
+    }
+    for (key, tile) in &raster.tiles {
+        let hash = tile_content_hash(&tile.px);
+        if cache.tiles.get(key) == Some(&hash) {
+            continue; // tuile inchangée depuis le dernier passage
+        }
+        blit_tile(&mut cache.pm, *key, tile);
+        cache.tiles.insert(*key, hash);
+    }
+}
+
+/// Hash bon marché d'une tuile (même technique d'échantillonnage que
+/// `RasterLayer::content_hash`, réappliquée par tuile individuelle ici).
+fn tile_content_hash(px: &[u8]) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    for i in (0..px.len()).step_by(97) {
+        h ^= px[i] as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+/// Blitte une tuile 256×256 (RGBA8 non prémultiplié) à sa position dans le
+/// pixmap document, en remplacement total (`Source`, pas `SourceOver`) : la
+/// tuile est déjà la vérité complète de ce carré de pixels, pas une couche à
+/// mélanger par-dessus l'ancien contenu du cache.
+fn blit_tile(pm: &mut Pixmap, key: TileKey, tile: &Tile) {
+    let mut premul = Vec::with_capacity(tile.px.len());
+    for c in tile.px.chunks_exact(4) {
         let a = c[3] as u16;
         premul.push((c[0] as u16 * a / 255) as u8);
         premul.push((c[1] as u16 * a / 255) as u8);
         premul.push((c[2] as u16 * a / 255) as u8);
         premul.push(c[3]);
     }
-    let Some(src) = Pixmap::from_vec(premul, tiny_skia::IntSize::from_wh(w, h).unwrap()) else { return };
+    let Some(size) = tiny_skia::IntSize::from_wh(TILE as u32, TILE as u32) else { return };
+    let Some(src) = Pixmap::from_vec(premul, size) else { return };
     pm.draw_pixmap(
-        ox,
-        oy,
+        key.0 * TILE,
+        key.1 * TILE,
         src.as_ref(),
-        &PixmapPaint { opacity: 1.0, blend_mode: SkBlend::SourceOver, quality: FilterQuality::Nearest },
+        &PixmapPaint { opacity: 1.0, blend_mode: SkBlend::Source, quality: FilterQuality::Nearest },
+        Transform::identity(),
+        None,
+    );
+}
+
+/// Efface (transparent) la région d'une tuile disparue du cache incrémental.
+fn clear_tile_region(pm: &mut Pixmap, key: TileKey) {
+    let Some(blank) = Pixmap::new(TILE as u32, TILE as u32) else { return };
+    pm.draw_pixmap(
+        key.0 * TILE,
+        key.1 * TILE,
+        blank.as_ref(),
+        &PixmapPaint { opacity: 1.0, blend_mode: SkBlend::Source, quality: FilterQuality::Nearest },
         Transform::identity(),
         None,
     );
@@ -670,5 +807,159 @@ mod tests {
         let mut pm = Pixmap::new(100, 100).unwrap();
         raster_stroke(&mut pm, &s);
         assert!(pm.pixels().iter().any(|p| p.alpha() > 0));
+    }
+
+    /// Roadmap ANALYSE.md §12.2 : l'export doit rendre le document à sa
+    /// résolution **native**, jamais celle d'un viewport à l'écran — vérifié
+    /// ici en dehors de toute fenêtre (`egui::Context::default()`, pas de
+    /// zoom/scale_factor en jeu).
+    #[test]
+    fn render_to_rgba_uses_native_document_resolution() {
+        let doc = crate::model::Document::new((37, 21));
+        let ctx = egui::Context::default();
+        let mut c = Compositor::new();
+        let (w, h, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
+        assert_eq!((w, h), (37, 21));
+        assert_eq!(rgba.len(), 37 * 21 * 4);
+    }
+
+    /// Le fond doit être peint en opaque (comme le fait le canevas à l'écran
+    /// avant §12.2) : un document sans aucun contenu exporte un aplat de la
+    /// couleur de fond, pas une image transparente.
+    #[test]
+    fn render_to_rgba_bakes_an_opaque_background() {
+        let doc = crate::model::Document::new((4, 4));
+        let ctx = egui::Context::default();
+        let mut c = Compositor::new();
+        let (_, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::from_rgb(10, 20, 30)).expect("render");
+        for px in rgba.chunks_exact(4) {
+            assert_eq!(px, &[10, 20, 30, 255]);
+        }
+    }
+
+    /// Le texte doit apparaître dans le rendu d'export même si le calque n'a
+    /// pas de mode de fusion particulier (contrairement à l'affichage à
+    /// l'écran, où le texte d'un calque « Normal » est dessiné par egui
+    /// par-dessus plutôt que rastérisé par le compositeur).
+    #[test]
+    fn render_to_rgba_includes_text() {
+        let mut doc = crate::model::Document::new((60, 30));
+        let mut item = crate::model::TextItem::new(1, (2.0, 2.0), 16.0, [0, 0, 0, 255]);
+        item.text = "Hi".into();
+        doc.layers[0].texts.push(item);
+        let ctx = egui::Context::default();
+        // Le glyph atlas d'egui n'existe qu'après un premier passage de
+        // frame — un `Context::default()` nu panique sur `ctx.fonts()`.
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = Compositor::new();
+        let (_, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
+        assert!(rgba.chunks_exact(4).any(|px| px != [255, 255, 255, 255]), "le texte devrait marquer des pixels");
+    }
+
+    // --- Cache incrémental par tuile (roadmap ANALYSE.md §12.1) -------------
+
+    #[test]
+    fn blit_raster_tiles_reflects_painted_pixels() {
+        let mut raster = crate::model::RasterLayer::default();
+        raster.set_pixel(10, 10, [255, 0, 0, 255]);
+        let mut cache = RasterTileCache::default();
+        blit_raster_tiles(&mut cache, &raster, 64, 64);
+        let px = cache.pm.pixel(10, 10).expect("pixel in bounds");
+        assert_eq!((px.red(), px.green(), px.blue(), px.alpha()), (255, 0, 0, 255));
+        // Un pixel jamais peint reste transparent.
+        let blank = cache.pm.pixel(0, 0).expect("pixel in bounds");
+        assert_eq!(blank.alpha(), 0);
+    }
+
+    #[test]
+    fn blit_raster_tiles_skips_unchanged_tiles_on_second_pass() {
+        let mut raster = crate::model::RasterLayer::default();
+        raster.set_pixel(5, 5, [0, 255, 0, 255]);
+        let mut cache = RasterTileCache::default();
+        blit_raster_tiles(&mut cache, &raster, 64, 64);
+        let hash_before = *cache.tiles.values().next().expect("one tile touched");
+        // Deuxième passe sans aucune modification : le hash mémorisé de la
+        // tuile ne doit pas bouger (rien à re-blitter).
+        blit_raster_tiles(&mut cache, &raster, 64, 64);
+        let hash_after = *cache.tiles.values().next().expect("still one tile");
+        assert_eq!(hash_before, hash_after);
+    }
+
+    #[test]
+    fn blit_raster_tiles_clears_a_tile_removed_since_last_pass() {
+        // Simule un undo qui retire une tuile entière (premier coup de
+        // pinceau annulé) : `RasterLayer::tiles` perd la clé, pas juste son
+        // contenu mis à zéro.
+        let mut raster = crate::model::RasterLayer::default();
+        raster.set_pixel(1, 1, [255, 255, 255, 255]);
+        let mut cache = RasterTileCache::default();
+        blit_raster_tiles(&mut cache, &raster, 64, 64);
+        assert_eq!(cache.pm.pixel(1, 1).unwrap().alpha(), 255);
+
+        raster.tiles.clear();
+        blit_raster_tiles(&mut cache, &raster, 64, 64);
+        assert_eq!(cache.pm.pixel(1, 1).unwrap().alpha(), 0, "la tuile effacée doit redevenir transparente");
+        assert!(cache.tiles.is_empty());
+    }
+
+    /// Mesure de performance (roadmap ANALYSE.md §12.1) — pas une assertion
+    /// de correction : compare le coût de l'ancien chemin (aplatir +
+    /// reconvertir toute la boîte englobante peinte à chaque dab) à celui du
+    /// nouveau cache incrémental (ne retoucher que les tuiles modifiées).
+    /// Ignoré par défaut (`cargo test` normal) car c'est une mesure de temps,
+    /// pas un test déterministe — lancer avec :
+    /// `cargo test --release bench_full_layer_repaint_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_full_layer_repaint_cost() {
+        use std::time::Instant;
+        // Document 4096×4096 = 256 tuiles de 256×256, entièrement peintes :
+        // le cas qui dégradait le plus l'ancien chemin (coût proportionnel à
+        // la surface déjà peinte, pas au dab courant).
+        let mut raster = crate::model::RasterLayer::default();
+        for ty in 0..16 {
+            for tx in 0..16 {
+                raster.set_pixel(tx * TILE + 5, ty * TILE + 5, [10, 20, 30, 255]);
+            }
+        }
+
+        // Ancien chemin : flatten() + reconversion prémultipliée de toute la
+        // boîte englobante, à chaque dab (simulé ici par N appels répétés).
+        let iterations = 50;
+        let t0 = Instant::now();
+        for _ in 0..iterations {
+            let Some((_, _, w, h, rgba)) = raster.flatten() else { continue };
+            let mut premul = Vec::with_capacity(rgba.len());
+            for c in rgba.chunks_exact(4) {
+                let a = c[3] as u16;
+                premul.push((c[0] as u16 * a / 255) as u8);
+                premul.push((c[1] as u16 * a / 255) as u8);
+                premul.push((c[2] as u16 * a / 255) as u8);
+                premul.push(c[3]);
+            }
+            let _ = Pixmap::from_vec(premul, tiny_skia::IntSize::from_wh(w, h).unwrap());
+        }
+        let old_cost = t0.elapsed();
+
+        // Nouveau chemin : un dab ne modifie qu'une poignée de tuiles ; le
+        // cache ne retouche que celles-là sur les passes suivantes.
+        let mut cache = RasterTileCache::default();
+        blit_raster_tiles(&mut cache, &raster, 4096, 4096); // remplissage initial (hors mesure)
+        let t1 = Instant::now();
+        for i in 0..iterations {
+            // Un seul pixel change, dans une seule tuile (cas réaliste d'un
+            // dab de pinceau qui déborde légèrement sur une tuile voisine).
+            raster.set_pixel(5, 5 + i as i32, [200, 0, 0, 255]);
+            blit_raster_tiles(&mut cache, &raster, 4096, 4096);
+        }
+        let new_cost = t1.elapsed();
+
+        eprintln!(
+            "ancien chemin (flatten complet) : {old_cost:?} / {iterations} appels\n\
+             nouveau chemin (tuiles sales)    : {new_cost:?} / {iterations} appels\n\
+             accélération : {:.1}×",
+            old_cost.as_secs_f64() / new_cost.as_secs_f64().max(1e-9)
+        );
+        assert!(new_cost < old_cost, "le cache incrémental doit être plus rapide que le flatten complet");
     }
 }

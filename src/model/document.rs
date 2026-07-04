@@ -236,6 +236,19 @@ impl Layer {
     }
 }
 
+/// Version du format de fichier `.json` (ANALYSE.md §8.2/§9). Stampée à
+/// `CURRENT_FORMAT_VERSION` à **chaque sauvegarde** (pas seulement à la
+/// création) : un projet rouvert puis resauvegardé reflète toujours la
+/// version du binaire qui l'a écrit. Un projet dont la version dépasse celle
+/// que ce binaire connaît est refusé explicitement à l'ouverture plutôt que
+/// mal interprété en silence (cf. `project::open_dialog`). Une valeur absente
+/// (anciens projets, avant l'introduction de ce champ) vaut `1`.
+pub const CURRENT_FORMAT_VERSION: u32 = 1;
+
+fn default_format_version() -> u32 {
+    1
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub layers: Vec<Layer>,
@@ -247,6 +260,9 @@ pub struct Document {
     /// Prochaine profondeur à attribuer (compteur monotone, superposition).
     #[serde(default)]
     pub next_z: f64,
+    /// Version du format `.json` — voir `CURRENT_FORMAT_VERSION`.
+    #[serde(default = "default_format_version")]
+    pub format_version: u32,
 }
 
 impl Document {
@@ -257,6 +273,7 @@ impl Document {
             size,
             next_layer_id: 2,
             next_z: 1.0,
+            format_version: CURRENT_FORMAT_VERSION,
         }
     }
 
