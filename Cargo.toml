@@ -9,8 +9,10 @@ repository = "https://github.com/lberthod/quickpaint"
 license = "MIT"
 
 [dependencies]
-eframe = "0.29"
-egui = "0.29"
+# "accesskit" : arbre d'accessibilité natif (VoiceOver) construit automatiquement
+# par egui à partir des widgets (boutons, libellés, curseurs) — UIX_ANALYSE.md U2.
+eframe = { version = "0.29", features = ["accesskit"] }
+egui = { version = "0.29", features = ["accesskit"] }
 # Icônes vectorielles (barre d'outils, calques, menus) — police Phosphor
 # embarquée, rendu net à toute taille, sans dépendre des emojis du système.
 egui-phosphor = { version = "0.7", features = ["fill"] }
@@ -31,6 +33,15 @@ fontdb = { version = "0.23.0", default-features = false, features = ["fs", "memm
 geo-clipper = "0.9.0"
 geo-types = "0.7.19"
 psd = "0.3.5"
+# Barre de menu macOS native (NSMenu) — UIX_ANALYSE.md U1/Sprint A : menu ⌘
+# (À propos, Quitter, Services) reconnu par le système, absent d'un menu
+# `egui::menu_button` custom.
+muda = "0.19"
+# Désactive le menu ⌘ par défaut de winit (`with_default_menu`), qui sinon
+# écrase silencieusement le nôtre après `PaintApp::new` — même version que
+# celle utilisée en interne par `eframe` 0.29 (winit 0.30), pour rester sur
+# le même type d'`EventLoopBuilder`.
+winit = { version = "0.30", default-features = false }
 
 [profile.release]
 opt-level = 3

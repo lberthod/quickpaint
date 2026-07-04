@@ -14,6 +14,7 @@ mod icon;
 mod input;
 mod keybindings;
 mod model;
+mod native_menu;
 mod project;
 mod psd_import;
 mod render;
@@ -58,6 +59,15 @@ fn main() -> eframe::Result<()> {
             .with_inner_size([1100.0, 760.0])
             .with_title("QuickPaint")
             .with_icon(std::sync::Arc::new(icon::app_icon())),
+        // winit installe par défaut son propre menu ⌘ minimal (À propos/
+        // Masquer/Quitter, nom de process brut) sur `applicationDidFinishLaunching`
+        // — *après* `PaintApp::new`, donc il écrase silencieusement le nôtre
+        // (`native_menu::install`, UIX_ANALYSE.md U1) si on ne le désactive pas ici.
+        #[cfg(target_os = "macos")]
+        event_loop_builder: Some(Box::new(|builder| {
+            use winit::platform::macos::EventLoopBuilderExtMacOS;
+            builder.with_default_menu(false);
+        })),
         ..Default::default()
     };
 

@@ -397,6 +397,10 @@ pub struct PaintApp {
     /// Un fichier de récupération d'une session précédente a été détecté au
     /// démarrage : propose à l'utilisateur de le restaurer ou de l'ignorer.
     pub show_recovery_prompt: bool,
+    /// Identifiants du menu ⌘ natif (UIX_ANALYSE.md U1) installés par
+    /// `PaintApp::new` — absent des instances de test (`Default`), qui ne
+    /// tournent pas dans un vrai processus AppKit.
+    native_edit_menu: Option<crate::native_menu::EditMenuIds>,
 }
 
 impl Default for PaintApp {
@@ -518,6 +522,7 @@ impl Default for PaintApp {
             autosave_last_rev: 0,
             autosave_last_at: std::time::Instant::now(),
             show_recovery_prompt: false,
+            native_edit_menu: None,
         }
     }
 }
@@ -539,7 +544,11 @@ impl PaintApp {
         // Détecté une seule fois, avant toute écriture de la session
         // courante : la présence du fichier signifie que la session
         // précédente ne s'est pas terminée proprement (crash, kill -9).
-        Self { show_recovery_prompt: crate::project::has_recovery(), ..Default::default() }
+        Self {
+            show_recovery_prompt: crate::project::has_recovery(),
+            native_edit_menu: Some(crate::native_menu::install()),
+            ..Default::default()
+        }
     }
 
     pub fn clear_active_layer(&mut self) {
@@ -3501,6 +3510,29 @@ impl PaintApp {
         self.info(format!("{} ({count} px).", t("Détourage appliqué", "Cutout applied")));
     }
 
+    /// Dépouille les clics du menu Édition natif (UIX_ANALYSE.md U1) et les
+    /// route vers les mêmes méthodes que les raccourcis clavier
+    /// (`handle_shortcuts`) — le menu ⌘ macOS n'est qu'une autre entrée vers
+    /// les actions déjà existantes, pas un chemin d'exécution séparé.
+    fn handle_native_menu(&mut self) {
+        let Some(ids) = &self.native_edit_menu else { return };
+        let (undo, redo, cut, copy, paste) =
+            (ids.undo.clone(), ids.redo.clone(), ids.cut.clone(), ids.copy.clone(), ids.paste.clone());
+        for id in crate::native_menu::poll_events() {
+            if id == undo {
+                self.undo();
+            } else if id == redo {
+                self.redo();
+            } else if id == cut {
+                self.cut_selection();
+            } else if id == copy {
+                self.copy_selection();
+            } else if id == paste && !self.paste_clipboard() {
+                self.paste_image();
+            }
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Capture d'un nouveau raccourci en cours (panneau de préférences,
         // Sprint 7.2) : la prochaine touche pressée devient le raccourci de
@@ -4868,6 +4900,7 @@ impl eframe::App for PaintApp {
         ctx.request_repaint_after(Self::AUTOSAVE_INTERVAL);
         self.show_recovery_dialog(ctx);
         self.handle_screenshot(ctx);
+        self.handle_native_menu();
         self.handle_shortcuts(ctx);
         self.show_resize_dialog(ctx);
         // Quitter l'édition de texte si on change d'outil.
