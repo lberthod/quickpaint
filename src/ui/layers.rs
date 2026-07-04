@@ -255,6 +255,16 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 ui.selectable_value(&mut adj, Adjustment::default_levels(), t("Niveaux", "Levels"));
                 ui.selectable_value(&mut adj, Adjustment::default_hue_saturation(), t("Teinte/Saturation", "Hue/Saturation"));
                 ui.selectable_value(&mut adj, Adjustment::default_curves(), t("Courbes", "Curves"));
+                ui.selectable_value(&mut adj, Adjustment::default_distortion(), t("Distorsion", "Distortion"));
+                ui.selectable_value(
+                    &mut adj,
+                    Adjustment::default_chromatic_aberration(),
+                    t("Aberration chromatique", "Chromatic aberration"),
+                );
+                ui.selectable_value(&mut adj, Adjustment::default_motion_blur(), t("Flou de mouvement", "Motion blur"));
+                ui.selectable_value(&mut adj, Adjustment::default_bokeh(), t("Bokeh", "Bokeh"));
+                ui.selectable_value(&mut adj, Adjustment::default_duotone(), t("Duotone", "Duotone"));
+                ui.selectable_value(&mut adj, Adjustment::default_arc_warp(), t("Warp : Arc", "Warp: Arc"));
             });
         });
         match &mut adj {
@@ -304,6 +314,54 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     ui.add(egui::Slider::new(highlight, 0..=255));
                 });
             }
+            Adjustment::Distortion { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Quantité", "Amount"));
+                    ui.add(egui::Slider::new(amount, -1.0..=1.0))
+                        .on_hover_text(t("Positif = bombé, négatif = creusé", "Positive = bulge, negative = pinch"));
+                });
+            }
+            Adjustment::ChromaticAberration { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Intensité", "Strength"));
+                    ui.add(egui::Slider::new(amount, 0.0..=1.0));
+                });
+            }
+            Adjustment::MotionBlur { angle, distance } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Angle", "Angle"));
+                    ui.add(egui::Slider::new(angle, -180.0..=180.0).suffix("°"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Distance", "Distance"));
+                    ui.add(egui::Slider::new(distance, 0.0..=60.0).suffix(" px"));
+                });
+            }
+            Adjustment::Bokeh { radius, boost } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Rayon", "Radius"));
+                    ui.add(egui::Slider::new(radius, 0.0..=40.0).suffix(" px"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Hautes lumières", "Highlights"));
+                    ui.add(egui::Slider::new(boost, 0.0..=1.0));
+                });
+            }
+            Adjustment::Duotone { shadow, highlight } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Ombres", "Shadows"));
+                    ui.color_edit_button_srgb(shadow);
+                    ui.label(t("Lumières", "Highlights"));
+                    ui.color_edit_button_srgb(highlight);
+                });
+            }
+            Adjustment::ArcWarp { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Quantité", "Amount"));
+                    ui.add(egui::Slider::new(amount, -1.0..=1.0))
+                        .on_hover_text(t("Positif = bombé vers le haut, négatif = vers le bas", "Positive = bulges upward, negative = downward"));
+                });
+            }
             Adjustment::Preset(_) => {}
         }
         layer.adjustment = Some(adj);
@@ -329,6 +387,75 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             ));
         }
     });
+
+    // Styles de calque (Sprint 6.1) : ombre portée, contour, lueur — non
+    // destructifs, dérivés de l'alpha du calque au rendu (voir
+    // `render::compositor::apply_layer_styles`). Ré-emprunte `layer` (plutôt
+    // que réutiliser la liaison plus haut) : le bloc du masque, juste
+    // au-dessus, emprunte `app` dans une fermeture — NLL a besoin que
+    // l'emprunt précédent de `layer` soit terminé avant ce point.
+    let layer = &mut app.doc.layers[active];
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.label(t("Styles", "Styles"));
+        egui::ComboBox::from_id_salt("layer_style_add")
+            .selected_text(t("Ajouter…", "Add…"))
+            .show_ui(ui, |ui| {
+                use crate::model::LayerStyle;
+                for (label, make) in [
+                    (t("Ombre portée", "Drop shadow"), LayerStyle::default_drop_shadow as fn() -> LayerStyle),
+                    (t("Contour", "Stroke"), LayerStyle::default_stroke),
+                    (t("Lueur externe", "Outer glow"), LayerStyle::default_outer_glow),
+                    (t("Lueur interne", "Inner glow"), LayerStyle::default_inner_glow),
+                ] {
+                    if ui.button(label).clicked() {
+                        layer.styles.push(make());
+                    }
+                }
+            });
+    });
+    {
+        use crate::model::LayerStyle;
+        let mut to_remove: Option<usize> = None;
+        for (i, style) in layer.styles.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(style.label());
+                if ui.small_button("🗑").on_hover_text(t("Supprimer ce style", "Remove this style")).clicked() {
+                    to_remove = Some(i);
+                }
+            });
+            match style {
+                LayerStyle::DropShadow { color, offset, blur } => {
+                    ui.horizontal(|ui| {
+                        ui.color_edit_button_srgba_unmultiplied(color);
+                        ui.label(t("Décalage X", "Offset X"));
+                        ui.add(egui::DragValue::new(&mut offset.0).speed(0.5));
+                        ui.label(t("Y", "Y"));
+                        ui.add(egui::DragValue::new(&mut offset.1).speed(0.5));
+                        ui.label(t("Flou", "Blur"));
+                        ui.add(egui::Slider::new(blur, 0.0..=30.0));
+                    });
+                }
+                LayerStyle::Stroke { color, width } => {
+                    ui.horizontal(|ui| {
+                        ui.color_edit_button_srgba_unmultiplied(color);
+                        ui.label(t("Épaisseur", "Width"));
+                        ui.add(egui::Slider::new(width, 0.0..=20.0));
+                    });
+                }
+                LayerStyle::Glow { color, blur, .. } => {
+                    ui.horizontal(|ui| {
+                        ui.color_edit_button_srgba_unmultiplied(color);
+                        ui.label(t("Flou", "Blur"));
+                        ui.add(egui::Slider::new(blur, 0.0..=30.0));
+                    });
+                }
+            }
+        }
+        if let Some(i) = to_remove {
+            layer.styles.remove(i);
+        }
+    }
 
     // Les actions sur les ÉLÉMENTS sélectionnés (aligner/rogner/ordre)
     // vivaient ici avant UX-3.4 — déplacées dans la barre d'options de

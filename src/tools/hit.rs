@@ -61,6 +61,20 @@ pub fn point_in_polygon(poly: &[(f32, f32)], p: (f32, f32)) -> bool {
     inside
 }
 
+/// Test point-dans-ellipse : `rect` (min, max) définit la boîte englobante
+/// de l'ellipse (mêmes bornes que le marquee rectangulaire, dessinée comme
+/// une ellipse inscrite). Pour l'outil Sélection en mode Ellipse.
+pub fn point_in_ellipse(rect: ((f32, f32), (f32, f32)), p: (f32, f32)) -> bool {
+    let ((x0, y0), (x1, y1)) = rect;
+    let (cx, cy) = ((x0 + x1) * 0.5, (y0 + y1) * 0.5);
+    let (rx, ry) = ((x1 - x0).abs() * 0.5, (y1 - y0).abs() * 0.5);
+    if rx <= 0.0 || ry <= 0.0 {
+        return false;
+    }
+    let (dx, dy) = ((p.0 - cx) / rx, (p.1 - cy) / ry);
+    dx * dx + dy * dy <= 1.0
+}
+
 fn within(stroke: &Stroke, p: (f32, f32), radius: f32) -> bool {
     let pts = &stroke.points;
     match pts.len() {
@@ -111,5 +125,18 @@ mod tests {
     #[test]
     fn degenerate_polygon_is_empty() {
         assert!(!point_in_polygon(&[(0.0, 0.0), (1.0, 1.0)], (0.0, 0.0)));
+    }
+
+    #[test]
+    fn point_in_ellipse_center_and_corners() {
+        let rect = ((0.0, 0.0), (20.0, 10.0));
+        assert!(point_in_ellipse(rect, (10.0, 5.0))); // centre
+        assert!(!point_in_ellipse(rect, (0.0, 0.0))); // coin, hors de l'ellipse inscrite
+        assert!(point_in_ellipse(rect, (10.0, 0.0))); // sommet haut de l'ellipse
+    }
+
+    #[test]
+    fn point_in_ellipse_degenerate_rect_is_empty() {
+        assert!(!point_in_ellipse(((0.0, 0.0), (0.0, 10.0)), (0.0, 5.0)));
     }
 }

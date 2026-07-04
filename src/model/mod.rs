@@ -4,8 +4,8 @@ pub mod raster;
 pub mod stroke;
 pub mod text;
 
-pub use document::{BlendMode, Document, ElemRef, Layer};
+pub use document::{BlendMode, Document, ElemRef, Layer, LayerStyle, NamedSelection};
 pub use image::ImageItem;
 pub use raster::{PixelEffect, RasterLayer};
-pub use stroke::{Gradient, GradientKind, Stroke, StrokePoint, StylePreset, Tool};
+pub use stroke::{BrushPreset, Gradient, GradientKind, Stroke, StrokePoint, StylePreset, Tool};
 pub use text::TextItem;

@@ -78,7 +78,7 @@ type ImagePixels = (u32, u32, Vec<u8>);
 /// = succès.
 pub fn import_image_dialog() -> Option<Result<ImagePixels, String>> {
     let path = rfd::FileDialog::new()
-        .add_filter(t("Images", "Images"), &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+        .add_filter(t("Images", "Images"), &["png", "jpg", "jpeg", "bmp", "gif", "webp", "tif", "tiff"])
         .pick_file()?;
     Some(load_image_from_path(&path))
 }
@@ -90,6 +90,70 @@ fn load_image_from_path(path: &std::path::Path) -> Result<ImagePixels, String> {
     let (w, h) = (img.width(), img.height());
     check_dims(w, h)?;
     Ok((w, h, img.into_raw()))
+}
+
+// --- Récupération après crash (Sprint 1.1) ------------------------------
+//
+// Même dossier local que `settings.json` (voir `i18n::settings_path`) :
+// un unique fichier `recovery.json`, écrasé à chaque autosave. Sa seule
+// présence au démarrage signale une session précédente non terminée
+// proprement (crash, kill -9) — une fermeture normale le supprime via
+// `clear_recovery`.
+
+fn recovery_path() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join("Library/Application Support/QuickPaint/recovery.json"))
+}
+
+/// `true` si un fichier de récupération existe déjà (session précédente
+/// interrompue). À vérifier une seule fois, au démarrage, avant toute
+/// écriture de la session courante.
+pub fn has_recovery() -> bool {
+    recovery_path().map(|p| p.exists()).unwrap_or(false)
+}
+
+/// Écrit l'état courant du document dans le fichier de récupération.
+/// Best-effort : une erreur d'écriture (disque plein, permissions) ne doit
+/// pas interrompre la session, donc pas de valeur de retour exploitée par
+/// l'appelant au-delà du logging silencieux.
+pub fn autosave(doc: &Document) {
+    let Some(path) = recovery_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string(doc) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Charge le document depuis le fichier de récupération, mêmes règles de
+/// validation que [`open_dialog`].
+pub fn load_recovery() -> Result<Document, String> {
+    let path = recovery_path().ok_or_else(|| t("dossier utilisateur introuvable", "couldn't find user home directory"))?;
+    load_from_path(&path)
+}
+
+/// Supprime le fichier de récupération : appelé après une sauvegarde/
+/// fermeture propre, ou une fois la restauration proposée à l'utilisateur
+/// (acceptée ou refusée — dans les deux cas la session précédente est actée).
+pub fn clear_recovery() {
+    if let Some(path) = recovery_path() {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Verrou partagé pour les tests qui redirigent temporairement `$HOME`
+/// (`recovery_path`, `i18n::settings_path` en dépendent tous les deux).
+/// `$HOME` est un état **global au process** : sans ce verrou, deux tests de
+/// modules différents qui le redirigent chacun de leur côté (ce fichier et
+/// `app::tests`) peuvent s'entrelacer — l'un restaure `$HOME` pendant que
+/// l'autre écrit encore, et le fichier réel du poste se retrouve pollué par
+/// des données de test (vu en pratique : un `settings.json` de test a fini
+/// dans le vrai dossier utilisateur avant l'ajout de ce verrou).
+#[cfg(test)]
+pub(crate) fn home_env_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
 #[cfg(test)]
@@ -125,5 +189,47 @@ mod tests {
         let loaded = load_from_path(&dir).expect("should load");
         assert_eq!(loaded.size, (100, 80));
         let _ = std::fs::remove_file(&dir);
+    }
+
+    /// TIFF (Sprint 8.1) : format ouvert en plus de PNG/JPG/BMP/GIF/WebP —
+    /// encode un petit TIFF via la crate `image` elle-même, puis vérifie que
+    /// `load_image_from_path` (utilisé par `import_image_dialog`) le décode.
+    #[test]
+    fn opens_a_tiff_image() {
+        let img = image::RgbaImage::from_fn(4, 3, |x, _y| image::Rgba([x as u8 * 10, 50, 100, 255]));
+        let dir = std::env::temp_dir().join("quickpaint-test-import.tiff");
+        img.save(&dir).expect("should encode a tiff");
+        let (w, h, rgba) = load_image_from_path(&dir).expect("should decode the tiff");
+        assert_eq!((w, h), (4, 3));
+        assert_eq!(rgba.len(), (4 * 3 * 4) as usize);
+        let _ = std::fs::remove_file(&dir);
+    }
+
+    /// `recovery_path` dérive de `$HOME`, comme `i18n::settings_path` — donc
+    /// testé via une valeur de `$HOME` temporaire plutôt que sur le vrai
+    /// dossier du poste, pour rester déterministe et ne rien polluer.
+    #[test]
+    fn recovery_round_trip_via_temporary_home() {
+        let _guard = home_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let real_home = std::env::var("HOME").ok();
+        let tmp = std::env::temp_dir().join("quickpaint-test-recovery-home");
+        std::env::set_var("HOME", &tmp);
+
+        assert!(!has_recovery());
+
+        let doc = Document::new((64, 48));
+        autosave(&doc);
+        assert!(has_recovery());
+
+        let loaded = load_recovery().expect("should load recovery file");
+        assert_eq!(loaded.size, (64, 48));
+
+        clear_recovery();
+        assert!(!has_recovery());
+
+        if let Some(home) = real_home {
+            std::env::set_var("HOME", home);
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

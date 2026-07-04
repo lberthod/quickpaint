@@ -5,8 +5,33 @@
 //! cohérents : même mise en page (police + alignement) et mêmes « passes » de
 //! dépôt (contour, faux-bold, remplissage).
 
-use crate::model::text::{TextAlign, TextFont, TextItem};
+use crate::model::text::{TextAlign, TextArc, TextFont, TextItem};
 use std::sync::Arc;
+
+/// Un caractère positionné sur un arc (Sprint 7.1) : décalage (unités
+/// document, depuis le centre `TextItem::pos`) et angle de rotation
+/// (radians, tangente au cercle en ce point) de ce caractère précis.
+pub struct ArcChar {
+    pub ch: char,
+    pub offset: (f32, f32),
+    pub angle: f32,
+}
+
+/// Calcule la position/rotation de chaque caractère de `t.text` le long de
+/// `arc`. Pur (pas de dépendance à egui/police) — la mise en page réelle de
+/// chaque caractère individuel reste à la charge de l'appelant.
+pub fn arc_chars(t: &TextItem, arc: &TextArc) -> Vec<ArcChar> {
+    let dir = if arc.flip { -1.0 } else { 1.0 };
+    t.text
+        .chars()
+        .zip(arc.char_angles(&t.text, t.size))
+        .map(|(ch, theta)| ArcChar {
+            ch,
+            offset: (arc.radius * theta.cos(), arc.radius * theta.sin()),
+            angle: theta + std::f32::consts::FRAC_PI_2 * dir,
+        })
+        .collect()
+}
 
 /// Une passe de dépôt du texte : décalage (unités document) + couleur. Les
 /// passes sont dessinées dans l'ordre (contour d'abord, remplissage en dernier).
@@ -58,10 +83,13 @@ pub fn layout(ctx: &egui::Context, t: &TextItem, px_per_doc: f32) -> Arc<egui::G
     ctx.fonts(|f| f.layout_job(job))
 }
 
-/// Passes de dépôt : contour (8 directions), faux-bold (4 directions), puis le
-/// remplissage central. Décalages en unités document.
+/// Passes de dépôt : ombre (si activée), contour (8 directions), faux-bold
+/// (4 directions), puis le remplissage central. Décalages en unités document.
 pub fn passes(t: &TextItem) -> Vec<Pass> {
     let mut v = Vec::new();
+    if let Some(shadow) = t.shadow {
+        v.push((shadow.offset, shadow.color));
+    }
     if t.outline_w > 0.4 {
         let r = t.outline_w;
         let d = r * std::f32::consts::FRAC_1_SQRT_2;
@@ -93,6 +121,20 @@ mod tests {
         let p = passes(&t);
         assert_eq!(p.len(), 1);
         assert_eq!(p[0], ((0.0, 0.0), [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn arc_chars_places_characters_on_the_circle() {
+        let mut t = TextItem::new(1, (0.0, 0.0), 20.0, [0, 0, 0, 255]);
+        t.text = "AB".to_string();
+        t.arc = Some(TextArc { radius: 50.0, start_angle_deg: 0.0, flip: false });
+        let arc = t.arc.unwrap();
+        let chars = arc_chars(&t, &arc);
+        assert_eq!(chars.len(), 2);
+        for c in &chars {
+            let dist = (c.offset.0.powi(2) + c.offset.1.powi(2)).sqrt();
+            assert!((dist - 50.0).abs() < 1e-3, "le caractère doit être à `radius` du centre");
+        }
     }
 
     #[test]

@@ -2,6 +2,51 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.14.0 — juillet 2026 (Sprints 1 à 9 — audit fonctionnel complet)
+
+Détail complet, priorisation et raisonnement : [FEATURE_SPRINTS.md](FEATURE_SPRINTS.md).
+Neuf sprints d'affilée à partir d'un audit fonctionnel produit/concurrence ;
+196 tests au total (+81), 0 warning clippy.
+
+- **Sprint 1 — Fiabilité** : récupération automatique après crash (autosave
+  périodique + détection au démarrage) ; sélections nommées (enregistrer/
+  recharger/supprimer), persistées avec le projet.
+- **Sprint 2 — Sélection & recadrage** : sélection ellipse ; vraie baguette
+  magique avec bascule Contigu/Global ; redressement d'horizon dans le
+  recadrage (rééchantillonnage par rotation inverse).
+- **Sprint 3 — Dessin** : pression réelle de stylet/tablette (événements
+  `Touch` d'egui, repli sur la simulation vitesse existante) ; stabilisation
+  du tracé réglable ; dégradé conique ; bibliothèque de préréglages de
+  pinceau (fournis + import/export `.json`).
+- **Sprint 4 — Retouche photo** : comparaison avant/après (maintenir pour
+  voir l'état précédent) + histogramme RGB ; correction de distorsion
+  (barrel/pincushion) et d'aberration chromatique ; suppression d'objets par
+  diffusion (inpainting) ; correction des yeux rouges et retouche peau
+  (lissage bilatéral préservant les contours).
+- **Sprint 5 — Filtres créatifs** : flou de mouvement et bokeh (avec
+  accentuation des hautes lumières) ; grain argentique, vintage, duotone ;
+  import de LUT `.cube` (interpolation trilinéaire, intensité réglable) ;
+  effets artistiques croquis / bande dessinée / peinture à l'huile (filtre
+  de Kuwahara) / aquarelle.
+- **Sprint 6 — Calques avancés** : styles de calque non destructifs (ombre
+  portée, contour, lueur externe/interne, dérivés de l'alpha du calque).
+  Les « objets intelligents » (redimensionnement sans perte) se sont révélés
+  déjà acquis à l'audit — les images sont toujours ré-échantillonnées depuis
+  leurs pixels natifs, jamais depuis une version déjà réduite.
+- **Sprint 7 — Texte & transformation** : ombre portée et texte sur courbe
+  (arc de cercle, un galley par caractère) ; transformation en perspective à
+  4 coins (homographie) ; warp « Arc » en calque de réglage.
+- **Sprint 8 — Formats** : ouverture TIFF ; qualité JPEG réglable à l'export
+  (simple, par lots, et PDF) ; import PSD multi-calques (via la crate `psd`,
+  modes de fusion mappés). HEIC et RAW volontairement écartés (licences
+  AGPL/LGPL des seules bibliothèques disponibles, incompatibles avec une
+  distribution simple).
+- **Sprint 9 — IA locale → version heuristique** : bords de détourage
+  affinés (dégradé continu par proximité de couleur plutôt qu'un flou
+  uniforme) ; suréchantillonnage 2×/3×/4× (Lanczos3). Remplace la
+  segmentation/super-résolution par réseau de neurones initialement prévue —
+  choix assumé pour éviter un modèle ML embarqué et ses dépendances.
+
 ## 0.13.1 — juillet 2026 (UX-2.3 + correctif defaults settings)
 
 - **UX-2.3** (reporté dans la 0.13.0) : le survol d'un outil personnalisable

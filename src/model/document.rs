@@ -97,10 +97,58 @@ pub struct Layer {
     mask_png: String,
     #[serde(default)]
     mask_origin: (i32, i32),
+    /// Styles de calque non destructifs (Sprint 6.1) : appliqués au rendu
+    /// déjà aplati du calque (traits + textes + images + raster), avant
+    /// écrêtage/fusion avec les calques du dessous — voir
+    /// `render::compositor::apply_layer_styles`.
+    #[serde(default)]
+    pub styles: Vec<LayerStyle>,
 }
 
 fn default_opacity() -> f32 {
     1.0
+}
+
+/// Style de calque non destructif (Sprint 6.1), à la manière de Photoshop —
+/// dérivé du rendu du calque (son alpha), jamais des pixels d'origine.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum LayerStyle {
+    /// Ombre portée : copie décalée et floutée de l'alpha du calque, colorée,
+    /// dessinée derrière son contenu.
+    DropShadow { color: [u8; 4], offset: (f32, f32), blur: f32 },
+    /// Contour : anneau de couleur juste à l'extérieur du contenu du calque.
+    Stroke { color: [u8; 4], width: f32 },
+    /// Lueur : externe (`inner = false`, autour du contenu, comme l'ombre
+    /// mais non décalée) ou interne (`inner = true`, un halo vers l'intérieur
+    /// depuis les bords).
+    Glow { color: [u8; 4], blur: f32, inner: bool },
+}
+
+impl LayerStyle {
+    pub fn label(self) -> &'static str {
+        match self {
+            LayerStyle::DropShadow { .. } => t("Ombre portée", "Drop shadow"),
+            LayerStyle::Stroke { .. } => t("Contour", "Stroke"),
+            LayerStyle::Glow { inner: false, .. } => t("Lueur externe", "Outer glow"),
+            LayerStyle::Glow { inner: true, .. } => t("Lueur interne", "Inner glow"),
+        }
+    }
+
+    pub fn default_drop_shadow() -> Self {
+        LayerStyle::DropShadow { color: [0, 0, 0, 160], offset: (4.0, 4.0), blur: 4.0 }
+    }
+
+    pub fn default_stroke() -> Self {
+        LayerStyle::Stroke { color: [255, 255, 255, 255], width: 3.0 }
+    }
+
+    pub fn default_outer_glow() -> Self {
+        LayerStyle::Glow { color: [255, 220, 100, 200], blur: 8.0, inner: false }
+    }
+
+    pub fn default_inner_glow() -> Self {
+        LayerStyle::Glow { color: [255, 255, 255, 200], blur: 8.0, inner: true }
+    }
 }
 
 /// Référence d'un élément d'un calque (index dans le vec de son type).
@@ -172,6 +220,7 @@ impl Layer {
             mask: None,
             mask_png: String::new(),
             mask_origin: (0, 0),
+            styles: Vec::new(),
         }
     }
 
@@ -249,6 +298,18 @@ fn default_format_version() -> u32 {
     1
 }
 
+/// Sélection nommée (Sprint 1.2) : ensemble d'ids d'éléments (traits, textes,
+/// images) d'un calque donné, sauvegardée dans le document pour être
+/// rechargée plus tard sans avoir à retracer la même zone. Un id disparu
+/// depuis (élément supprimé) est simplement ignoré au chargement — pas
+/// d'erreur, la sélection restaurée contient juste ce qu'il en reste.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NamedSelection {
+    pub name: String,
+    pub layer: u64,
+    pub ids: Vec<u64>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub layers: Vec<Layer>,
@@ -263,6 +324,9 @@ pub struct Document {
     /// Version du format `.json` — voir `CURRENT_FORMAT_VERSION`.
     #[serde(default = "default_format_version")]
     pub format_version: u32,
+    /// Sélections nommées enregistrées par l'utilisateur (Sprint 1.2).
+    #[serde(default)]
+    pub named_selections: Vec<NamedSelection>,
 }
 
 impl Document {
@@ -274,6 +338,7 @@ impl Document {
             next_layer_id: 2,
             next_z: 1.0,
             format_version: CURRENT_FORMAT_VERSION,
+            named_selections: Vec::new(),
         }
     }
 

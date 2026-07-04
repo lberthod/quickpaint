@@ -261,6 +261,10 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     batch_export_window(ctx, app);
     style_presets_window(ctx, app);
     asset_library_window(ctx, app);
+    brush_library_window(ctx, app);
+    histogram_window(ctx, app);
+    lut_window(ctx, app);
+    perspective_window(ctx, app);
 }
 
 /// Bibliothèque d'éléments réutilisables (Sprint 10.1) : pictogrammes et
@@ -388,6 +392,264 @@ fn style_presets_window(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
+/// Histogramme RGB + comparaison avant/après (Sprint 4.1). L'histogramme
+/// porte sur l'image seule sélectionnée sur le calque actif (calcul cher sur
+/// tout le canevas sinon) ; le bouton « Avant » ne fait qu'annuler/réappliquer
+/// la dernière action pendant que le clic est maintenu — voir
+/// `PaintApp::begin_compare_before`.
+fn histogram_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_histogram {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("📊 Histogramme", "📊 Histogram"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(280.0);
+            match app.single_image_idx() {
+                Some(idx) => {
+                    let im = &app.doc.layers[app.doc.active_layer].images[idx];
+                    let hist = crate::tools::filter::histogram_rgb(&im.rgba);
+                    paint_histogram(ui, &hist);
+                }
+                None => {
+                    ui.label(t(
+                        "Sélectionne une image (outil Sélection) pour voir son histogramme.",
+                        "Select an image (Select tool) to see its histogram.",
+                    ));
+                }
+            }
+            ui.separator();
+            let resp = ui.add_enabled(
+                app.history.can_undo(),
+                egui::Button::new(t("👁 Avant (maintenir)", "👁 Before (hold)")),
+            );
+            if resp.is_pointer_button_down_on() {
+                app.begin_compare_before();
+            } else if app.comparing_before {
+                app.end_compare_before();
+            }
+            resp.on_hover_text(t(
+                "Maintiens le clic pour voir l'état avant la dernière action",
+                "Hold the click to see the state before the last action",
+            ));
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_histogram = false;
+            }
+        });
+    if !open {
+        app.show_histogram = false;
+    }
+}
+
+/// Dessine les trois canaux R/V/B en barres semi-transparentes superposées,
+/// normalisées par le compte max (évite qu'un pic unique n'écrase le reste).
+fn paint_histogram(ui: &mut Ui, hist: &[[u32; 256]; 3]) {
+    let (w, h) = (256.0, 100.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 2.0, Color32::from_gray(30));
+    let max = hist.iter().flat_map(|c| c.iter()).copied().max().unwrap_or(1).max(1) as f32;
+    let colors = [
+        Color32::from_rgba_unmultiplied(255, 60, 60, 140),
+        Color32::from_rgba_unmultiplied(60, 220, 60, 140),
+        Color32::from_rgba_unmultiplied(80, 120, 255, 140),
+    ];
+    for (c, color) in colors.iter().enumerate() {
+        for x in 0..256 {
+            let v = hist[c][x] as f32 / max;
+            if v <= 0.0 {
+                continue;
+            }
+            let bar_h = v * h;
+            let x0 = rect.left() + x as f32;
+            painter.line_segment(
+                [egui::pos2(x0, rect.bottom()), egui::pos2(x0, rect.bottom() - bar_h)],
+                egui::Stroke::new(1.0, *color),
+            );
+        }
+    }
+}
+
+/// Import et application de LUT `.cube` (Sprint 5.3).
+fn lut_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_lut_panel {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("🎞 LUT (.cube)", "🎞 LUT (.cube)"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(280.0);
+            if ui.button(t("Importer…", "Import…")).clicked() {
+                app.import_lut();
+            }
+            match &app.loaded_lut {
+                Some((name, _)) => {
+                    ui.label(format!("{} : {name}", t("LUT chargée", "Loaded LUT")));
+                }
+                None => {
+                    ui.label(t("Aucune LUT chargée.", "No LUT loaded."));
+                }
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(t("Intensité", "Intensity"));
+                ui.add(egui::Slider::new(&mut app.lut_intensity, 0.0..=1.0));
+            });
+            if ui
+                .add_enabled(app.loaded_lut.is_some(), egui::Button::new(t("Appliquer", "Apply")))
+                .on_hover_text(t(
+                    "Applique à l'image sélectionnée (outil Sélection)",
+                    "Applies to the selected image (Select tool)",
+                ))
+                .clicked()
+            {
+                app.apply_loaded_lut();
+            }
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_lut_panel = false;
+            }
+        });
+    if !open {
+        app.show_lut_panel = false;
+    }
+}
+
+/// Transformation en perspective (Sprint 7.2) : 4 curseurs (un par coin, en
+/// fraction de la largeur/hauteur de l'image) plutôt qu'un glissé interactif
+/// des coins — plus simple à intégrer, tout aussi contrôlable.
+fn perspective_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_perspective_panel {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("◪ Perspective", "◪ Perspective"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(280.0);
+            ui.label(t(
+                "S'applique à l'image sélectionnée (outil Sélection)",
+                "Applies to the selected image (Select tool)",
+            ));
+            let labels = [
+                t("Haut-gauche", "Top-left"),
+                t("Haut-droit", "Top-right"),
+                t("Bas-droit", "Bottom-right"),
+                t("Bas-gauche", "Bottom-left"),
+            ];
+            for (i, label) in labels.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(*label);
+                    ui.add(egui::Slider::new(&mut app.perspective_offsets[i].0, -0.5..=0.5).text("X"));
+                    ui.add(egui::Slider::new(&mut app.perspective_offsets[i].1, -0.5..=0.5).text("Y"));
+                });
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button(t("Réinitialiser", "Reset")).clicked() {
+                    app.perspective_offsets = [(0.0, 0.0); 4];
+                }
+                if ui.button(t("Appliquer", "Apply")).clicked() {
+                    app.apply_perspective_to_selection();
+                }
+            });
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_perspective_panel = false;
+            }
+        });
+    if !open {
+        app.show_perspective_panel = false;
+    }
+}
+
+/// Bibliothèque de brosses (Sprint 3.4) : préréglages fournis + ceux de
+/// l'utilisateur (épaisseur, dureté, stabilisation, pression), plus
+/// l'enregistrement du réglage courant et l'import depuis un fichier
+/// `.json` partageable. Même structure que `style_presets_window`.
+fn brush_library_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_brush_library {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("🖌 Bibliothèque de brosses", "🖌 Brush library"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(320.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut app.brush_preset_name).hint_text(t("Nom du pinceau", "Brush name")));
+                if ui.button(t("Enregistrer", "Save")).clicked() {
+                    let name = std::mem::take(&mut app.brush_preset_name);
+                    app.save_brush_preset(name);
+                }
+                if ui.button(t("Importer…", "Import…")).clicked() {
+                    app.import_brush_presets();
+                }
+            })
+            .response
+            .on_hover_text(t(
+                "Enregistre l'épaisseur, la dureté, la stabilisation et la pression courantes",
+                "Saves the current width, hardness, stabilization and pressure",
+            ));
+            ui.separator();
+            ui.label(t("Préréglages fournis :", "Built-in presets:"));
+            let mut to_apply: Option<crate::model::BrushPreset> = None;
+            for preset in crate::model::BrushPreset::builtins() {
+                ui.horizontal(|ui| {
+                    ui.label(&preset.name);
+                    if ui.button(t("Appliquer", "Apply")).clicked() {
+                        to_apply = Some(preset.clone());
+                    }
+                });
+            }
+            ui.separator();
+            ui.label(t("Tes pinceaux :", "Your brushes:"));
+            if app.brush_presets.is_empty() {
+                ui.label(t("Aucun pinceau enregistré pour l'instant.", "No brush saved yet."));
+            }
+            let mut to_delete: Option<String> = None;
+            for preset in app.brush_presets.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(&preset.name);
+                    if ui.button(t("Appliquer", "Apply")).clicked() {
+                        to_apply = Some(preset.clone());
+                    }
+                    if ui.button("🗑").on_hover_text(t("Supprimer", "Delete")).clicked() {
+                        to_delete = Some(preset.name.clone());
+                    }
+                });
+            }
+            if let Some(preset) = to_apply {
+                app.apply_brush_preset(&preset);
+            }
+            if let Some(name) = to_delete {
+                app.delete_brush_preset(&name);
+            }
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_brush_library = false;
+            }
+        });
+    if !open {
+        app.show_brush_library = false;
+    }
+}
+
 /// Panneau « Exporter en plusieurs tailles » (Sprint 7.3) : coche des
 /// multiples du document + une largeur personnalisée, un seul dossier choisi
 /// pour tous les fichiers écrits.
@@ -412,6 +674,12 @@ fn batch_export_window(ctx: &egui::Context, app: &mut PaintApp) {
                     ui.radio_value(&mut app.batch_export.format, fmt, fmt.label());
                 }
             });
+            if matches!(app.batch_export.format, ExportFormat::Jpg | ExportFormat::Pdf) {
+                ui.horizontal(|ui| {
+                    ui.label(t("Qualité JPEG :", "JPEG quality:"));
+                    ui.add(egui::Slider::new(&mut app.jpeg_quality, 1..=100));
+                });
+            }
             ui.separator();
             ui.label(t("Tailles à exporter :", "Sizes to export:"));
             let dim = |m: f32| format!("{}×{}", (dw as f32 * m).round() as u32, (dh as f32 * m).round() as u32);
@@ -609,6 +877,17 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.import_image();
                 ui.close_menu();
             }
+            if ui
+                .button(t("Importer un PSD…", "Import PSD…"))
+                .on_hover_text(t(
+                    "Ouvre un fichier Photoshop comme un nouveau document multi-calques",
+                    "Opens a Photoshop file as a new multi-layer document",
+                ))
+                .clicked()
+            {
+                app.import_psd();
+                ui.close_menu();
+            }
             if ui.button(mtitle(ic::CLIPBOARD, t("Coller une image (⌘V)", "Paste image (⌘V)"))).clicked() {
                 app.paste_image();
                 ui.close_menu();
@@ -619,6 +898,12 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 ui.close_menu();
             }
             ui.menu_button(t("Exporter sous…", "Export as…"), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(t("Qualité JPEG :", "JPEG quality:"));
+                    ui.add(egui::Slider::new(&mut app.jpeg_quality, 1..=100))
+                        .on_hover_text(t("S'applique aussi au JPEG embarqué dans le PDF", "Also applies to the JPEG embedded in the PDF"));
+                });
+                ui.separator();
                 for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Pdf] {
                     if ui.button(fmt.label()).clicked() {
                         app.request_export(ctx, fmt);
@@ -717,6 +1002,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             if ui.button(t("✨ Bibliothèque d'éléments…", "✨ Element library…")).clicked() {
                 app.show_asset_library = true;
+                ui.close_menu();
+            }
+            if ui.button(t("🖌 Bibliothèque de brosses…", "🖌 Brush library…")).clicked() {
+                app.show_brush_library = true;
                 ui.close_menu();
             }
             ui.separator();
@@ -825,6 +1114,12 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     (t("Niveaux…", "Levels…"), Adjustment::default_levels as fn() -> Adjustment),
                     (t("Teinte/Saturation…", "Hue/Saturation…"), Adjustment::default_hue_saturation),
                     (t("Courbes…", "Curves…"), Adjustment::default_curves),
+                    (t("Distorsion…", "Distortion…"), Adjustment::default_distortion),
+                    (t("Aberration chromatique…", "Chromatic aberration…"), Adjustment::default_chromatic_aberration),
+                    (t("Flou de mouvement…", "Motion blur…"), Adjustment::default_motion_blur),
+                    (t("Bokeh…", "Bokeh…"), Adjustment::default_bokeh),
+                    (t("Duotone…", "Duotone…"), Adjustment::default_duotone),
+                    (t("Warp Arc…", "Warp Arc…"), Adjustment::default_arc_warp),
                 ] {
                     if ui.button(label).clicked() {
                         app.add_adjustment_layer(make());
@@ -932,6 +1227,18 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 }
             }
         });
+
+        if ui.button(mtitle(ic::CHART_BAR, t("Histogramme", "Histogram"))).clicked() {
+            app.show_histogram = !app.show_histogram;
+        }
+
+        if ui.button(mtitle(ic::PALETTE, t("LUT", "LUT"))).clicked() {
+            app.show_lut_panel = !app.show_lut_panel;
+        }
+
+        if ui.button(mtitle(ic::PERSPECTIVE, t("Perspective", "Perspective"))).clicked() {
+            app.show_perspective_panel = !app.show_perspective_panel;
+        }
 
         ui.menu_button(mtitle(ic::GEAR, t("Préférences", "Preferences")), |ui| {
             if ui.button(t("Raccourcis clavier…", "Keyboard shortcuts…")).clicked() {
@@ -1291,6 +1598,54 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
         }
     }
 
+    ui.separator();
+    let mut shadow_on = app.text_shadow.is_some();
+    if ui.checkbox(&mut shadow_on, t("Ombre", "Shadow")).changed() {
+        app.text_shadow = shadow_on.then(crate::model::text::TextShadow::default);
+        changed = true;
+    }
+    if let Some(shadow) = &mut app.text_shadow {
+        ui.label(t("Décalage", "Offset"));
+        if ui.add(egui::DragValue::new(&mut shadow.offset.0).speed(0.5)).changed() {
+            changed = true;
+        }
+        if ui.add(egui::DragValue::new(&mut shadow.offset.1).speed(0.5)).changed() {
+            changed = true;
+        }
+        let mut sc = Color32::from_rgba_unmultiplied(shadow.color[0], shadow.color[1], shadow.color[2], shadow.color[3]);
+        if ui.color_edit_button_srgba(&mut sc).changed() {
+            shadow.color = sc.to_srgba_unmultiplied();
+            changed = true;
+        }
+    }
+
+    ui.separator();
+    let mut arc_on = app.text_arc.is_some();
+    if ui
+        .checkbox(&mut arc_on, t("Sur courbe", "On a curve"))
+        .on_hover_text(t(
+            "Place le texte le long d'un cercle centré sur sa position (ignore la rotation)",
+            "Places the text along a circle centered on its position (ignores rotation)",
+        ))
+        .changed()
+    {
+        app.text_arc = arc_on.then(crate::model::text::TextArc::default);
+        changed = true;
+    }
+    if let Some(arc) = &mut app.text_arc {
+        ui.label(t("Rayon", "Radius"));
+        if ui.add(egui::Slider::new(&mut arc.radius, 20.0..=400.0)).changed() {
+            changed = true;
+        }
+        ui.label(t("Angle", "Angle"));
+        if ui.add(egui::Slider::new(&mut arc.start_angle_deg, -180.0..=180.0).suffix("°")).changed() {
+            changed = true;
+        }
+        if ui.checkbox(&mut arc.flip, t("Retourné", "Flipped")).changed() {
+            changed = true;
+        }
+    }
+
     if changed {
         app.sync_text_style();
     }
@@ -1388,6 +1743,50 @@ fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
     {
         app.start_crop();
     }
+    if ui
+        .button(t("🩹 Supprimer un objet", "🩹 Remove object"))
+        .on_hover_text(t(
+            "Glisse un rectangle sur un objet de l'image pour l'effacer (remplissage par diffusion)",
+            "Drag a rectangle over an object in the image to erase it (diffusion fill)",
+        ))
+        .clicked()
+    {
+        app.start_retouch(crate::tools::RetouchKind::Remove);
+    }
+    if ui
+        .button(t("👁 Yeux rouges", "👁 Red eye"))
+        .on_hover_text(t(
+            "Glisse un rectangle sur l'œil à corriger",
+            "Drag a rectangle over the eye to fix",
+        ))
+        .clicked()
+    {
+        app.start_retouch(crate::tools::RetouchKind::RedEye);
+    }
+    if ui
+        .button(t("✨ Retouche peau", "✨ Skin smoothing"))
+        .on_hover_text(t(
+            "Glisse un rectangle sur la zone de peau à adoucir",
+            "Drag a rectangle over the skin area to soften",
+        ))
+        .clicked()
+    {
+        app.start_retouch(crate::tools::RetouchKind::SkinSmooth);
+    }
+    ui.separator();
+    ui.label(t("Suréchantillonner :", "Upscale:"));
+    for factor in [2u32, 3, 4] {
+        if ui
+            .button(format!("{factor}×"))
+            .on_hover_text(t(
+                "Augmente la résolution native (Lanczos3) sans changer la taille affichée",
+                "Increases native resolution (Lanczos3) without changing the displayed size",
+            ))
+            .clicked()
+        {
+            app.upscale_selection(factor);
+        }
+    }
     // Contrainte de ratio du recadrage, proposée pendant le mode rognage.
     if app.is_cropping() {
         ui.separator();
@@ -1401,6 +1800,52 @@ fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
         ];
         for (label, ratio) in choices {
             ui.selectable_value(&mut app.crop_ratio, *ratio, *label);
+        }
+        // Redressement d'horizon (Sprint 2.3) : incline la zone de recadrage,
+        // le contenu ressort droit une fois le recadrage validé.
+        ui.separator();
+        ui.label(t("Redressement :", "Straighten:"));
+        let mut degrees = app.crop_angle.to_degrees();
+        if ui
+            .add(egui::Slider::new(&mut degrees, -45.0..=45.0).suffix("°"))
+            .on_hover_text(t("Redresse l'horizon de l'image recadrée", "Straighten the horizon of the cropped image"))
+            .changed()
+        {
+            app.crop_angle = degrees.to_radians();
+        }
+    }
+}
+
+/// Sélections nommées (Sprint 1.2) : champ + bouton pour enregistrer la
+/// sélection courante, puis un bouton par sélection déjà enregistrée pour la
+/// recharger (✕ pour la supprimer). Toujours affiché avec l'outil Sélection,
+/// même sans sélection courante active, pour rester accessible.
+fn named_selections_row(ui: &mut Ui, app: &mut PaintApp) {
+    ui.separator();
+    ui.label(t("Sélections :", "Selections:"));
+    ui.add(
+        egui::TextEdit::singleline(&mut app.named_selection_field)
+            .desired_width(90.0)
+            .hint_text(t("nom…", "name…")),
+    );
+    let has = !app.selection.is_empty();
+    let name_ok = !app.named_selection_field.trim().is_empty();
+    if ui
+        .add_enabled(has && name_ok, egui::Button::new(t("Enregistrer", "Save")))
+        .on_hover_text(t("Enregistrer la sélection courante sous ce nom", "Save the current selection under this name"))
+        .clicked()
+    {
+        let name = std::mem::take(&mut app.named_selection_field);
+        app.save_named_selection(name);
+    }
+    let saved: Vec<String> = app.doc.named_selections.iter().map(|s| s.name.clone()).collect();
+    for name in saved {
+        ui.separator();
+        if ui.button(&name).on_hover_text(t("Recharger cette sélection", "Reload this selection")).clicked() {
+            app.load_named_selection(&name);
+        }
+        if ui.small_button("✕").on_hover_text(t("Supprimer cette sélection nommée", "Delete this named selection")).clicked() {
+            app.delete_named_selection(&name);
         }
     }
 }
@@ -1419,11 +1864,18 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
                     egui::Slider::new(&mut app.wand_tol, 0..=128).text(t("Tolérance", "Tolerance")),
                 )
                 .on_hover_text(t("Écart de couleur toléré par canal", "Color tolerance per channel"));
+                ui.separator();
+                ui.label(t("Portée :", "Scope:"));
+                ui.selectable_value(&mut app.wand_global, false, t("Contigu", "Contiguous"))
+                    .on_hover_text(t("Seulement la région connexe autour du clic", "Only the connected region around the click"));
+                ui.selectable_value(&mut app.wand_global, true, t("Global", "Global"))
+                    .on_hover_text(t("Toute couleur proche sur le calque", "Any similar color on the layer"));
             }
             ui.separator();
             ui.label(t("Couleur :", "Color:"));
             brush_color_edit(ui, app);
             selection_actions(ui, app);
+            named_selections_row(ui, app);
             return;
         }
         // Outil Texte : taille + style riche (police, gras, alignement, contour).
@@ -1509,6 +1961,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             ui.separator();
             ui.selectable_value(&mut app.gradient_kind, crate::model::GradientKind::Linear, t("Linéaire", "Linear"));
             ui.selectable_value(&mut app.gradient_kind, crate::model::GradientKind::Radial, t("Radial", "Radial"));
+            ui.selectable_value(&mut app.gradient_kind, crate::model::GradientKind::Conic, t("Conique", "Conic"));
             ui.label(t("(s'applique aux formes pleines sélectionnées)", "(applies to selected filled shapes)"));
         }
         if app.active_tool == ActiveTool::Cutout {
@@ -1610,6 +2063,11 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         ui.label(t("Pression", "Pressure"));
         ui.add(egui::Slider::new(&mut app.capture_pressure_strength, 0.0..=1.0))
             .on_hover_text(t("Intensité de la pression simulée (vitesse → épaisseur)", "Simulated pressure strength (speed → thickness)"));
+
+        ui.separator();
+        ui.label(t("Stabilisation", "Stabilization"));
+        ui.add(egui::Slider::new(&mut app.stroke_stabilization, 0.0..=1.0))
+            .on_hover_text(t("Lisse le tracé (plus haut = plus lisse, mais plus de délai)", "Smooths the stroke (higher = smoother, but more lag)"));
     });
 }
 

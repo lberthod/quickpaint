@@ -15,6 +15,7 @@ mod input;
 mod keybindings;
 mod model;
 mod project;
+mod psd_import;
 mod render;
 mod svg;
 mod tools;

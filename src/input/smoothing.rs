@@ -20,6 +20,12 @@ impl Ema {
         self.state = None;
     }
 
+    /// Change l'intensité du filtre sans perdre l'état en cours (utilisé pour
+    /// la stabilisation du tracé réglable, Sprint 3.2).
+    pub fn set_alpha(&mut self, alpha: f32) {
+        self.alpha = alpha.clamp(0.01, 1.0);
+    }
+
     /// Applique le filtre et renvoie la position lissée.
     pub fn filter(&mut self, raw: (f32, f32)) -> (f32, f32) {
         let out = match self.state {
@@ -50,5 +56,15 @@ mod tests {
         ema.filter((0.0, 0.0));
         let p = ema.filter((10.0, 0.0));
         assert!((p.0 - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn set_alpha_changes_the_smoothing_without_resetting_state() {
+        let mut ema = Ema::new(1.0); // pas de lissage au départ
+        ema.filter((0.0, 0.0));
+        ema.set_alpha(0.1); // fort lissage désormais
+        let p = ema.filter((100.0, 0.0));
+        // Avec alpha=0.1, le nouveau point ne tire que faiblement vers 100.
+        assert!(p.0 < 20.0, "attendu proche de 10 (alpha=0.1 × 100), eu {}", p.0);
     }
 }

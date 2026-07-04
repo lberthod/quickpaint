@@ -85,6 +85,10 @@ struct Settings {
     /// + dégradé optionnel, réutilisables en un clic.
     #[serde(default)]
     style_presets: Vec<crate::model::StylePreset>,
+    /// Préréglages de pinceau nommés par l'utilisateur (Sprint 3.4), en plus
+    /// des préréglages fournis (`BrushPreset::builtins`, jamais persistés ici).
+    #[serde(default)]
+    brush_presets: Vec<crate::model::BrushPreset>,
     /// Groupes de la barre d'outils repliés (UX-2.1). `#[serde(default =
     /// ...)]`, pas `Default::default()` : un fichier qui n'a jamais eu ce
     /// champ (installation existante) obtient les groupes secondaires
@@ -233,6 +237,18 @@ pub fn load_style_presets() -> Vec<crate::model::StylePreset> {
 pub fn save_style_presets(presets: &[crate::model::StylePreset]) {
     let mut settings = read_settings();
     settings.style_presets = presets.to_vec();
+    write_settings(&settings);
+}
+
+/// Préréglages de pinceau nommés par l'utilisateur (Sprint 3.4), même
+/// fichier local — les préréglages fournis ne sont jamais persistés ici.
+pub fn load_brush_presets() -> Vec<crate::model::BrushPreset> {
+    read_settings().brush_presets
+}
+
+pub fn save_brush_presets(presets: &[crate::model::BrushPreset]) {
+    let mut settings = read_settings();
+    settings.brush_presets = presets.to_vec();
     write_settings(&settings);
 }
 

@@ -7,6 +7,9 @@ pub mod filter;
 pub mod eyedropper;
 pub mod guides;
 pub mod hit;
+pub mod inpaint;
+pub mod lut;
+pub mod perspective;
 pub mod pen;
 pub mod shape;
 
@@ -79,6 +82,23 @@ pub enum ActiveTool {
     Gradient,
 }
 
+/// Mode de retouche destructive d'image par glissé de rectangle (Sprint 4.3/
+/// 4.4) : recadrage mis à part (`crop_mode`, plus ancien et avec sa propre
+/// contrainte de ratio), ces trois modes partagent le même geste — glisser un
+/// rectangle sur l'image sélectionnée — mais chacun applique un traitement
+/// différent au relâchement, voir `PaintApp::apply_retouch`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetouchKind {
+    /// Suppression d'objet content-aware : remplissage par diffusion.
+    Remove,
+    /// Suppression des yeux rouges : neutralise la teinte rouge dominante
+    /// dans l'ellipse inscrite au rectangle.
+    RedEye,
+    /// Retouche peau : lissage guidé par la luminance (préserve les contours
+    /// nets — yeux, sourcils, lèvres — tout en adoucissant la peau).
+    SkinSmooth,
+}
+
 /// Sous-mode de l'outil Sélection (Sprint 1). Détermine le geste « glisser sur
 /// le vide » (rectangle vs lasso) ou le clic (baguette par couleur).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -86,6 +106,9 @@ pub enum SelectMode {
     /// Rectangle de sélection (marquee) : sélectionne les éléments recoupés.
     #[default]
     Rect,
+    /// Ellipse de sélection : sélectionne les éléments dont le centre tombe
+    /// dans l'ellipse inscrite dans le rectangle glissé (Sprint 2.1).
+    Ellipse,
     /// Lasso libre : sélectionne les éléments dont le centre est dans le tracé.
     Lasso,
     /// Baguette magique : clic → sélectionne les traits de couleur proche.
@@ -93,11 +116,12 @@ pub enum SelectMode {
 }
 
 impl SelectMode {
-    pub const ALL: [SelectMode; 3] = [SelectMode::Rect, SelectMode::Lasso, SelectMode::Wand];
+    pub const ALL: [SelectMode; 4] = [SelectMode::Rect, SelectMode::Ellipse, SelectMode::Lasso, SelectMode::Wand];
 
     pub fn label(self) -> &'static str {
         match self {
             SelectMode::Rect => t("Rectangle", "Rectangle"),
+            SelectMode::Ellipse => t("Ellipse", "Ellipse"),
             SelectMode::Lasso => t("Lasso", "Lasso"),
             SelectMode::Wand => t("Baguette", "Wand"),
         }

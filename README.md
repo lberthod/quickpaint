@@ -18,42 +18,61 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
 
 ## Features
 
-- **Drawing**: vector brush (width simulated from stroke speed, Catmull-Rom
-  smoothing), plus a tiled **raster engine** with pixel **brush**, **eraser**,
-  **clone stamp** (⌥+click = source), **healing brush**, a real flood-fill
-  **paint bucket**, and one-click **cutout** (flood-fill + feathering) — all
-  with per-tile undo.
+- **Drawing**: vector brush (width simulated from stroke speed **or real
+  stylet/tablet pressure** when available, Catmull-Rom smoothing, adjustable
+  **stroke stabilization**), plus a tiled **raster engine** with pixel
+  **brush**, **eraser**, **clone stamp** (⌥+click = source), **healing
+  brush**, a real flood-fill **paint bucket**, and one-click **cutout**
+  (flood-fill + color-proximity soft edges) — all with per-tile undo. Named
+  **brush presets** (built-in + import/export `.json`).
 - **Local retouching tools**: **dodge/burn**, **sponge**
   (saturate/desaturate), localized **blur/sharpen**, **smudge**,
   **measure ruler**, rotational **mirror drawing**, drag-to-place
-  **interactive gradient**.
+  **interactive gradient** (linear/radial/**conic**).
 - **Shapes**: line, arrow, rectangle, ellipse, polygon, star (outline or
-  filled, Shift constraint), with **linear/radial gradient fills**.
+  filled, Shift constraint), with **linear/radial/conic gradient fills**.
 - **Pen** (Bézier curves) with **node editing after the fact** — double-click
   a pen path to reopen and reshape its anchors/handles — and **path booleans**
   (union / subtract / intersect) on selected filled shapes.
 - **Rich text**: system fonts (lazy-loaded), faux-bold, left/center/right
-  alignment, outline.
-- **Selection**: click, **rectangle (marquee)**, **lasso**, **magic wand**
+  alignment, outline, **drop shadow**, and **text on a curve**.
+- **Selection**: click, **rectangle**, **ellipse**, **lasso**, **magic wand**
   (by color, contiguous or global); move, **resize**, **rotate**, duplicate,
   align / distribute (with **smart guides**/snapping), **z-order**,
-  **copy/paste style**, named **style presets**.
+  **copy/paste style**, named **style presets**, named **selections**
+  (save/reload).
 - **Layers**: visibility, opacity, **blend modes** (multiply, screen…),
   reordering, **groups**, merge / flatten, **clipping masks**, **painted
   layer masks**, non-destructive **adjustment layers** (levels, curves,
-  hue/saturation, brightness/contrast, sharpen, invert, grayscale…).
-- **Images**: import + **paste (⌘V)**, move, **crop** (free or
-  ratio-constrained 1:1 / 4:3 / 16:9 / A4), image & canvas **resize**,
-  filters.
+  hue/saturation, brightness/contrast, sharpen, invert, grayscale, motion
+  blur, bokeh, duotone, distortion, chromatic aberration, arc warp…), and
+  non-destructive **layer styles** (drop shadow, stroke, outer/inner glow).
+- **Images**: import (PNG/JPG/BMP/GIF/WebP/**TIFF**) + **paste (⌘V)**, move,
+  **crop** (free, ratio-constrained, or with **horizon straightening**),
+  image & canvas **resize**, **perspective transform** (4-corner homography),
+  content-aware **object removal**, **red-eye correction**, **skin
+  smoothing**, **2×/3×/4× upscaling** (Lanczos3), filters, **before/after
+  comparison** + live **RGB histogram**, **`.cube` LUT import**.
+- **Import**: **Photoshop `.psd`** (multi-layer, blend modes mapped) as a new
+  document.
 - **Templates & assets**: built-in gallery of common formats (social posts,
   presentation, print…), embedded asset/picto library, custom-sized documents.
 - **View**: touch zoom/pan, grid + snapping, **rulers**, fixed document size.
-- **History**: non-linear (panel + jump straight to any state).
-- **Export**: **PNG, JPEG, WebP, PDF**, vector **SVG**, **batch multi-size
-  export**; **project save** as `.json`.
+- **History**: non-linear (panel + jump straight to any state), automatic
+  **crash recovery** (periodic autosave, restore prompt on next launch).
+- **Export**: **PNG, JPEG (adjustable quality), WebP, PDF**, vector **SVG**,
+  **batch multi-size export**; **project save** as `.json`.
 - **Customization**: editable color palette, configurable keyboard shortcuts.
 - **Languages**: **FR/EN** UI, detected from the system locale at launch
   (switchable anytime from the menu bar, preference persisted).
+
+Not supported by design (see [FEATURE_SPRINTS.md](FEATURE_SPRINTS.md) for the
+reasoning): HEIC and camera RAW import (the only available Rust libraries are
+AGPL/LGPL-licensed, incompatible with a simple standalone distribution),
+lossy WebP export (the `image` crate's encoder is lossless-only), and ML-based
+background removal/super-resolution (replaced with heuristic equivalents —
+color-proximity cutout edges and Lanczos upscaling — to avoid bundling a
+neural network model).
 
 ## Non-goals (by design)
 
@@ -73,22 +92,19 @@ Gatekeeper warning.
 cargo run --release
 ```
 
-Requires a recent stable Rust toolchain. Tests: `cargo test` (96 tests, no
+Requires a recent stable Rust toolchain. Tests: `cargo test` (196 tests, no
 window needed — the model, tools and history layers are UI-independent).
 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — layers, data model, input pipeline,
   rendering, undo/redo design.
-- [UX_SPRINTS.md](UX_SPRINTS.md) — UI/UX and functionality audit with a
-  5-sprint execution plan, grounded in real screenshots and code review.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 - [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md) — Mac App Store
   sandbox validation notes.
 
-Older planning documents (feature roadmap, sprint-by-sprint log, the initial
-technical audit) were retired once acted upon — see the git log for that
-history.
+Older planning documents (feature roadmap, sprint-by-sprint log, the UI/UX
+audit) were retired once acted upon — see the git log for that history.
 
 ## License
 

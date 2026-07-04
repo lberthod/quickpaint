@@ -19,7 +19,7 @@ use crate::render::ribbon;
 use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
 use std::collections::HashMap;
 use tiny_skia::{
-    BlendMode as SkBlend, Color, FillRule, FilterQuality, GradientStop, LinearGradient, Paint,
+    BlendMode as SkBlend, Color, FillRule, FilterQuality, GradientStop, LinearGradient, Mask, Paint,
     PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient, Shader, SpreadMode, Transform,
 };
 
@@ -182,6 +182,12 @@ impl Compositor {
                 if let Some(mask) = &layer.mask {
                     apply_mask(&mut lp, mask);
                 }
+                // Styles de calque (Sprint 6.1) : après le masque (pour que
+                // l'ombre/contour/lueur suivent la forme réellement visible),
+                // avant l'écrêtage (qui s'applique au résultat final du calque).
+                if !layer.styles.is_empty() {
+                    apply_layer_styles(&mut lp, &layer.styles, w as usize, h as usize);
+                }
                 self.layers.insert(layer.id, (hash, lp));
             }
             let lp = &self.layers[&layer.id].1;
@@ -239,6 +245,29 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
     mix(l.blend as u64);
     mix(l.raster.content_hash());
     mix(l.mask.as_ref().map(|m| m.content_hash()).unwrap_or(0));
+    for style in &l.styles {
+        use crate::model::LayerStyle;
+        match style {
+            LayerStyle::DropShadow { color, offset, blur } => {
+                mix(1);
+                mix(u32::from_le_bytes(*color) as u64);
+                mix(offset.0.to_bits() as u64);
+                mix(offset.1.to_bits() as u64);
+                mix(blur.to_bits() as u64);
+            }
+            LayerStyle::Stroke { color, width } => {
+                mix(2);
+                mix(u32::from_le_bytes(*color) as u64);
+                mix(width.to_bits() as u64);
+            }
+            LayerStyle::Glow { color, blur, inner } => {
+                mix(3);
+                mix(u32::from_le_bytes(*color) as u64);
+                mix(blur.to_bits() as u64);
+                mix(*inner as u64);
+            }
+        }
+    }
     for s in &l.strokes {
         mix(s.id);
         mix(s.z.to_bits());
@@ -377,8 +406,15 @@ fn raster_stroke(pm: &mut Pixmap, stroke: &Stroke) {
         pb.close();
     }
     let Some(path) = pb.finish() else { return };
+    let fill_gradient = stroke.fill.then_some(stroke.gradient.as_ref()).flatten();
+    // Conique : pas de shader tiny-skia natif (Linear/Radial seulement), donc
+    // rendu à part, pixel par pixel — voir `paint_conic_gradient`.
+    if let Some(g) = fill_gradient.filter(|g| g.kind == crate::model::GradientKind::Conic) {
+        paint_conic_gradient(pm, &path, g);
+        return;
+    }
     let mut paint = Paint { anti_alias: true, ..Paint::default() };
-    match stroke.fill.then_some(stroke.gradient.as_ref()).flatten().and_then(gradient_shader) {
+    match fill_gradient.and_then(gradient_shader) {
         Some(shader) => paint.shader = shader,
         None => {
             let [r, g, b, alpha] = stroke.color;
@@ -386,6 +422,234 @@ fn raster_stroke(pm: &mut Pixmap, stroke: &Stroke) {
         }
     }
     pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+}
+
+/// Rendu du dégradé conique (Sprint 3.3) : rastérise `path` dans un masque
+/// alpha (couverture anti-aliasée), puis pour chaque pixel couvert calcule
+/// l'angle polaire autour de `g.from` (0 = direction de `g.to`) et compose la
+/// couleur interpolée des arrêts — `blend_pixel` fait le compositing
+/// source-over, comme pour le texte rastérisé plus haut.
+fn paint_conic_gradient(pm: &mut Pixmap, path: &tiny_skia::Path, g: &crate::model::Gradient) {
+    let (pw, ph) = (pm.width() as usize, pm.height() as usize);
+    let Some(mut mask) = Mask::new(pm.width(), pm.height()) else { return };
+    mask.fill_path(path, FillRule::Winding, true, Transform::identity());
+    let data = mask.data();
+
+    let bounds = path.bounds();
+    let x0 = (bounds.left().floor() as i32).max(0);
+    let y0 = (bounds.top().floor() as i32).max(0);
+    let x1 = (bounds.right().ceil() as i32).min(pw as i32);
+    let y1 = (bounds.bottom().ceil() as i32).min(ph as i32);
+
+    let (cx, cy) = g.from;
+    let angle0 = (g.to.1 - cy).atan2(g.to.0 - cx);
+    let mut stops = g.stops.clone();
+    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let idx = py as usize * pw + px as usize;
+            let cov = data[idx] as f32 / 255.0;
+            if cov <= 0.003 {
+                continue;
+            }
+            let angle = (py as f32 + 0.5 - cy).atan2(px as f32 + 0.5 - cx) - angle0;
+            let t = angle.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU;
+            let color = sample_gradient_stops(&stops, t);
+            blend_pixel(pm, px, py, pw, ph, cov, color);
+        }
+    }
+}
+
+/// Interpole la couleur des arrêts (triés par position) à `t` (0..=1, module
+/// après le dernier arrêt : le dégradé conique boucle sur lui-même).
+fn sample_gradient_stops(stops: &[(f32, [u8; 4])], t: f32) -> [u8; 4] {
+    match stops {
+        [] => [0, 0, 0, 0],
+        [(_, c)] => *c,
+        _ => {
+            if t <= stops[0].0 {
+                return stops[0].1;
+            }
+            if t >= stops[stops.len() - 1].0 {
+                return stops[stops.len() - 1].1;
+            }
+            for w in stops.windows(2) {
+                let ((p0, c0), (p1, c1)) = (w[0], w[1]);
+                if t >= p0 && t <= p1 {
+                    let f = if p1 > p0 { (t - p0) / (p1 - p0) } else { 0.0 };
+                    let mut out = [0u8; 4];
+                    for i in 0..4 {
+                        out[i] = (c0[i] as f32 + (c1[i] as f32 - c0[i] as f32) * f).round() as u8;
+                    }
+                    return out;
+                }
+            }
+            stops[stops.len() - 1].1
+        }
+    }
+}
+
+/// Applique les styles de calque (Sprint 6.1), dans l'ordre où ils ont été
+/// ajoutés : chacun dérive de l'alpha courant de `lp` (donc du résultat déjà
+/// modifié par les styles précédents), jamais des pixels d'origine.
+fn apply_layer_styles(lp: &mut Pixmap, styles: &[crate::model::LayerStyle], w: usize, h: usize) {
+    use crate::model::LayerStyle;
+    for style in styles {
+        match *style {
+            LayerStyle::DropShadow { color, offset, blur } => apply_drop_shadow(lp, color, offset, blur, w, h),
+            LayerStyle::Stroke { color, width } => apply_layer_stroke(lp, color, width, w, h),
+            LayerStyle::Glow { color, blur, inner } => apply_glow(lp, color, blur, inner, w, h),
+        }
+    }
+}
+
+/// Flou boîte sur un unique canal 8 bits (alpha) — variante à un canal du
+/// flou séparable de `tools::filter::box_blur`, pour éviter de repasser par
+/// un buffer RGBA complet juste pour flouter un masque.
+fn box_blur_channel(src: &[u8], w: usize, h: usize, r: usize) -> Vec<u8> {
+    if r == 0 || w == 0 || h == 0 {
+        return src.to_vec();
+    }
+    let pass = |src: &[u8], horizontal: bool| -> Vec<u8> {
+        let mut out = vec![0u8; w * h];
+        let (outer, inner) = if horizontal { (h, w) } else { (w, h) };
+        for o in 0..outer {
+            let idx = |i: usize| -> usize {
+                let (x, y) = if horizontal { (i, o) } else { (o, i) };
+                y * w + x
+            };
+            let mut sum = 0u32;
+            let mut count = 0u32;
+            for i in 0..=r.min(inner - 1) {
+                sum += src[idx(i)] as u32;
+                count += 1;
+            }
+            for i in 0..inner {
+                out[idx(i)] = (sum / count.max(1)) as u8;
+                if i >= r {
+                    sum -= src[idx(i - r)] as u32;
+                    count -= 1;
+                }
+                let add = i + r + 1;
+                if add < inner {
+                    sum += src[idx(add)] as u32;
+                    count += 1;
+                }
+            }
+        }
+        out
+    };
+    pass(&pass(src, true), false)
+}
+
+/// Alpha (non prémultiplié) de chaque pixel de `pm`.
+fn alpha_of(pm: &Pixmap) -> Vec<u8> {
+    pm.pixels().iter().map(|p| p.alpha()).collect()
+}
+
+/// Peint `alpha` (teinté par `color`, prémultiplié) dans un pixmap neuf.
+fn tint_from_alpha(alpha: &[u8], color: [u8; 4], w: usize, h: usize) -> Pixmap {
+    let mut pm = Pixmap::new(w as u32, h as u32).unwrap();
+    let data = pm.pixels_mut();
+    for (i, &a) in alpha.iter().enumerate() {
+        if a == 0 {
+            continue;
+        }
+        let ea = (a as f32 / 255.0) * (color[3] as f32 / 255.0);
+        if let Some(c) = tiny_skia::PremultipliedColorU8::from_rgba(
+            (color[0] as f32 * ea).round() as u8,
+            (color[1] as f32 * ea).round() as u8,
+            (color[2] as f32 * ea).round() as u8,
+            (ea * 255.0).round() as u8,
+        ) {
+            data[i] = c;
+        }
+    }
+    pm
+}
+
+/// Ombre portée : copie décalée + floutée de l'alpha de `lp`, teintée,
+/// dessinée derrière son contenu actuel.
+fn apply_drop_shadow(lp: &mut Pixmap, color: [u8; 4], offset: (f32, f32), blur: f32, w: usize, h: usize) {
+    let alpha = alpha_of(lp);
+    let blurred = box_blur_channel(&alpha, w, h, blur.max(0.0).round() as usize);
+    let (dx, dy) = (offset.0.round() as i32, offset.1.round() as i32);
+    let mut shifted = vec![0u8; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let (sx, sy) = (x as i32 - dx, y as i32 - dy);
+            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
+                shifted[y * w + x] = blurred[sy as usize * w + sx as usize];
+            }
+        }
+    }
+    let mut result = tint_from_alpha(&shifted, color, w, h);
+    result.draw_pixmap(0, 0, lp.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    *lp = result;
+}
+
+/// Contour : anneau de couleur juste à l'extérieur du contenu actuel de `lp`
+/// (dilatation de l'alpha par un disque de rayon `width`, restreinte aux
+/// pixels non déjà couverts), dessiné derrière ce contenu.
+fn apply_layer_stroke(lp: &mut Pixmap, color: [u8; 4], width: f32, w: usize, h: usize) {
+    let radius = width.max(0.0).round() as i32;
+    if radius <= 0 {
+        return;
+    }
+    let alpha = alpha_of(lp);
+    let mut ring = vec![0u8; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            if alpha[y * w + x] > 0 {
+                continue; // déjà couvert par le contenu d'origine
+            }
+            let mut covered = false;
+            'search: for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    if dx * dx + dy * dy > radius * radius {
+                        continue;
+                    }
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx as usize >= w || ny as usize >= h {
+                        continue;
+                    }
+                    if alpha[ny as usize * w + nx as usize] > 0 {
+                        covered = true;
+                        break 'search;
+                    }
+                }
+            }
+            if covered {
+                ring[y * w + x] = 255;
+            }
+        }
+    }
+    let mut result = tint_from_alpha(&ring, color, w, h);
+    result.draw_pixmap(0, 0, lp.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    *lp = result;
+}
+
+/// Lueur externe (autour du contenu, non décalée) ou interne (halo depuis les
+/// bords vers l'intérieur) — dérivées d'un flou de l'alpha (externe) ou de
+/// son inverse restreint au contenu (interne).
+fn apply_glow(lp: &mut Pixmap, color: [u8; 4], blur: f32, inner: bool, w: usize, h: usize) {
+    let alpha = alpha_of(lp);
+    let radius = blur.max(0.0).round() as usize;
+    if inner {
+        let inverted: Vec<u8> = alpha.iter().map(|&a| 255 - a).collect();
+        let blurred = box_blur_channel(&inverted, w, h, radius);
+        let mask: Vec<u8> = alpha.iter().zip(&blurred).map(|(&a, &b)| if a > 0 { b } else { 0 }).collect();
+        let glow = tint_from_alpha(&mask, color, w, h);
+        // Lueur interne : visible par-dessus le contenu (halo vers l'intérieur).
+        lp.draw_pixmap(0, 0, glow.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    } else {
+        let blurred = box_blur_channel(&alpha, w, h, radius);
+        let mask: Vec<u8> = alpha.iter().zip(&blurred).map(|(&a, &b)| if a == 0 { b } else { 0 }).collect();
+        let mut result = tint_from_alpha(&mask, color, w, h);
+        result.draw_pixmap(0, 0, lp.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        *lp = result;
+    }
 }
 
 /// Construit le shader tiny-skia d'un dégradé (roadmap P2 #11). `None` si
@@ -409,6 +673,9 @@ fn gradient_shader(g: &crate::model::Gradient) -> Option<Shader<'static>> {
             let radius = ((to.x - from.x).powi(2) + (to.y - from.y).powi(2)).sqrt();
             RadialGradient::new(from, from, radius, stops, SpreadMode::Pad, Transform::identity())
         }
+        // Jamais atteint : `raster_stroke` intercepte le cas Conique avant
+        // d'appeler cette fonction (pas de shader tiny-skia natif pour lui).
+        crate::model::GradientKind::Conic => None,
     }
 }
 
@@ -423,16 +690,53 @@ fn raster_text(
     if t.text.trim().is_empty() {
         return;
     }
+    if let Some(arc) = &t.arc {
+        // Texte sur courbe (Sprint 7.1) : chaque caractère a sa propre mise
+        // en page et sa propre rotation — pas un galley global tourné en bloc.
+        for ac in crate::render::text::arc_chars(t, arc) {
+            let mut single = t.clone();
+            single.text = ac.ch.to_string();
+            single.rot = 0.0;
+            single.arc = None;
+            let galley = crate::render::text::layout(ctx, &single, 1.0);
+            let passes = crate::render::text::passes(&single);
+            let char_center = (t.pos.0 + ac.offset.0, t.pos.1 + ac.offset.1);
+            let (gw, gh) = (galley.rect.width(), galley.rect.height());
+            let origin = (char_center.0 - gw * 0.5, char_center.1 - gh * 0.5);
+            raster_text_glyphs(pm, atlas, &galley, origin, char_center, ac.angle, &passes);
+        }
+        return;
+    }
     // Mise en page partagée (police + alignement), en espace document (1 px/doc).
     let galley = crate::render::text::layout(ctx, t, 1.0);
+    let passes = crate::render::text::passes(t);
+    raster_text_glyphs(pm, atlas, &galley, t.pos, t.pos, t.rot, &passes);
+}
+
+/// Blitte les glyphes de `galley` dans `pm`, teintés par chaque passe.
+/// `origin` : point où les coordonnées locales des glyphes (`g.pos`) sont
+/// ancrées avant rotation. `rotation_center`/`angle` : pivot et angle de la
+/// rotation appliquée après coup — distincts d'`origin` pour le texte sur
+/// courbe (Sprint 7.1), où chaque caractère tourne autour de son propre
+/// centre plutôt que du coin haut-gauche du texte entier (texte plat :
+/// `origin == rotation_center == t.pos`, comme avant ce refactor).
+fn raster_text_glyphs(
+    pm: &mut Pixmap,
+    atlas: &egui::epaint::FontImage,
+    galley: &egui::Galley,
+    origin: (f32, f32),
+    rotation_center: (f32, f32),
+    angle: f32,
+    passes: &[((f32, f32), [u8; 4])],
+) {
     let (aw, ah) = (atlas.size[0], atlas.size[1]);
     let (pw, ph) = (pm.width() as usize, pm.height() as usize);
-    let rotated = t.rot.abs() > 1e-5;
-    let (c, s) = (t.rot.cos(), t.rot.sin());
+    let rotated = angle.abs() > 1e-5;
+    let (c, s) = (angle.cos(), angle.sin());
 
     // Chaque passe (contour / gras / remplissage) blitte le galley décalé+teinté.
-    for ((offx, offy), color) in crate::render::text::passes(t) {
-        let base = (t.pos.0 + offx, t.pos.1 + offy);
+    for &((offx, offy), color) in passes {
+        let base = (origin.0 + offx, origin.1 + offy);
         for row in &galley.rows {
             for g in &row.glyphs {
                 let uv = g.uv_rect;
@@ -465,8 +769,8 @@ fn raster_text(
                     // et on retrouve la couverture par rotation inverse (pas de trou).
                     let corners = [(ox, oy), (ox + dw, oy), (ox + dw, oy + dh), (ox, oy + dh)];
                     let rot = |p: (f32, f32)| {
-                        let (vx, vy) = (p.0 - t.pos.0, p.1 - t.pos.1);
-                        (t.pos.0 + vx * c - vy * s, t.pos.1 + vx * s + vy * c)
+                        let (vx, vy) = (p.0 - rotation_center.0, p.1 - rotation_center.1);
+                        (rotation_center.0 + vx * c - vy * s, rotation_center.1 + vx * s + vy * c)
                     };
                     let rc: Vec<(f32, f32)> = corners.iter().map(|p| rot(*p)).collect();
                     let minx = rc.iter().map(|p| p.0).fold(f32::INFINITY, f32::min).floor() as i32;
@@ -475,10 +779,10 @@ fn raster_text(
                     let maxy = rc.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
                     for py in miny..=maxy {
                         for px in minx..=maxx {
-                            let (vx, vy) = (px as f32 + 0.5 - t.pos.0, py as f32 + 0.5 - t.pos.1);
-                            // Rotation inverse (-rot).
-                            let lx = t.pos.0 + vx * c + vy * s;
-                            let ly = t.pos.1 - vx * s + vy * c;
+                            let (vx, vy) = (px as f32 + 0.5 - rotation_center.0, py as f32 + 0.5 - rotation_center.1);
+                            // Rotation inverse (-angle).
+                            let lx = rotation_center.0 + vx * c + vy * s;
+                            let ly = rotation_center.1 - vx * s + vy * c;
                             if lx < ox || lx >= ox + dw || ly < oy || ly >= oy + dh {
                                 continue;
                             }
@@ -856,6 +1160,24 @@ mod tests {
         assert!(rgba.chunks_exact(4).any(|px| px != [255, 255, 255, 255]), "le texte devrait marquer des pixels");
     }
 
+    #[test]
+    fn render_to_rgba_renders_arc_text_away_from_center() {
+        let mut doc = crate::model::Document::new((80, 80));
+        let mut item = crate::model::TextItem::new(1, (40.0, 40.0), 14.0, [0, 0, 0, 255]);
+        item.text = "ABC".into();
+        item.arc = Some(crate::model::text::TextArc { radius: 25.0, start_angle_deg: -90.0, flip: false });
+        doc.layers[0].texts.push(item);
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = Compositor::new();
+        let (w, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
+        // Le centre (40,40) ne doit pas être marqué (le texte est sur le
+        // cercle, pas au centre) ; quelque part sur le cercle, si.
+        let center_i = ((40 * w as usize) + 40) * 4;
+        assert_eq!(&rgba[center_i..center_i + 4], &[255, 255, 255, 255]);
+        assert!(rgba.chunks_exact(4).any(|px| px != [255, 255, 255, 255]), "le texte sur courbe devrait marquer des pixels");
+    }
+
     // --- Cache incrémental par tuile (roadmap ANALYSE.md §12.1) -------------
 
     #[test]
@@ -961,5 +1283,113 @@ mod tests {
             old_cost.as_secs_f64() / new_cost.as_secs_f64().max(1e-9)
         );
         assert!(new_cost < old_cost, "le cache incrémental doit être plus rapide que le flatten complet");
+    }
+
+    #[test]
+    fn sample_gradient_stops_interpolates_between_two() {
+        let stops = vec![(0.0, [0, 0, 0, 255]), (1.0, [200, 100, 0, 255])];
+        assert_eq!(sample_gradient_stops(&stops, 0.0), [0, 0, 0, 255]);
+        assert_eq!(sample_gradient_stops(&stops, 1.0), [200, 100, 0, 255]);
+        assert_eq!(sample_gradient_stops(&stops, 0.5), [100, 50, 0, 255]);
+    }
+
+    #[test]
+    fn sample_gradient_stops_clamps_outside_range() {
+        let stops = vec![(0.2, [10, 10, 10, 255]), (0.8, [250, 250, 250, 255])];
+        assert_eq!(sample_gradient_stops(&stops, 0.0), [10, 10, 10, 255]);
+        assert_eq!(sample_gradient_stops(&stops, 1.0), [250, 250, 250, 255]);
+    }
+
+    #[test]
+    fn paint_conic_gradient_sweeps_around_the_center() {
+        // Carré 10×10, dégradé centré, arrêt 0 = référence vers la droite
+        // (angle 0), noir → blanc sur le tour complet.
+        let mut pm = Pixmap::new(10, 10).unwrap();
+        let mut pb = PathBuilder::new();
+        pb.move_to(0.0, 0.0);
+        pb.line_to(10.0, 0.0);
+        pb.line_to(10.0, 10.0);
+        pb.line_to(0.0, 10.0);
+        pb.close();
+        let path = pb.finish().unwrap();
+        let g = crate::model::Gradient {
+            kind: crate::model::GradientKind::Conic,
+            from: (5.0, 5.0),
+            to: (10.0, 5.0),
+            stops: vec![(0.0, [0, 0, 0, 255]), (1.0, [255, 255, 255, 255])],
+        };
+        paint_conic_gradient(&mut pm, &path, &g);
+        // Le pixel juste à droite du centre (angle ≈ 0) doit rester sombre ;
+        // celui juste au-dessus (angle ≈ -90°, soit t ≈ 0.75) doit être clair.
+        let px = |x: usize, y: usize| pm.data()[(y * 10 + x) * 4];
+        assert!(px(9, 5) < 40, "attendu sombre près de l'angle 0, eu {}", px(9, 5));
+        assert!(px(5, 0) > 150, "attendu clair près de t≈0.75, eu {}", px(5, 0));
+    }
+
+    /// Petit carré opaque blanc centré dans un pixmap transparent, pour
+    /// tester les styles de calque dérivés de l'alpha.
+    fn square_pixmap(size: u32, square: std::ops::Range<u32>) -> Pixmap {
+        let mut pm = Pixmap::new(size, size).unwrap();
+        for y in square.clone() {
+            for x in square.clone() {
+                let i = (y * size + x) as usize;
+                pm.pixels_mut()[i] = tiny_skia::PremultipliedColorU8::from_rgba(255, 255, 255, 255).unwrap();
+            }
+        }
+        pm
+    }
+
+    #[test]
+    fn drop_shadow_appears_offset_from_the_original_shape() {
+        let mut pm = square_pixmap(20, 5..10);
+        apply_drop_shadow(&mut pm, [0, 0, 0, 255], (4.0, 4.0), 0.0, 20, 20);
+        // Décalage de (4,4) sans flou : juste sous/à droite du carré d'origine
+        // (dans la zone d'ombre, hors du carré blanc lui-même) doit être opaque.
+        let d = pm.data();
+        let i = (12 * 20 + 12) * 4; // dans le carré d'origine décalé de (4,4) = [9,14)
+        assert!(d[i + 3] > 0, "l'ombre décalée devrait couvrir ce pixel");
+        // Loin de tout, doit rester transparent.
+        let far = (1 * 20 + 1) * 4;
+        assert_eq!(d[far + 3], 0);
+    }
+
+    #[test]
+    fn layer_stroke_draws_a_ring_outside_the_shape_not_inside() {
+        let mut pm = square_pixmap(20, 8..12);
+        apply_layer_stroke(&mut pm, [255, 0, 0, 255], 2.0, 20, 20);
+        let d = pm.data();
+        // Juste à l'extérieur du carré (7,10) doit être touché par le contour.
+        let outside = (10 * 20 + 7) * 4;
+        assert!(d[outside + 3] > 0, "le contour doit apparaître juste à l'extérieur du carré");
+        // Le centre du carré doit rester blanc d'origine (contour ne remplace
+        // pas le contenu existant).
+        let center = (10 * 20 + 10) * 4;
+        assert_eq!(&d[center..center + 3], &[255, 255, 255]);
+    }
+
+    #[test]
+    fn outer_glow_is_black_outside_and_absent_deep_inside() {
+        let mut pm = square_pixmap(30, 12..18);
+        apply_glow(&mut pm, [255, 200, 0, 255], 6.0, false, 30, 30);
+        let d = pm.data();
+        // Juste à l'extérieur du carré : de la lueur.
+        let just_outside = (15 * 30 + 10) * 4;
+        assert!(d[just_outside + 3] > 0, "la lueur externe doit déborder autour du carré");
+        // Loin de tout (coin de l'image) : rien.
+        let far = 0usize;
+        assert_eq!(d[far + 3], 0);
+    }
+
+    #[test]
+    fn inner_glow_is_strongest_near_the_edge_of_the_shape() {
+        let mut pm = square_pixmap(30, 10..20);
+        apply_glow(&mut pm, [255, 255, 255, 255], 6.0, true, 30, 30);
+        let d = pm.data();
+        // Alpha reste inchangé (opaque) partout dans la forme d'origine — la
+        // lueur interne teinte par-dessus sans percer de trou.
+        let edge = (15 * 30 + 11) * 4; // proche du bord gauche du carré
+        let center = (15 * 30 + 15) * 4; // centre du carré
+        assert_eq!(d[edge + 3], 255);
+        assert_eq!(d[center + 3], 255);
     }
 }

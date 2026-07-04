@@ -1,5 +1,6 @@
 //! Un trait (`Stroke`) = liste de points + style. Modèle vectoriel (section 3b).
 
+use crate::i18n::t;
 use serde::{Deserialize, Serialize};
 
 /// Outil ayant produit le trait. Détermine la couleur effective au rendu.
@@ -26,13 +27,19 @@ pub struct StrokePoint {
 pub enum GradientKind {
     Linear,
     Radial,
+    /// Dégradé conique (Sprint 3.3) : balayage angulaire autour de `from`,
+    /// l'angle 0 pointant vers `to`. Pas de support natif dans tiny-skia (qui
+    /// n'expose que Linear/Radial) : rendu à part, pixel par pixel, dans le
+    /// compositeur — voir `render::compositor::paint_conic_gradient`.
+    Conic,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Gradient {
     pub kind: GradientKind,
     /// Linéaire : point de départ/arrivée. Radial : centre / point sur le
-    /// bord (sa distance au centre = le rayon).
+    /// bord (sa distance au centre = le rayon). Conique : centre / référence
+    /// de l'angle 0.
     pub from: (f32, f32),
     pub to: (f32, f32),
     /// Arrêts (position 0..=1, couleur), triés par position.
@@ -45,7 +52,7 @@ impl Gradient {
         let (mn, mx) = bounds;
         let (from, to) = match kind {
             GradientKind::Linear => ((mn.0, (mn.1 + mx.1) * 0.5), (mx.0, (mn.1 + mx.1) * 0.5)),
-            GradientKind::Radial => {
+            GradientKind::Radial | GradientKind::Conic => {
                 let c = ((mn.0 + mx.0) * 0.5, (mn.1 + mx.1) * 0.5);
                 (c, (mx.0, c.1))
             }
@@ -67,6 +74,61 @@ pub struct StylePreset {
     pub width: f32,
     pub fill: bool,
     pub gradient: Option<Gradient>,
+}
+
+/// Préréglage de pinceau (Sprint 3.4) : regroupe les réglages du geste de
+/// dessin (épaisseur, dureté du pinceau pixel, stabilisation du tracé,
+/// intensité de la pression simulée) sous un nom, au même titre qu'un
+/// `StylePreset` pour l'apparence — persisté localement, importable/
+/// exportable en fichier `.json` autonome (pas seulement via `settings.json`)
+/// pour pouvoir être partagé.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BrushPreset {
+    pub name: String,
+    pub width: f32,
+    /// Dureté du pinceau pixel (0 = dégradé complet, 1 = bord net).
+    pub hardness: f32,
+    /// Stabilisation du tracé, 0..=1 (voir `input::capture::GestureCapture`).
+    pub stabilization: f32,
+    /// Intensité de la pression simulée vitesse→épaisseur, 0..=1.
+    pub pressure_strength: f32,
+}
+
+impl BrushPreset {
+    /// Préréglages fournis par défaut (Sprint 3.4) — toujours proposés dans
+    /// le panneau, en plus de ceux enregistrés par l'utilisateur.
+    pub fn builtins() -> Vec<Self> {
+        vec![
+            Self {
+                name: t("Feutre", "Felt tip").to_string(),
+                width: 6.0,
+                hardness: 1.0,
+                stabilization: 0.3,
+                pressure_strength: 0.6,
+            },
+            Self {
+                name: t("Crayon fin", "Fine pencil").to_string(),
+                width: 2.0,
+                hardness: 0.9,
+                stabilization: 0.15,
+                pressure_strength: 0.9,
+            },
+            Self {
+                name: t("Aquarelle douce", "Soft watercolor").to_string(),
+                width: 16.0,
+                hardness: 0.15,
+                stabilization: 0.6,
+                pressure_strength: 0.4,
+            },
+            Self {
+                name: t("Calligraphie", "Calligraphy").to_string(),
+                width: 10.0,
+                hardness: 0.6,
+                stabilization: 0.7,
+                pressure_strength: 1.0,
+            },
+        ]
+    }
 }
 
 /// Un trait complet, posé dans une couche.

@@ -43,7 +43,14 @@ impl ExportFormat {
 /// fois (Sprint 7.3) — un clic pour couvrir web + print plutôt qu'un export
 /// par taille. Renvoie le nombre de fichiers écrits. `rgba` doit faire
 /// exactement `w * h * 4` octets (rendu natif du document, roadmap §12.2).
-pub fn save_batch(w: u32, h: u32, rgba: &[u8], format: ExportFormat, sizes: &[(u32, u32)]) -> std::io::Result<usize> {
+pub fn save_batch(
+    w: u32,
+    h: u32,
+    rgba: &[u8],
+    format: ExportFormat,
+    sizes: &[(u32, u32)],
+    jpeg_quality: u8,
+) -> std::io::Result<usize> {
     if w == 0 || h == 0 || sizes.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -64,7 +71,7 @@ pub fn save_batch(w: u32, h: u32, rgba: &[u8], format: ExportFormat, sizes: &[(u
             image::imageops::resize(&base, tw, th, image::imageops::FilterType::Lanczos3)
         };
         let path = dir.join(format!("QuickPaint-{tw}x{th}.{}", format.ext()));
-        encode_to(&path, tw, th, resized.as_raw(), format)?;
+        encode_to(&path, tw, th, resized.as_raw(), format, jpeg_quality)?;
     }
     Ok(sizes.len())
 }
@@ -72,7 +79,12 @@ pub fn save_batch(w: u32, h: u32, rgba: &[u8], format: ExportFormat, sizes: &[(u
 /// Ouvre un sélecteur « Enregistrer » et écrit l'export au format demandé.
 /// Renvoie le chemin écrit, ou `None` si annulé / erreur. `rgba` doit faire
 /// exactement `w * h * 4` octets (rendu natif du document, roadmap §12.2).
-pub fn save_dialog(w: u32, h: u32, rgba: &[u8], format: ExportFormat) -> std::io::Result<PathBuf> {
+/// `jpeg_quality` (1..=100) : ignoré pour les formats autres que JPEG/PDF (le
+/// PDF embarque son image en JPEG, voir `write_pdf`). Le PNG reste sans perte
+/// et le WebP de la crate `image` est **toujours** sans perte — encoder du
+/// WebP *lossy* nécessiterait `libwebp` (dépendance système), volontairement
+/// évitée ici (même arbitrage que pour l'ouverture de HEIC).
+pub fn save_dialog(w: u32, h: u32, rgba: &[u8], format: ExportFormat, jpeg_quality: u8) -> std::io::Result<PathBuf> {
     if w == 0 || h == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -87,12 +99,12 @@ pub fn save_dialog(w: u32, h: u32, rgba: &[u8], format: ExportFormat) -> std::io
     else {
         return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
     };
-    encode_to(&path, w, h, rgba, format)?;
+    encode_to(&path, w, h, rgba, format, jpeg_quality)?;
     Ok(path)
 }
 
 /// Encode et écrit le buffer RGBA dans `path` selon le format.
-fn encode_to(path: &PathBuf, w: u32, h: u32, rgba: &[u8], format: ExportFormat) -> std::io::Result<()> {
+fn encode_to(path: &PathBuf, w: u32, h: u32, rgba: &[u8], format: ExportFormat, jpeg_quality: u8) -> std::io::Result<()> {
     let buf = image::RgbaImage::from_raw(w, h, rgba.to_vec())
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "buffer invalide"))?;
     let to_io = |e: image::ImageError| std::io::Error::other(e.to_string());
@@ -101,19 +113,23 @@ fn encode_to(path: &PathBuf, w: u32, h: u32, rgba: &[u8], format: ExportFormat) 
         ExportFormat::Webp => buf.save(path).map_err(to_io),
         ExportFormat::Jpg => {
             // JPEG est opaque : on aplatit l'alpha sur blanc.
-            image::DynamicImage::ImageRgba8(buf).to_rgb8().save(path).map_err(to_io)
+            let rgb = image::DynamicImage::ImageRgba8(buf).to_rgb8();
+            let mut file = std::fs::File::create(path)?;
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, jpeg_quality.clamp(1, 100))
+                .encode_image(&rgb)
+                .map_err(to_io)
         }
-        ExportFormat::Pdf => write_pdf(path, w, h, &buf),
+        ExportFormat::Pdf => write_pdf(path, w, h, &buf, jpeg_quality),
     }
 }
 
 /// Écrit un PDF mono-page embarquant l'image en JPEG (filtre DCTDecode). Format
 /// minimal mais valide ; évite une dépendance PDF lourde et changeante.
-fn write_pdf(path: &PathBuf, w: u32, h: u32, buf: &image::RgbaImage) -> std::io::Result<()> {
+fn write_pdf(path: &PathBuf, w: u32, h: u32, buf: &image::RgbaImage, jpeg_quality: u8) -> std::io::Result<()> {
     // Encode l'image en JPEG en mémoire (flux DCTDecode du PDF).
     let mut jpeg = Vec::new();
     let rgb = image::DynamicImage::ImageRgba8(buf.clone()).to_rgb8();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, jpeg_quality.clamp(1, 100))
         .encode_image(&rgb)
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
@@ -207,7 +223,7 @@ mod tests {
             (ExportFormat::Webp, "p.webp"),
         ] {
             let path = tmp(name);
-            encode_to(&path, w, h, img.as_raw(), fmt).expect("encode");
+            encode_to(&path, w, h, img.as_raw(), fmt, 90).expect("encode");
             // Relecture : l'image doit se redécoder aux bonnes dimensions.
             let back = image::open(&path).expect("reopen");
             assert_eq!((back.width(), back.height()), (w, h), "{name}");
@@ -216,9 +232,27 @@ mod tests {
     }
 
     #[test]
+    fn jpeg_quality_affects_file_size() {
+        // Image avec assez de détail (pas un aplat) pour que la compression
+        // JPEG varie réellement avec la qualité.
+        let img = image::RgbaImage::from_fn(64, 64, |x, y| {
+            image::Rgba([((x * 7 + y * 3) % 256) as u8, ((x * 13) % 256) as u8, ((y * 17) % 256) as u8, 255])
+        });
+        let low = tmp("quality-low.jpg");
+        let high = tmp("quality-high.jpg");
+        encode_to(&low, 64, 64, img.as_raw(), ExportFormat::Jpg, 10).expect("encode low");
+        encode_to(&high, 64, 64, img.as_raw(), ExportFormat::Jpg, 95).expect("encode high");
+        let low_size = std::fs::metadata(&low).unwrap().len();
+        let high_size = std::fs::metadata(&high).unwrap().len();
+        assert!(low_size < high_size, "qualité basse ({low_size}o) devrait être plus légère que qualité haute ({high_size}o)");
+        let _ = std::fs::remove_file(&low);
+        let _ = std::fs::remove_file(&high);
+    }
+
+    #[test]
     fn pdf_is_well_formed() {
         let path = tmp("p.pdf");
-        write_pdf(&path, 4, 3, &sample()).expect("pdf");
+        write_pdf(&path, 4, 3, &sample(), 90).expect("pdf");
         let bytes = std::fs::read(&path).expect("read");
         assert!(bytes.starts_with(b"%PDF-1.4"));
         assert!(bytes.ends_with(b"%%EOF"));
