@@ -2,6 +2,22 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.13.1 — juillet 2026 (UX-2.3 + correctif defaults settings)
+
+- **UX-2.3** (reporté dans la 0.13.0) : le survol d'un outil personnalisable
+  affiche maintenant sa touche *effective* (`app.keybindings`), pas
+  seulement la lettre par défaut figée dans son nom — utile après un rebind
+  (Sprint 7.2).
+- **Correctif** : `i18n::read_settings()` retombait sur `Settings::default()`
+  (dérivé) quand `settings.json` n'existe pas encore, ce qui ignorait les
+  `#[serde(default = "fn")]` par champ. Conséquence concrète au tout premier
+  lancement : aucun groupe d'outil replié par défaut (UX-2.1), largeur du
+  panneau des calques incohérente (UX-3.2) — trouvé en tentant de vérifier
+  ces deux items à l'écran. Corrigé (le cas « fichier absent » passe par le
+  même chemin de désérialisation qu'un fichier existant) + test de
+  régression dédié.
+- 118 tests (+3), 0 warning clippy.
+
 ## 0.13.0 — juillet 2026 (UX-1 à UX-5 — optimisation UI/UX & fonctionnalité)
 
 Détail complet, constats et critères d'acceptation : [UX_SPRINTS.md](UX_SPRINTS.md).

@@ -8,16 +8,18 @@
 > Chaque constat ci-dessous est référencé par fichier/ligne ou par
 > observation directe sur la capture — aucun n'est spéculatif.
 >
-> **Statut : les 5 sprints sont implémentés** (même session). Vérifié par
-> `cargo build`/`cargo test` (115 tests, dont 4 nouveaux ciblant
-> spécifiquement l'arithmétique délicate du glisser-déposer de calques) et
-> `cargo clippy -- -D warnings` (0 warning). UX-1 a en plus été vérifié par
-> capture d'écran réelle (chevauchement du footer corrigé, icônes
-> cohérentes). UX-2 à UX-5 n'ont **pas** pu être revérifiés par capture
-> d'écran dans cette session — la fenêtre de l'app se retrouvait derrière
-> d'autres fenêtres actives de l'utilisateur, et prendre des captures
-> d'écran répétées du bureau complet aurait exposé du contenu sans rapport
-> avec cette tâche. À vérifier visuellement à l'occasion.
+> **Statut : les 5 sprints sont implémentés** (même session, y compris
+> UX-2.3 initialement reporté). Vérifié par `cargo build`/`cargo test`
+> (118 tests, dont 6 nouveaux — arithmétique du glisser-déposer de calques,
+> résolution de raccourci par outil, defaults de settings) et
+> `cargo clippy -- -D warnings` (0 warning). UX-1 a été confirmé par capture
+> d'écran réelle. Une tentative de capture pour UX-2/UX-3 a révélé et permis
+> de corriger un vrai bug de defaults au premier lancement (voir « Bug trouvé
+> » plus bas) avant d'être interrompue : la fenêtre de l'app se retrouvait
+> derrière d'autres fenêtres actives de l'utilisateur, et enchaîner des
+> captures d'écran complètes du bureau aurait exposé du contenu sans rapport
+> avec cette tâche. Reste à valider par un usage interactif réel (voir
+> « Reste ouvert »).
 
 ---
 
@@ -171,10 +173,13 @@ lisible même quand un 28ᵉ outil s'ajoute plus tard.
       ou Rectangle par défaut) avec un petit chevron en coin ; clic = popup
       (`egui::popup_below_widget`) listant les 6 formes, se referme dès
       qu'on en choisit une (`PopupCloseBehavior::CloseOnClick`).
-- [x] **UX-2.3 Raccourci clavier affiché au survol** — S, ⭐. **Reporté** —
-      non fait dans cette passe (le repli par groupe couvrait déjà l'essentiel
-      du gain de lisibilité visé par ce sprint) ; reste un bon candidat
-      « quick win » pour une prochaine itération.
+- [x] **UX-2.3 Raccourci clavier affiché au survol** — S, ⭐. ✅ (fait dans
+      une deuxième passe, initialement reporté). `shortcut_for_tool(tool)`
+      résout le `ShortcutAction` d'un outil personnalisable (12 sur 29, voir
+      `keybindings::ShortcutAction`) et ajoute la touche **effective**
+      (`app.keybindings.key_for(...)`) au survol — pas seulement la lettre
+      par défaut déjà figée dans le nom de l'outil, qui restait affichée
+      même après un rebind. 2 tests unitaires.
 
 ### Sprint UX-3 — Panneau des calques et menu contextuel (M/L, ~1-2 semaines)
 
@@ -274,13 +279,36 @@ lancement).
 
 Chaque sprint est indépendant des autres (pas de dépendance dure entre eux)
 — l'ordre ci-dessus optimise juste le rapport effort/visibilité, pas une
-contrainte technique. Tous les items ont finalement été réalisés dans une
-seule passe (voir statut en tête de document).
+contrainte technique. **Les 5 sprints, y compris UX-2.3, sont maintenant
+tous réalisés.**
+
+## Bug trouvé en essayant de vérifier à l'écran (et corrigé)
+
+Une tentative de vérification visuelle de UX-2.1 (groupes repliés par
+défaut) et UX-3.2 (largeur de panneau persistée) a révélé un vrai bug :
+`i18n::read_settings()` retombait sur `Settings::default()` (dérivé) quand
+`settings.json` n'existe pas encore — le derive `Default` ignore les
+`#[serde(default = "fn")]` par champ (il donne `Vec::new()`/`0.0`, jamais
+`default_collapsed_toolbar_groups()`/`default_layers_panel_width()`).
+Conséquence concrète observée à l'écran : au tout premier lancement, aucun
+groupe d'outil n'était replié et le panneau des calques démarrait à une
+largeur incohérente — l'exact opposé du comportement voulu par UX-2.1/3.2.
+Corrigé en faisant passer le cas « fichier absent » par le même chemin de
+désérialisation serde qu'un fichier existant (`serde_json::from_str("{}")`
+au lieu de `.unwrap_or_default()`), avec un test dédié qui aurait détecté la
+régression. Ce genre de bug ne se voit qu'à l'usage réel (les tests
+unitaires des fonctions individuelles passaient tous) — la vérification à
+l'écran, même partielle, a eu une vraie valeur ici.
 
 ## Reste ouvert
 
-- **UX-2.3** (raccourci clavier affiché au survol) : seul item non fait —
-  reporté, bon candidat pour une prochaine itération courte.
-- **Vérification visuelle interactive de UX-2 à UX-5** : seul UX-1 a été
-  confirmé par capture d'écran dans cette session (voir note de statut en
-  tête de document).
+- **Vérification visuelle interactive complète** : UX-1 a été confirmé par
+  capture d'écran ; UX-2/UX-3/UX-4/UX-5 ont été vérifiés par
+  build/tests/clippy et relecture de code, plus une capture partielle qui a
+  révélé le bug de defaults ci-dessus (donc pas totalement à l'aveugle),
+  mais pas par un test interactif complet (glisser un calque, ouvrir le
+  sélecteur de formes, clic droit sur le canevas). À valider en priorité au
+  premier usage réel — voir la note de statut en tête de document sur la
+  raison (fenêtre de l'app passant derrière d'autres fenêtres actives,
+  captures d'écran complètes évitées pour ne pas exposer du contenu sans
+  rapport avec cette tâche).

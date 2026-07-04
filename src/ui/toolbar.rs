@@ -1088,7 +1088,14 @@ fn shape_family_selector(ui: &mut Ui, app: &mut PaintApp, group: &[(ActiveTool, 
     if resp.clicked() {
         ui.memory_mut(|m| m.toggle_popup(popup_id));
     }
-    let resp = resp.on_hover_text(format!("{face_name} — {face_hint}"));
+    let resp = match shortcut_for_tool(face_tool) {
+        Some(action) => resp.on_hover_text(format!(
+            "{face_name} — {face_hint}\n{} : {}",
+            t("Raccourci", "Shortcut"),
+            app.keybindings.key_for(action).name()
+        )),
+        None => resp.on_hover_text(format!("{face_name} — {face_hint}")),
+    };
 
     egui::popup_below_widget(ui, popup_id, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
         ui.horizontal(|ui| {
@@ -1169,7 +1176,27 @@ fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hi
     if resp.clicked() {
         app.active_tool = tool;
     }
-    resp.on_hover_text(format!("{name} — {hint}"));
+    // Raccourci clavier *effectif* (UX-2.3) : le nom de l'outil embarque déjà
+    // sa touche par défaut (ex. « Sélection (V) »), mais celle-ci est
+    // personnalisable (Sprint 7.2) — un outil rebindé affichait quand même
+    // l'ancienne lettre. Le survol montre maintenant la touche réellement
+    // assignée, tirée de `app.keybindings`.
+    match shortcut_for_tool(tool) {
+        Some(action) => resp.on_hover_text(format!(
+            "{name} — {hint}\n{} : {}",
+            t("Raccourci", "Shortcut"),
+            app.keybindings.key_for(action).name()
+        )),
+        None => resp.on_hover_text(format!("{name} — {hint}")),
+    };
+}
+
+/// Raccourci personnalisable actuellement associé à `tool`, s'il en a un —
+/// seuls les 12 outils « une touche » du Sprint 7.2 le sont (voir
+/// `keybindings::ShortcutAction`) ; `None` pour les autres (formes
+/// secondaires, retouche locale, mesure…).
+fn shortcut_for_tool(tool: ActiveTool) -> Option<crate::keybindings::ShortcutAction> {
+    crate::keybindings::ShortcutAction::ALL.into_iter().find(|a| a.tool() == tool)
 }
 
 /// Glyphe Phosphor associé à chaque outil (police embarquée, cf. `PaintApp::new`).
@@ -1651,7 +1678,9 @@ fn swatch(ui: &mut Ui, rgb: [u8; 3]) -> egui::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_hex_color;
+    use super::{parse_hex_color, shortcut_for_tool};
+    use crate::keybindings::ShortcutAction;
+    use crate::tools::ActiveTool;
 
     #[test]
     fn parses_common_hex_forms() {
@@ -1666,5 +1695,20 @@ mod tests {
         assert_eq!(parse_hex_color("#GG0000"), None);
         assert_eq!(parse_hex_color("#FF80"), None);
         assert_eq!(parse_hex_color(""), None);
+    }
+
+    /// UX-2.3 : un outil personnalisable (Sprint 7.2) doit résoudre vers son
+    /// `ShortcutAction`, pour que le survol affiche la touche réellement
+    /// assignée plutôt que la lettre par défaut figée dans le nom de l'outil.
+    #[test]
+    fn shortcut_for_tool_resolves_rebindable_tools() {
+        assert_eq!(shortcut_for_tool(ActiveTool::Brush), Some(ShortcutAction::Brush));
+        assert_eq!(shortcut_for_tool(ActiveTool::Rectangle), Some(ShortcutAction::Rectangle));
+    }
+
+    #[test]
+    fn shortcut_for_tool_is_none_for_tools_without_a_binding() {
+        assert_eq!(shortcut_for_tool(ActiveTool::Polygon), None);
+        assert_eq!(shortcut_for_tool(ActiveTool::Dodge), None);
     }
 }

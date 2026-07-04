@@ -174,7 +174,16 @@ fn read_settings() -> Settings {
     settings_path()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
+        // Bug trouvé en vérifiant UX-2.1/UX-3.2 à l'écran : `.unwrap_or_default()`
+        // construisait `Settings` via `#[derive(Default)]`, qui ignore les
+        // `#[serde(default = "...")]` par champ (`Vec::new()`/`0.0` au lieu de
+        // `default_collapsed_toolbar_groups()`/`default_layers_panel_width()`).
+        // Résultat au tout premier lancement (fichier absent) : aucun groupe
+        // d'outils replié, largeur de panneau à 0 au lieu de 170 — l'exact
+        // opposé du comportement voulu. Parser `"{}"` traverse le même chemin
+        // de désérialisation que n'importe quel fichier existant, donc les
+        // défauts par champ s'appliquent uniformément, fichier présent ou non.
+        .unwrap_or_else(|| serde_json::from_str("{}").expect("Settings: tous les champs ont un default"))
 }
 
 fn write_settings(settings: &Settings) {
@@ -278,5 +287,24 @@ mod tests {
         set(Lang::En);
         assert_eq!(t("Nouveau", "New"), "New");
         set(Lang::Fr); // ne pas polluer les autres tests
+    }
+
+    /// Régression (constatée en vérifiant UX-2.1/UX-3.2 à l'écran) : au tout
+    /// premier lancement, `read_settings()` ne doit jamais passer par
+    /// `Settings::default()` (dérivé — ignore les `#[serde(default = ...)]`
+    /// par champ) mais toujours par le même chemin de désérialisation serde
+    /// qu'un fichier existant, pour que les défauts par champ s'appliquent.
+    /// Testé directement sur `"{}"` plutôt que sur `read_settings()` (qui
+    /// touche le vrai `settings.json` du poste) pour rester déterministe et
+    /// ne pas interférer avec l'état réel de la machine de test.
+    #[test]
+    fn settings_from_empty_json_use_field_level_defaults_not_derived_default() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.collapsed_toolbar_groups, default_collapsed_toolbar_groups());
+        assert_eq!(settings.layers_panel_width, default_layers_panel_width());
+        // Le derive `Default` donnerait `Vec::new()` / `0.0` ici — exactement
+        // le bug corrigé : vérifie qu'on n'est pas revenu en arrière.
+        assert_ne!(settings.collapsed_toolbar_groups, Vec::<String>::new());
+        assert_ne!(settings.layers_panel_width, 0.0);
     }
 }
