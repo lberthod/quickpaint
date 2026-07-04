@@ -1,6 +1,6 @@
 [package]
 name = "quickpaint"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 description = "QuickPaint — éditeur de dessin tactile macOS en Rust (egui)"
 authors = ["Loïc Berthod <https://github.com/lberthod>"]

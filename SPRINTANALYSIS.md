@@ -168,12 +168,12 @@ Ce que je **ne peux pas faire depuis cet environnement** : signer et notariser
 le `.dmg` (nécessite le trousseau macOS avec le certificat Developer ID du
 compte Apple de Loïc Berthod, et une session `xcrun notarytool` authentifiée
 — identifiants qui n'existent pas dans ce dépôt ni dans cet environnement
-d'exécution). Publier un DMG non signé sous un tag `v0.11.0` serait pire que
+d'exécution). Publier un DMG non signé sous un tag `v0.12.0` serait pire que
 ne rien publier : Gatekeeper bloquerait les utilisateurs et le tag laisserait
 croire qu'une release existe.
 
 **Ce qui a été préparé** pour que l'étape manuelle soit la plus courte
-possible : version Cargo alignée (`0.11.0`), CHANGELOG à jour, README pointant
+possible : version Cargo alignée (`0.12.0`), CHANGELOG à jour, README pointant
 déjà vers `github.com/lberthod/quickpaint/releases`, CI verte sur `main`.
 
 **Reste à faire, par toi, en local (macOS avec ton certificat Developer ID)** :
@@ -185,13 +185,13 @@ codesign --deep --options runtime -s "Developer ID Application: Loïc Berthod (T
 create-dmg QuickPaint.app                   # ou hdiutil create
 xcrun notarytool submit QuickPaint.dmg --keychain-profile "AC_PASSWORD" --wait
 xcrun stapler staple QuickPaint.dmg
-git tag v0.11.0 && git push origin v0.11.0
-gh release create v0.11.0 QuickPaint.dmg --title "QuickPaint 0.11.0" \
+git tag v0.12.0 && git push origin v0.12.0
+gh release create v0.12.0 QuickPaint.dmg --title "QuickPaint 0.12.0" \
   --notes-file CHANGELOG.md
 ```
 
 Le chantier **Mac App Store** (sandbox + entitlements) reste au backlog
-produit (SPRINTS.md 12+) — plus gros que cette étape de distribution ad hoc,
+produit (SPRINTS.md 13+) — plus gros que cette étape de distribution ad hoc,
 et nécessite aussi un compte développeur + des décisions de conformité
 (entitlements minimaux, revue Apple) hors du périmètre d'un audit technique.
 
@@ -204,12 +204,17 @@ transformation restante documentée pour un prochain sprint.**
 
 `app.rs` faisait 4 617 lignes (+1000/sprint). Extrait dans ce sprint :
 
-- **`app/pen_edit.rs`** : la machine à états de réédition des nœuds de plume
-  après coup (`try_start_pen_edit`, `apply_pen_drag`, `paint_pen_edit`,
-  hit-test des poignées) — un sous-système autonome (state + rendu + geste)
-  qui ne partage que `Document`/`Stroke` avec le reste de `app.rs`. Devient
-  testable indépendamment (2 tests unitaires ajoutés sur le hit-test de
-  nœud, qui n'existaient qu'indirectement avant).
+- **`app/pen_edit.rs`** (232 lignes) : `app.rs` devient `app/mod.rs`
+  (4 444 lignes) + ce sous-module — la machine à états de réédition des
+  nœuds de plume après coup (`try_start_pen_edit`, `hit_test_pen_node`,
+  `apply_pen_drag`, `commit_pen_edit`, `handle_pen_node_edit`,
+  `paint_pen_edit`, le type `PenNodeTarget`) — un sous-système autonome
+  (état + geste + rendu) qui ne partage que `Document`/`Stroke` avec le
+  reste de `app`. Méthodes `pub(super)` (visibles du module parent `app`
+  uniquement, comme avant l'extraction — pas un élargissement de l'API
+  publique). Devient testable indépendamment : 2 tests unitaires ajoutés sur
+  le hit-test de nœud (choix du nœud le plus proche sous le seuil, rejet
+  hors seuil), qui n'existaient qu'indirectement avant.
 
 **Non fait ici, noté pour la suite** : la machine à états de
 sélection/transformation (`XformKind`, le drag de redimensionnement/rotation,

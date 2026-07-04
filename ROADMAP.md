@@ -297,12 +297,16 @@ Le premier plan (sélection, texte, doc fixe, AA, raster d'images, pot de peintu
 import, modes de fusion, plume, grille/magnétisme) est **entièrement livré** en
 5 sprints + release signée/notarisée. Voir le journal git pour le détail.
 
-## 6. Suite — Sprints 7 à 11 (terminés) et 12+ (proposé)
+## 6. Suite — Sprints 7 à 11 (terminés), 12 (qualité) et 13+ (proposé)
 
 Le détail sprint par sprint (confort/personnalisation, retouche photo avancée,
 détourage local, bibliothèque d'assets, puis les **10 nouveaux outils** de
 retouche locale et composition — densité/éponge/flou/netteté/estompe, règle,
-miroir, dégradé interactif) vit dans [SPRINTS.md](SPRINTS.md), avec un
-Sprint 12+ proposé (raccourcis pour ces 10 outils, symétrie par réflexion,
-format projet v2, App Store…). Ce document (ROADMAP.md) reste la vue
+miroir, dégradé interactif) vit dans [SPRINTS.md](SPRINTS.md). Le Sprint 12
+(fluidité du compositeur, export à résolution native, robustesse d'entrée,
+premier découpage de `app.rs`) est traité à part dans
+[SPRINTANALYSIS.md](SPRINTANALYSIS.md), directement dérivé de
+l'[audit](ANALYSE.md). Un Sprint 13+ reste proposé (raccourcis pour les 10
+outils du Sprint 11, symétrie par réflexion, format projet v2, App Store…).
+Ce document (ROADMAP.md) reste la vue
 d'ensemble « pourquoi » ; SPRINTS.md est le « quoi, comment, dans quel ordre ».

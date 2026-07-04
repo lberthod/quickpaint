@@ -4,6 +4,12 @@
 > (Sprint 10) + modifications locales en cours (Sprint 11).
 > Périmètre : raison d'être, stack, fonctionnalités, architecture, qualité,
 > performance, sécurité, dette technique, recommandations.
+>
+> **Instantané figé** : ce document décrit l'état du projet à cette date et
+> n'est pas remis à jour au fil de l'eau. Les 5 recommandations de clôture
+> (§10 P1/P2) ont été traitées dans la foulée sous forme d'un **Sprint 12** —
+> voir [SPRINTANALYSIS.md](SPRINTANALYSIS.md) pour le détail, les mesures
+> avant/après et ce qui reste ouvert.
 
 ---
 

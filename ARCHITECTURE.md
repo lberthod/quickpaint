@@ -11,8 +11,10 @@
 ┌────────────────────────────────────────────────────────────┐
 │ ui/          toolbar, layers, footer            (egui)     │
 ├────────────────────────────────────────────────────────────┤
-│ app.rs       état global, machine à états des outils,      │
-│              sélection/transformation, dialogues           │
+│ app/         état global (mod.rs), machine à états des     │
+│              outils, sélection/transformation, dialogues ; │
+│              pen_edit.rs = édition de nœuds Bézier après    │
+│              coup, extrait en sous-module (ANALYSE.md §12.5)│
 ├────────────────────────────────────────────────────────────┤
 │ tools/       brush, eraser, pen, shape, bucket, boolean,   │
 │              guides, filter, assets, eyedropper, hit       │
@@ -67,7 +69,7 @@ bouts ronds) — [render/ribbon.rs](src/render/ribbon.rs).
 
 La vraie pression stylet (tablettes Wacom…) nécessiterait de contourner
 winit/egui-winit (NSEvent custom) — investigué, scopé « L », en backlog
-(SPRINTS.md 12.7).
+(SPRINTS.md 13.7).
 
 ## 4. Rendu
 
@@ -76,10 +78,17 @@ winit/egui-winit (NSEvent custom) — investigué, scopé « L », en backlog
 - **Compositing par calque** ([render/compositor.rs](src/render/compositor.rs)) :
   tiny-skia (CPU) réalise modes de fusion, masques, dégradés et calques
   d'ajustement, avec **cache bitmap par calque** invalidé sélectivement.
-  Seul le trait en cours est recalculé à chaque frame.
-- Limite connue (backlog) : pendant une peinture raster, la recomposition est
-  **plein cadre** à chaque dab ; la propagation de dirty-rects à travers le
-  compositing est le prochain chantier perf.
+  Seul le trait en cours est recalculé à chaque frame. Le contenu peint
+  (pinceau/gomme pixel...) d'un calque « sale » est lui-même patché **tuile
+  par tuile** dans un cache persistant plutôt que ré-aplati en entier à
+  chaque dab (`RasterTileCache`, ANALYSE.md §12.1 — ≈103× plus rapide sur un
+  calque déjà bien rempli, mesuré). Reste au backlog : propager ce
+  découpage jusqu'au compositing multi-calques (fusion/écrêtage séquentiels).
+- **Export** ([`Compositor::render_to_rgba`](src/render/compositor.rs)) :
+  rend le document à sa résolution **native** (`doc.size`) via ce même
+  chemin de composition, indépendamment du zoom/de la taille de la fenêtre à
+  l'écran (ANALYSE.md §12.2 — remplace l'ancien export par capture d'écran
+  du viewport, qui plafonnait la résolution exportée à celle de la fenêtre).
 
 ## 5. Undo / redo (pattern Command)
 
@@ -99,7 +108,9 @@ n'importe lequel.
 
 - **Projet** : `.json` (serde) — images et raster embarqués en PNG base64.
   Format v2 prévu (zip JSON + PNG séparés, façon .ora) : le base64 gonfle
-  les fichiers (SPRINTS.md 12.5).
+  les fichiers (SPRINTS.md 13.5). Version de format déjà en place
+  (`Document::format_version`, ANALYSE.md §12.3) pour préparer cette
+  migration.
 - **Export** : PNG/JPEG/WebP, PDF mono-page (writer minimal maison,
   DCTDecode), SVG vectoriel, export par lots multi-tailles.
 - **Préférences** : `~/Library/Application Support/QuickPaint/settings.json`

@@ -3,6 +3,23 @@
 Versions alignées sur les sprints. Détail complet : [SPRINTS.md](SPRINTS.md)
 et le journal git.
 
+## 0.12.0 — juillet 2026 (Sprint 12 — qualité, à partir de l'audit ANALYSE.md)
+
+Détail complet et mesures : [SPRINTANALYSIS.md](SPRINTANALYSIS.md).
+
+- **Fluidité** : le compositeur ne re-rastérise plus la surface peinte
+  entière à chaque coup de pinceau pixel — cache incrémental par tuile
+  (≈103× plus rapide sur un calque 4096×4096 déjà bien rempli, mesuré).
+- **Export fidèle** : PNG/JPEG/WebP/PDF (simple et par lots) rendent le
+  document à sa résolution native via le compositeur, au lieu de recadrer
+  une capture d'écran du viewport — la résolution exportée ne dépend plus
+  du zoom ni de la taille de la fenêtre.
+- **Robustesse** : version de format projet, erreurs de chargement
+  explicites (fichier corrompu, dimensions hors bornes) au lieu d'un échec
+  silencieux, bornage du collage presse-papiers et des redimensionnements.
+- **Maintenabilité** : `app.rs` → `app/mod.rs` + `app/pen_edit.rs` (édition
+  de nœuds Bézier après coup extraite en sous-module, testable seule).
+
 ## 0.11.0 — juillet 2026 (Sprint 11)
 
 - 10 nouveaux outils de retouche & composition : densité -/+ (dodge/burn),

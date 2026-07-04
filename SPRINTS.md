@@ -325,42 +325,55 @@ release passent après correction.
 
 ---
 
-## Sprint 12+ (proposé, pas encore engagé)
+## Sprint 13+ (proposé, pas encore engagé)
+
+> Numérotation : le **Sprint 12** a été pris par un chantier qualité/perf
+> mené à partir de l'audit ([ANALYSE.md](ANALYSE.md)) plutôt que par de
+> nouvelles fonctionnalités — détail dans [SPRINTANALYSIS.md](SPRINTANALYSIS.md)
+> (fluidité du compositeur, export à résolution native, robustesse d'entrée,
+> premier découpage de `app.rs`). Ce Sprint 13+ reprend la suite fonctionnelle
+> proposée initialement, décalée d'un cran.
 
 Objectif : à partir des limites notées au Sprint 11 et du backlog déjà
 identifié dans [ROADMAP.md](ROADMAP.md), voici la suite logique. Priorités
 indicatives (⭐ impact) — à confirmer avant de démarrer, pas un engagement.
 
-- [ ] **12.1 Raccourcis clavier pour les outils Sprint 11** — S, ⭐⭐ :
+- [ ] **13.1 Raccourcis clavier pour les outils Sprint 11** — S, ⭐⭐ :
       étendre `ShortcutAction`/`KeyBindings` ([keybindings.rs](src/keybindings.rs))
       aux 10 nouveaux outils, personnalisables comme les 12 existants
       (Sprint 7.2). Le panneau **Préférences › Raccourcis clavier** n'a rien
       à changer, juste la liste `ALL` à compléter.
-- [ ] **12.2 Symétrie par réflexion (vrai miroir)** — M, ⭐⭐ : en plus de la
+- [ ] **13.2 Symétrie par réflexion (vrai miroir)** — M, ⭐⭐ : en plus de la
       rotation régulière (11.6), ajouter un mode réflexion (axe vertical/
       horizontal/diagonal) — utile pour des visages, logos, motifs non
       purement radiaux.
-- [ ] **12.3 Dégradé sur le texte** — M, ⭐ : backlog déjà noté au P1 #11 de
+- [ ] **13.3 Dégradé sur le texte** — M, ⭐ : backlog déjà noté au P1 #11 de
       ROADMAP.md, nécessite un shader par glyphe dans `raster_text`.
-- [ ] **12.4 Segmentation par modèle embarqué (détourage IA)** — L, ⭐⭐⭐ :
+- [ ] **13.4 Segmentation par modèle embarqué (détourage IA)** — L, ⭐⭐⭐ :
       toujours reporté depuis Sprint 9.2 (ROADMAP.md), nécessite un fichier
       de poids `.onnx` fourni/validé par l'utilisateur.
-- [ ] **12.5 Format projet v2** — M, ⭐⭐ : images en fichiers séparés dans un
+- [ ] **13.5 Format projet v2** — M, ⭐⭐ : images en fichiers séparés dans un
       conteneur zip plutôt qu'en base64 dans le `.json` (déjà noté transversal
       dans ROADMAP.md) — réduit fortement la taille des projets avec beaucoup
-      d'images importées.
-- [ ] **12.6 Import PSD (lecture)** — L, ⭐ : ROADMAP.md #16, toujours backlog,
+      d'images importées. Bon moment pour porter le format à
+      `Document::CURRENT_FORMAT_VERSION = 2` (le champ existe depuis le
+      Sprint 12, voir ANALYSE.md §12.3) et vérifier la migration des projets v1.
+- [ ] **13.6 Import PSD (lecture)** — L, ⭐ : ROADMAP.md #16, toujours backlog,
       interop d'appel plutôt qu'une priorité produit.
-- [ ] **12.7 Pression réelle du stylet** — L, ⭐⭐ : ré-évaluer seulement si
+- [ ] **13.7 Pression réelle du stylet** — L, ⭐⭐ : ré-évaluer seulement si
       un fork/patch du pipeline `egui-winit` devient justifié par l'usage
       (voir l'investigation détaillée à ROADMAP.md #15).
+- [ ] **13.8 Suite du découpage de `app.rs`** — M, ⭐⭐ : le Sprint 12 n'a
+      extrait que l'édition de nœuds de plume (`app/pen_edit.rs`) ; la machine
+      à états de sélection/transformation (`XformKind`, ~600 lignes) est le
+      prochain candidat, à sortir seule (voir ANALYSE.md §12.5/§10 P1 #8).
 - [ ] **Mac App Store** — M, ⭐⭐⭐ : toujours le plus gros levier de
       découvrabilité non tiré, indépendant des outils ci-dessus.
 
-**Ordre suggéré** : 12.1 (rapide, complète le Sprint 11) → 12.5 (dette
+**Ordre suggéré** : 13.1 (rapide, complète le Sprint 11) → 13.5 (dette
 technique qui grossit avec chaque nouvelle bibliothèque d'assets/templates) →
-12.2/12.3 (finitions outils) → Mac App Store → 12.4/12.6/12.7 (gros chantiers,
-au choix selon la demande utilisateur).
+13.2/13.3 (finitions outils) → Mac App Store → 13.4/13.6/13.7/13.8 (gros
+chantiers, au choix selon la demande utilisateur).
 
 ---
 

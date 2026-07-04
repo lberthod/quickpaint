@@ -85,7 +85,10 @@ window needed — the model, tools and history layers are UI-independent).
 - [SPRINTS.md](SPRINTS.md) — the "what & how": sprint-by-sprint delivery log
   and the proposed next sprint.
 - [ANALYSE.md](ANALYSE.md) — full project audit (stack, quality, security,
-  performance) with prioritized recommendations.
+  performance) with prioritized recommendations (point-in-time snapshot).
+- [SPRINTANALYSIS.md](SPRINTANALYSIS.md) — Sprint 12: execution of the
+  audit's recommendations (compositor performance, native-resolution export,
+  input robustness, `app.rs` breakup) with before/after measurements.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 
 ## License
