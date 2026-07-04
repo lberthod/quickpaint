@@ -107,10 +107,10 @@ fn diffuse(rgba: &mut [u8], w: usize, h: usize, mask: &[bool], iterations: usize
         }
         std::mem::swap(&mut cur, &mut next);
     }
-    for i in 0..n {
+    for (i, pixel) in cur.iter().enumerate().take(n) {
         let p = i * 4;
         for c in 0..4 {
-            rgba[p + c] = cur[i][c].round().clamp(0.0, 255.0) as u8;
+            rgba[p + c] = pixel[c].round().clamp(0.0, 255.0) as u8;
         }
     }
 }

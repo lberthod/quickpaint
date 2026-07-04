@@ -211,9 +211,7 @@ mod tests {
     #[test]
     fn hit_test_pen_node_picks_the_closest_anchor() {
         let path = PenPath { anchors: vec![anchor((0.0, 0.0)), anchor((100.0, 0.0))], closed: false };
-        let mut app = PaintApp::default();
-        app.editing_pen = Some((1, path));
-        app.zoom = 1.0;
+        let app = PaintApp { editing_pen: Some((1, path)), zoom: 1.0, ..Default::default() };
         // Plus proche de l'ancre à (100, 0) que de celle à (0, 0), mais les
         // deux sont sous le seuil de 8px (converti en unités document par
         // `hit_test_pen_node`, ici zoom = 1 donc seuil = 8).
@@ -224,9 +222,7 @@ mod tests {
     #[test]
     fn hit_test_pen_node_none_outside_threshold() {
         let path = PenPath { anchors: vec![anchor((0.0, 0.0))], closed: false };
-        let mut app = PaintApp::default();
-        app.editing_pen = Some((1, path));
-        app.zoom = 1.0;
+        let app = PaintApp { editing_pen: Some((1, path)), zoom: 1.0, ..Default::default() };
         assert_eq!(app.hit_test_pen_node((50.0, 50.0)), None);
     }
 }

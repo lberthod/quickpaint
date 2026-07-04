@@ -536,12 +536,10 @@ impl PaintApp {
             .families
             .insert(egui::FontFamily::Name("phosphor-fill".into()), vec!["phosphor-fill".into()]);
         cc.egui_ctx.set_fonts(fonts);
-        let mut app = Self::default();
         // Détecté une seule fois, avant toute écriture de la session
         // courante : la présence du fichier signifie que la session
         // précédente ne s'est pas terminée proprement (crash, kill -9).
-        app.show_recovery_prompt = crate::project::has_recovery();
-        app
+        Self { show_recovery_prompt: crate::project::has_recovery(), ..Default::default() }
     }
 
     pub fn clear_active_layer(&mut self) {

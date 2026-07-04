@@ -709,9 +709,9 @@ fn comic(src: &[u8], w: usize, h: usize) -> Vec<u8> {
             px[2] = 0;
             continue;
         }
-        for c in 0..3 {
-            let v = (px[c] as f32 / 255.0 * levels).round() / levels * 255.0;
-            px[c] = v.clamp(0.0, 255.0) as u8;
+        for channel in px.iter_mut().take(3) {
+            let v = (*channel as f32 / 255.0 * levels).round() / levels * 255.0;
+            *channel = v.clamp(0.0, 255.0) as u8;
         }
     }
     out
@@ -1355,8 +1355,8 @@ mod tests {
         // canal alignées sur l'un des 6 niveaux de la posterization
         // (k/5×255 pour k=0..=5), à l'arrondi près.
         let levels = [0.0, 51.0, 102.0, 153.0, 204.0, 255.0];
-        for c in 0..3 {
-            let v = rgba[c] as f32;
+        for (c, &channel) in rgba.iter().enumerate().take(3) {
+            let v = channel as f32;
             assert!(levels.iter().any(|l| (v - l).abs() < 2.0), "canal {c} = {v} pas proche d'un niveau");
         }
     }

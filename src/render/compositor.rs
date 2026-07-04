@@ -1271,7 +1271,7 @@ mod tests {
         for i in 0..iterations {
             // Un seul pixel change, dans une seule tuile (cas réaliste d'un
             // dab de pinceau qui déborde légèrement sur une tuile voisine).
-            raster.set_pixel(5, 5 + i as i32, [200, 0, 0, 255]);
+            raster.set_pixel(5, 5 + i, [200, 0, 0, 255]);
             blit_raster_tiles(&mut cache, &raster, 4096, 4096);
         }
         let new_cost = t1.elapsed();
@@ -1349,7 +1349,7 @@ mod tests {
         let i = (12 * 20 + 12) * 4; // dans le carré d'origine décalé de (4,4) = [9,14)
         assert!(d[i + 3] > 0, "l'ombre décalée devrait couvrir ce pixel");
         // Loin de tout, doit rester transparent.
-        let far = (1 * 20 + 1) * 4;
+        let far = (20 + 1) * 4;
         assert_eq!(d[far + 3], 0);
     }
 

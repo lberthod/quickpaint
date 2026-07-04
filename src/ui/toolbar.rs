@@ -460,8 +460,8 @@ fn paint_histogram(ui: &mut Ui, hist: &[[u32; 256]; 3]) {
         Color32::from_rgba_unmultiplied(80, 120, 255, 140),
     ];
     for (c, color) in colors.iter().enumerate() {
-        for x in 0..256 {
-            let v = hist[c][x] as f32 / max;
+        for (x, &count) in hist[c].iter().enumerate().take(256) {
+            let v = count as f32 / max;
             if v <= 0.0 {
                 continue;
             }
