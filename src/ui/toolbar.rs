@@ -90,6 +90,14 @@ fn tool_groups() -> Vec<Vec<(ActiveTool, &'static str, &'static str)>> {
                 t("Trait à main levée, épaisseur selon la vitesse", "Freehand stroke, width follows speed"),
             ),
             (
+                ActiveTool::Pencil,
+                t("Crayon", "Pencil"),
+                t(
+                    "Comme le pinceau, avec le préréglage « Crayon fin » (trait fin, bord net) déjà appliqué",
+                    "Same as the brush, with the “Fine pencil” preset (thin, hard edge) already applied",
+                ),
+            ),
+            (
                 ActiveTool::Eraser,
                 t("Gomme (E)", "Eraser (E)"),
                 t("Efface les traits survolés du calque actif", "Erases hovered strokes on the active layer"),
@@ -2059,6 +2067,7 @@ fn tool_accent(tool: ActiveTool) -> Color32 {
         ActiveTool::Select => Color32::from_rgb(0x2F, 0x6F, 0xED),
         ActiveTool::Pan => Color32::from_rgb(0x5B, 0x8D, 0xEF),
         ActiveTool::Brush => Color32::from_rgb(0xF2, 0x99, 0x4A),
+        ActiveTool::Pencil => Color32::from_rgb(0xB5, 0x83, 0x3D),
         ActiveTool::Eraser => Color32::from_rgb(0xEB, 0x57, 0x57),
         ActiveTool::Bucket => Color32::from_rgb(0x00, 0xAC, 0xC1),
         ActiveTool::Eyedropper => Color32::from_rgb(0x00, 0x96, 0x88),
@@ -2116,6 +2125,15 @@ fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hi
     }
     if resp.clicked() {
         app.active_tool = tool;
+        // Crayon (point 40 de l'audit) : dessine exactement comme le pinceau
+        // (voir `ActiveTool::Pencil`) — la seule différence est ce préréglage
+        // appliqué à la sélection du bouton, plutôt qu'un moteur de dessin
+        // séparé.
+        if tool == ActiveTool::Pencil {
+            if let Some(preset) = crate::model::BrushPreset::builtins().into_iter().find(|p| p.name == t("Crayon fin", "Fine pencil")) {
+                app.apply_brush_preset(&preset);
+            }
+        }
     }
     // Raccourci clavier *effectif* (UX-2.3) : le nom de l'outil embarque déjà
     // sa touche par défaut (ex. « Sélection (V) »), mais celle-ci est
@@ -2147,6 +2165,7 @@ fn tool_glyph(tool: ActiveTool) -> &'static str {
         ActiveTool::Select => CURSOR,
         ActiveTool::Pan => HAND,
         ActiveTool::Brush => PAINT_BRUSH,
+        ActiveTool::Pencil => PENCIL_SIMPLE,
         ActiveTool::Eraser => ERASER,
         ActiveTool::PixelBrush => PAINT_BRUSH,
         ActiveTool::Airbrush => SPRAY_BOTTLE,
@@ -2361,6 +2380,32 @@ fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
         .clicked()
     {
         app.reorder(ZMove::Back);
+    }
+
+    // Fusionner / réunir en calque : n'ont de sens qu'à 2+ éléments (⇧/⌘+clic
+    // dans la liste « Éléments du calque », ou rectangle/lasso sur le canevas).
+    let multi = app.selection.len() >= 2;
+    ui.separator();
+    if ui
+        .add_enabled(multi, egui::Button::new(t("Fusionner en image", "Merge to image")))
+        .on_hover_text(t(
+            "Aplatit les éléments sélectionnés en une seule image, à leur place",
+            "Flattens the selected elements into a single image, in place",
+        ))
+        .clicked()
+    {
+        let ctx = ui.ctx().clone();
+        app.merge_selection_to_image(&ctx);
+    }
+    if ui
+        .add_enabled(multi, egui::Button::new(t("Nouveau calque", "New layer")))
+        .on_hover_text(t(
+            "Déplace les éléments sélectionnés vers un nouveau calque dédié",
+            "Moves the selected elements to a new dedicated layer",
+        ))
+        .clicked()
+    {
+        app.group_selection_into_layer();
     }
 
     ui.separator();

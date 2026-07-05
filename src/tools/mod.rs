@@ -26,6 +26,14 @@ use crate::i18n::t;
 pub enum ActiveTool {
     Select,
     Brush,
+    /// Crayon (point 40 de l'audit) : outil dédié plutôt qu'un simple
+    /// préréglage — dessine exactement comme `Brush` (même chemin de geste
+    /// dans `handle_draw`, non spécialisé ci-dessous), la différence tient
+    /// entièrement à la sélection du bouton dans la barre d'outils, qui
+    /// applique automatiquement le préréglage « Crayon fin » (trait fin,
+    /// bord net, peu de lissage) — cosmétique/ergonomique, pas un nouveau
+    /// moteur de dessin.
+    Pencil,
     Eraser,
     /// Pinceau pixel (roadmap F1) : peint dans la couche raster du calque
     /// actif, avec dureté/feathering — à la différence du pinceau vectoriel.
@@ -175,5 +183,20 @@ impl ActiveTool {
             ActiveTool::Star => Some(Shape::Star),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Le Crayon (point 40 de l'audit) doit dessiner exactement comme le
+    /// Pinceau : `as_shape() == None` pour les deux fait tomber leur geste
+    /// dans la même branche « trait à main levée » de
+    /// `PaintApp::handle_draw`, plutôt que la branche « forme ».
+    #[test]
+    fn pencil_is_not_a_shape_tool_same_as_brush() {
+        assert_eq!(ActiveTool::Pencil.as_shape(), None);
+        assert_eq!(ActiveTool::Brush.as_shape(), None);
     }
 }

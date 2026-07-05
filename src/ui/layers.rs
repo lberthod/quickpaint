@@ -85,6 +85,40 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         }
     });
 
+    // Répartition multi-calque (point 36 de l'audit) : ⇧/⌘+clic sur un nom de
+    // calque ci-dessous peuple `layer_multi_select` — au moins 3 calques non
+    // vides nécessaires (les deux extrêmes restent fixes, à répartir entre
+    // eux).
+    let multi = app.layer_multi_select.len();
+    if multi > 0 {
+        ui.horizontal(|ui| {
+            ui.label(format!("{} : {multi}", t("Calques sélectionnés", "Selected layers")));
+            if ui.small_button(t("Effacer", "Clear")).clicked() {
+                app.layer_multi_select.clear();
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        let can_distribute = multi >= 3;
+        ui.label(t("Répartir :", "Distribute:"));
+        if ui
+            .add_enabled(can_distribute, egui::Button::new(t("↔ Horizontal", "↔ Horizontal")))
+            .on_hover_text(t(
+                "Espace uniformément les calques sélectionnés (centres), les deux extrêmes restent fixes",
+                "Evenly spaces the selected layers (centers), the two outer ones stay fixed",
+            ))
+            .clicked()
+        {
+            app.distribute_layers(true);
+        }
+        if ui
+            .add_enabled(can_distribute, egui::Button::new(t("↕ Vertical", "↕ Vertical")))
+            .clicked()
+        {
+            app.distribute_layers(false);
+        }
+    });
+
     ui.separator();
 
     // Recherche/filtre (Sprint I.4) : complément naturel du renommage
@@ -108,7 +142,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
 
     // Du dessus (dernier) vers le dessous (premier). En-tête par groupe.
     let count = app.doc.layers.len();
-    let mut select: Option<usize> = None;
+    let mut select: Option<(usize, u64)> = None;
     let mut toggle_group: Option<String> = None;
     let mut prev_group: Option<String> = None;
     let mut reorder: Option<(u64, u64)> = None;
@@ -149,14 +183,22 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         let layer_id = layer.id;
         let row_id = egui::Id::new("layer_row").with(layer_id);
         let frame = egui::Frame::default().inner_margin(2.0);
+        // Seule la poignée (DOTS_SIX_VERTICAL) est enveloppée dans
+        // dnd_drag_source : avant, toute la ligne l'était, et la détection de
+        // glisser-déposer captait le clic avant les boutons œil/cadenas/etc.,
+        // qui devenaient difficiles à activer (surtout au trackpad). La zone
+        // de dépôt (dnd_drop_zone), elle, reste sur toute la ligne.
         let (_, dropped) = ui.dnd_drop_zone::<u64, ()>(frame, |ui| {
-            ui.dnd_drag_source(row_id, layer_id, |ui| {
-                ui.horizontal(|ui| {
-                    if group.is_some() {
-                        ui.add_space(12.0); // indentation des calques groupés
-                    }
-                    ui.label(egui_phosphor::regular::DOTS_SIX_VERTICAL)
-                        .on_hover_text(t("Glisser pour réordonner", "Drag to reorder"));
+            ui.horizontal(|ui| {
+                if group.is_some() {
+                    ui.add_space(12.0); // indentation des calques groupés
+                }
+                ui.dnd_drag_source(row_id, layer_id, |ui| {
+                    ui.label(egui_phosphor::regular::DOTS_SIX_VERTICAL);
+                })
+                .response
+                .on_hover_text(t("Glisser pour réordonner", "Drag to reorder"));
+                {
                     let eye = if layer.visible { egui_phosphor::regular::EYE } else { egui_phosphor::regular::EYE_SLASH };
                     if icon_button(ui, false, eye)
                         .on_hover_text(t("Afficher / masquer", "Show / hide"))
@@ -178,6 +220,24 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                         .clicked()
                     {
                         layer.locked = !layer.locked;
+                    }
+                    // Verrouillage granulaire (audit point 28) : position et
+                    // transparence, indépendants du verrou global ci-dessus —
+                    // affichés seulement s'ils sont actifs (icônes discrètes,
+                    // pas une 3e icône permanente pour un cas d'usage plus
+                    // rare que le verrou global) ; se règlent depuis le
+                    // panneau « Calque actif » plus bas.
+                    if layer.lock_position {
+                        icon_button(ui, true, egui_phosphor::regular::ARROWS_OUT_CARDINAL).on_hover_text(t(
+                            "Position verrouillée (glisser-déplacer bloqué) — réglable plus bas",
+                            "Position locked (drag-move blocked) — adjustable below",
+                        ));
+                    }
+                    if layer.lock_alpha {
+                        icon_button(ui, true, egui_phosphor::regular::CHECKERBOARD).on_hover_text(t(
+                            "Transparence verrouillée — réglable plus bas",
+                            "Transparency locked — adjustable below",
+                        ));
                     }
                     // Code couleur (Sprint I.5) : étiquette visuelle,
                     // aucun effet sur le rendu — palette prédéfinie plutôt
@@ -242,22 +302,45 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                         } else {
                             format!("({}){dim}", layer.strokes.len())
                         };
-                        let label = ui.selectable_label(is_active, format!("{clip}{} {suffix}", layer.name));
+                        let highlighted = is_active || app.layer_multi_select.contains(&layer.id);
+                        let label = ui
+                            .selectable_label(highlighted, format!("{clip}{} {suffix}", layer.name))
+                            .on_hover_text(t(
+                                "Clic : calque actif · ⇧/⌘+clic : ajouter à la sélection multi-calque (pour Répartir)",
+                                "Click: active layer · Shift/Cmd+click: add to multi-layer selection (for Distribute)",
+                            ));
                         if label.clicked() {
-                            select = Some(idx);
+                            select = Some((idx, layer.id));
                         }
                         if label.double_clicked() {
                             start_rename = Some((layer.id, layer.name.clone()));
                         }
                     }
-                });
+                }
             });
         });
         if let Some(from_id) = dropped {
             reorder = Some((*from_id, layer_id));
         }
     }
-    if let Some(idx) = select {
+    if let Some((idx, id)) = select {
+        let (shift, cmd) = ui.input(|i| (i.modifiers.shift, i.modifiers.command || i.modifiers.ctrl));
+        if shift {
+            let anchor = app.layer_select_anchor.unwrap_or(idx);
+            let (lo, hi) = (anchor.min(idx), anchor.max(idx));
+            for i in lo..=hi {
+                app.layer_multi_select.insert(app.doc.layers[i].id);
+            }
+        } else if cmd {
+            if !app.layer_multi_select.remove(&id) {
+                app.layer_multi_select.insert(id);
+            }
+            app.layer_select_anchor = Some(idx);
+        } else {
+            app.layer_multi_select.clear();
+            app.layer_multi_select.insert(id);
+            app.layer_select_anchor = Some(idx);
+        }
         app.doc.active_layer = idx;
     }
     if let Some(name) = toggle_group {
@@ -286,6 +369,22 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     let layer = &mut app.doc.layers[active];
     ui.label(t("Calque actif :", "Active layer:"));
     ui.add(egui::TextEdit::singleline(&mut layer.name).desired_width(f32::INFINITY));
+    // Verrouillage granulaire (audit point 28) : en plus du verrou global
+    // (icône cadenas ci-dessus, tout ou rien), ces deux-là restent
+    // indépendants et cumulables — verrouiller la position seule permet par
+    // exemple de peindre sur un calque de fond sans risquer de le décaler
+    // par erreur, sans passer par le verrou global qui bloquerait aussi la
+    // peinture.
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut layer.lock_position, t("🔒 Position", "🔒 Position")).on_hover_text(t(
+            "Bloque le glisser-déplacer des éléments de ce calque (peinture/édition de contenu toujours possibles)",
+            "Blocks drag-moving elements on this layer (painting/editing content still allowed)",
+        ));
+        ui.checkbox(&mut layer.lock_alpha, t("🔒 Transparence", "🔒 Transparency")).on_hover_text(t(
+            "Peindre ne peut plus rendre opaque un pixel transparent, ni la gomme en rendre un transparent",
+            "Painting can no longer make a transparent pixel opaque, nor can erasing make one transparent",
+        ));
+    });
     ui.horizontal(|ui| {
         ui.label(t("Opacité", "Opacity"));
         let mut pct = (layer.opacity * 100.0).round();
@@ -700,13 +799,32 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
 
     // Liste virtualisée (show_rows) : seules les lignes visibles sont
     // construites → reste rapide même avec des milliers d'éléments.
-    let mut pick: Option<u64> = None;
+    //
+    // Sélection multiple (⇧ = plage depuis la dernière ancre, ⌘/Ctrl =
+    // ajouter/retirer un élément, clic simple = remplacer) : réutilise
+    // `app.selection`, la même sélection multi-élément que le canevas
+    // (rectangle/lasso/baguette), ce qui donne accès aux actions déjà
+    // câblées dessus (aligner/rogner/ordre/suréchantillonner dans
+    // `toolbar::selection_actions`) sans dupliquer ce mécanisme.
+    let mut pick: Option<(usize, u64)> = None;
     let active = app.doc.active_layer;
     let (nt, ni, ns) = {
         let l = &app.doc.layers[active];
         (l.texts.len(), l.images.len(), l.strokes.len())
     };
     let total = nt + ni + ns;
+    // Résout l'id d'une ligne par index, indépendamment de ce qui est
+    // effectivement construit par `show_rows` — nécessaire pour la plage ⇧,
+    // dont l'ancre peut être hors de la zone visible (virtualisation).
+    let id_at_row = |l: &Layer, row: usize| -> u64 {
+        if row < nt {
+            l.texts[nt - 1 - row].id
+        } else if row < nt + ni {
+            l.images[ni - 1 - (row - nt)].id
+        } else {
+            l.strokes[ns - 1 - (row - nt - ni)].id
+        }
+    };
     let row_h = ui.text_style_height(&egui::TextStyle::Body) + 4.0;
     egui::ScrollArea::vertical().max_height(220.0).show_rows(ui, row_h, total, |ui, range| {
         let l = &app.doc.layers[active];
@@ -737,14 +855,39 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 let kind = if s.fill { t("forme", "shape") } else { t("trait", "stroke") };
                 (s.id, format!("{kind} ({} pts)", s.points.len()))
             };
-            if ui.selectable_label(app.selection.contains(&id), lbl).clicked() {
-                pick = Some(id);
+            if ui
+                .selectable_label(app.selection.contains(&id), lbl)
+                .on_hover_text(t(
+                    "Clic : sélectionner · ⇧+clic : plage · ⌘/Ctrl+clic : ajouter/retirer",
+                    "Click: select · Shift+click: range · Cmd/Ctrl+click: add/remove",
+                ))
+                .clicked()
+            {
+                pick = Some((row, id));
             }
         }
     });
-    if let Some(id) = pick {
-        app.selection.clear();
-        app.selection.insert(id);
+    if let Some((row, id)) = pick {
+        let (shift, cmd) = ui.input(|i| (i.modifiers.shift, i.modifiers.command || i.modifiers.ctrl));
+        if shift {
+            // Plage depuis la dernière ancre (clic simple) jusqu'à cette ligne —
+            // s'il n'y a pas encore d'ancre, se comporte comme un ajout simple.
+            let anchor = app.layer_elements_anchor.unwrap_or(row);
+            let (lo, hi) = (anchor.min(row), anchor.max(row));
+            let l = &app.doc.layers[active];
+            for r in lo..=hi {
+                app.selection.insert(id_at_row(l, r));
+            }
+        } else if cmd {
+            if !app.selection.remove(&id) {
+                app.selection.insert(id);
+            }
+            app.layer_elements_anchor = Some(row);
+        } else {
+            app.selection.clear();
+            app.selection.insert(id);
+            app.layer_elements_anchor = Some(row);
+        }
         app.active_tool = crate::tools::ActiveTool::Select;
     }
 

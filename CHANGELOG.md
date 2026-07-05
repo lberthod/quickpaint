@@ -2,6 +2,30 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.19.0 — juillet 2026 (les 4 derniers points optionnels de l'audit)
+
+299 tests au total, 0 warning clippy.
+
+- **Distribution multi-calque** (point 36) : sélection multi-calque dans le
+  panneau (⇧/⌘+clic sur un nom de calque) + répartition à espacement égal
+  (horizontal/vertical), les deux calques extrêmes restent fixes.
+- **Détection de contours Canny** (point 87) : nouveau preset « Contours
+  (Canny) », en plus de Sobel (toujours utilisé par Croquis/BD) — lissage,
+  gradients avec direction, suppression non maximale, double seuil +
+  hystérésis.
+- **Outil Crayon dédié** (point 40) : bouton dans la barre d'outils, dessine
+  comme le Pinceau, applique automatiquement le préréglage « Crayon fin ».
+- **Verrouillage granulaire de calque** (point 28) : `lock_position`
+  (bloque le glisser-déplacer, pas la peinture) et `lock_alpha` (peindre/
+  gommer ne peut plus rendre un pixel opaque/transparent), indépendants du
+  verrou global existant et cumulables avec lui.
+- Sélection multiple d'éléments dans la liste « Éléments du calque » (⇧/⌘+
+  clic), avec deux nouvelles actions : fusionner en image, nouveau calque
+  à partir de la sélection.
+- Fix : le glisser-déposer pour réordonner les calques capturait le clic
+  avant les boutons œil/cadenas/etc. (seule la poignée déclenche le glisser
+  désormais).
+
 ## 0.15.0 — juillet 2026 (audit fonctionnel de suivi — Sprints A à F)
 
 Audit et plan de sprints (`audit_newxxx.md`/`audit_sprint_xx.md`) retirés une

@@ -76,6 +76,8 @@ type ElemBounds = (u64, ((f32, f32), (f32, f32)));
 
 /// (id, boîte englobante (min, max), centre) — géométrie de sélection (Sprint 1).
 type ElemGeom = (u64, ((f32, f32), (f32, f32)), (f32, f32));
+/// (index de calque, boîte englobante) — utilisé par `distribute_layers`.
+type LayerBounds = (usize, ((f32, f32), (f32, f32)));
 
 /// Mouvements de profondeur (z-order) de la sélection.
 #[derive(Clone, Copy)]
@@ -465,6 +467,21 @@ pub struct PaintApp {
     /// filtre. Le champ n'est révélé dans l'UI qu'au-delà d'un seuil de
     /// calques, pour ne pas alourdir les petits documents.
     pub layer_search: String,
+    /// Ancre de sélection étendue (⇧) dans la liste « Éléments du calque »
+    /// (index de ligne du dernier clic simple) — permet de sélectionner une
+    /// plage sans redéfinir un concept de sélection propre à cette liste :
+    /// réutilise `self.selection`, déjà partagé avec le canevas (aligner,
+    /// rogner, ordre… dans `toolbar::selection_actions`).
+    pub layer_elements_anchor: Option<usize>,
+    /// Sélection multi-calque dans le panneau des calques (point 36 de
+    /// l'audit : distribution entre plusieurs calques) — indépendante de
+    /// `doc.active_layer` (qui reste un index unique, seul calque réellement
+    /// « actif » pour la peinture/édition de contenu). ⇧/⌘+clic sur un nom de
+    /// calque la peuple ; sert uniquement à `distribute_layers`.
+    pub layer_multi_select: std::collections::HashSet<u64>,
+    /// Ancre de sélection étendue (⇧) pour `layer_multi_select`, même principe
+    /// que [`Self::layer_elements_anchor`].
+    pub layer_select_anchor: Option<usize>,
     /// Saisie hexadécimale de la couleur courante (roadmap P0 #6).
     pub hex_field: String,
     // Pinceau / gomme pixel (roadmap F1) : dureté du tampon (0 = dégradé
@@ -625,6 +642,9 @@ impl Default for PaintApp {
             editing_mask: false,
             layer_rename: None,
             layer_search: String::new(),
+            layer_elements_anchor: None,
+            layer_multi_select: std::collections::HashSet::new(),
+            layer_select_anchor: None,
             hex_field: String::new(),
             pixel_hardness: 0.8,
             raster_stroke_last: None,
@@ -993,6 +1013,13 @@ impl PaintApp {
     /// Enregistre un déplacement (dx, dy) de la sélection comme commande.
     fn push_move(&mut self, dx: f32, dy: f32) {
         if self.selection.is_empty() {
+            return;
+        }
+        if self.doc.layers[self.doc.active_layer].lock_position {
+            self.info(t(
+                "Position verrouillée : déverrouille le calque pour le déplacer.",
+                "Position locked: unlock the layer to move it.",
+            ));
             return;
         }
         let layer = self.doc.active_id();
@@ -2070,6 +2097,124 @@ impl PaintApp {
         self.info(t("Calque dupliqué.", "Layer duplicated."));
     }
 
+    /// Fusionne les éléments sélectionnés (traits/formes/images/textes,
+    /// mélangés) en une seule image bitmap, à leur place. Rendu isolé dans un
+    /// document temporaire d'un seul calque ne contenant que la sélection —
+    /// réutilise le compositeur existant (dégradés, styles…) plutôt que
+    /// dupliquer sa logique, puis recadré à la boîte englobante de la
+    /// sélection. Besoin d'au moins 2 éléments : à 1 seul, ce serait juste une
+    /// conversion sans intérêt (et une image seule n'a rien à « fusionner »).
+    pub fn merge_selection_to_image(&mut self, ctx: &egui::Context) {
+        if self.selection.len() < 2 {
+            return;
+        }
+        let bounds = self.selected_elements_bounds();
+        if bounds.is_empty() {
+            return;
+        }
+        let (mut min, mut max) = ((f32::MAX, f32::MAX), (f32::MIN, f32::MIN));
+        for (_, (bmin, bmax)) in &bounds {
+            min.0 = min.0.min(bmin.0);
+            min.1 = min.1.min(bmin.1);
+            max.0 = max.0.max(bmax.0);
+            max.1 = max.1.max(bmax.1);
+        }
+        min = (min.0.max(0.0), min.1.max(0.0));
+        max = (max.0.min(self.doc.size.0 as f32), max.1.min(self.doc.size.1 as f32));
+        let (w, h) = ((max.0 - min.0).ceil().max(1.0) as u32, (max.1 - min.1).ceil().max(1.0) as u32);
+        let (x0, y0) = (min.0.floor() as u32, min.1.floor() as u32);
+
+        let idx = self.doc.active_layer;
+        let sel = self.selection.clone();
+        let src = &self.doc.layers[idx];
+        let mut temp_layer = crate::model::Layer::new(1, String::new());
+        temp_layer.strokes = src.strokes.iter().filter(|s| sel.contains(&s.id)).cloned().collect();
+        temp_layer.texts = src.texts.iter().filter(|t| sel.contains(&t.id)).cloned().collect();
+        temp_layer.images = src.images.iter().filter(|im| sel.contains(&im.id)).cloned().collect();
+        let mut temp_doc = crate::model::Document::new(self.doc.size);
+        temp_doc.layers = vec![temp_layer];
+
+        let mut temp_compositor = crate::render::compositor::Compositor::new();
+        let Some((full_w, full_h, rgba)) = temp_compositor.render_to_rgba(ctx, &temp_doc, Color32::TRANSPARENT) else {
+            return;
+        };
+        let mut cropped = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            let sy = y0 + y;
+            if sy >= full_h {
+                break;
+            }
+            for x in 0..w {
+                let sx = x0 + x;
+                if sx >= full_w {
+                    break;
+                }
+                let si = ((sy * full_w + sx) * 4) as usize;
+                let di = ((y * w + x) * 4) as usize;
+                cropped[di..di + 4].copy_from_slice(&rgba[si..si + 4]);
+            }
+        }
+
+        let image = crate::model::ImageItem::from_rgba(self.next_id, (x0 as f32, y0 as f32), w, h, cropped);
+        self.next_id += 1;
+
+        let before = self.doc.layers.clone();
+        let mut after = before.clone();
+        after[idx].strokes.retain(|s| !sel.contains(&s.id));
+        after[idx].texts.retain(|t| !sel.contains(&t.id));
+        after[idx].images.retain(|im| !sel.contains(&im.id));
+        let new_id = image.id;
+        after[idx].images.push(image);
+        self.selection.clear();
+        self.selection.insert(new_id);
+        self.history.push(&mut self.doc, Command::SetLayers { before, before_active: idx, after, after_active: idx });
+        self.info(t("Éléments fusionnés en une image.", "Elements merged into an image."));
+    }
+
+    /// Réunit les éléments sélectionnés dans un nouveau calque dédié (Cmd+G
+    /// façon Photoshop/GIMP, mais un vrai calque plutôt qu'un nouveau concept
+    /// de groupe d'éléments — déplaçable/verrouillable/masquable comme
+    /// n'importe quel calque, réutilise entièrement le système existant).
+    /// Inséré juste au-dessus du calque source et activé.
+    pub fn group_selection_into_layer(&mut self) {
+        if self.selection.len() < 2 {
+            return;
+        }
+        let idx = self.doc.active_layer;
+        let sel = self.selection.clone();
+        let before = self.doc.layers.clone();
+        let mut after = before.clone();
+        let mut group = crate::model::Layer::new(self.doc.next_layer_id, t("Groupe", "Group"));
+        after[idx].strokes.retain(|s| {
+            let keep = !sel.contains(&s.id);
+            if !keep {
+                group.strokes.push(s.clone());
+            }
+            keep
+        });
+        after[idx].texts.retain(|tx| {
+            let keep = !sel.contains(&tx.id);
+            if !keep {
+                group.texts.push(tx.clone());
+            }
+            keep
+        });
+        after[idx].images.retain(|im| {
+            let keep = !sel.contains(&im.id);
+            if !keep {
+                group.images.push(im.clone());
+            }
+            keep
+        });
+        after.insert(idx + 1, group);
+        self.doc.next_layer_id += 1;
+        self.history.push(
+            &mut self.doc,
+            Command::SetLayers { before, before_active: idx, after, after_active: idx + 1 },
+        );
+        self.info(t("Éléments réunis dans un nouveau calque.", "Elements grouped into a new layer."));
+    }
+
     // --- Alignement / répartition (backlog) ---------------------------------
 
     /// Boîtes (id, (min, max)) des éléments sélectionnés du calque actif.
@@ -2187,12 +2332,13 @@ impl PaintApp {
     /// images) par rapport au document (Sprint I.2) — différent de
     /// `align()`, qui n'agit que sur les éléments sélectionnés. Les modes
     /// Distribute n'ont pas de sens pour un seul calque (répartir suppose
-    /// plusieurs calques, pas encore de sélection multi-calque dans l'UI).
+    /// plusieurs calques) — voir [`Self::distribute_layers`], qui s'appuie
+    /// sur `layer_multi_select` (point 36 de l'audit).
     pub fn align_layer_to_document(&mut self, mode: AlignMode) {
         if matches!(mode, AlignMode::DistributeH | AlignMode::DistributeV) {
             self.info(t(
-                "Répartir : sélectionne plusieurs calques (pas pris en charge pour l'instant).",
-                "Distribute: select multiple layers (not supported yet).",
+                "Répartir : sélectionne plusieurs calques dans le panneau (⇧/⌘+clic).",
+                "Distribute: select multiple layers in the panel (Shift/Cmd+click).",
             ));
             return;
         }
@@ -2225,6 +2371,109 @@ impl PaintApp {
         self.history.push(&mut self.doc, Command::MoveEach { layer, moves });
         self.cache.invalidate(ids.iter());
         self.info(t("Calque aligné.", "Layer aligned."));
+    }
+
+    /// Boîte englobante de tout le contenu vectoriel d'un calque (traits ∪
+    /// textes ∪ images) — même périmètre que `active_elements_geom` (pas le
+    /// raster peint), généralisé à un calque arbitraire pour la distribution
+    /// multi-calque. `None` si le calque n'a aucun de ces éléments.
+    fn layer_content_bounds(l: &crate::model::Layer) -> Option<((f32, f32), (f32, f32))> {
+        let mut mn = (f32::INFINITY, f32::INFINITY);
+        let mut mx = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let mut any = false;
+        let mut feed = |b: ((f32, f32), (f32, f32))| {
+            mn.0 = mn.0.min(b.0 .0);
+            mn.1 = mn.1.min(b.0 .1);
+            mx.0 = mx.0.max(b.1 .0);
+            mx.1 = mx.1.max(b.1 .1);
+            any = true;
+        };
+        for s in &l.strokes {
+            if let Some(b) = hit::bounds_of(std::iter::once(s)) {
+                feed(b);
+            }
+        }
+        for t in &l.texts {
+            feed(t.approx_bounds());
+        }
+        for im in &l.images {
+            feed(im.bounds());
+        }
+        any.then_some((mn, mx))
+    }
+
+    /// Décale tout le contenu vectoriel d'un calque de `(dx, dy)` — même
+    /// périmètre que ci-dessus, pas le raster peint (limite déjà assumée par
+    /// `align_layer_to_document`).
+    fn shift_layer_content(l: &mut crate::model::Layer, dx: f32, dy: f32) {
+        for s in &mut l.strokes {
+            for p in &mut s.points {
+                p.pos.0 += dx;
+                p.pos.1 += dy;
+            }
+        }
+        for t in &mut l.texts {
+            t.pos.0 += dx;
+            t.pos.1 += dy;
+        }
+        for im in &mut l.images {
+            im.pos.0 += dx;
+            im.pos.1 += dy;
+        }
+    }
+
+    /// Répartit à espacement égal les calques sélectionnés dans le panneau
+    /// (`layer_multi_select`, point 36 de l'audit) — les deux calques aux
+    /// extrémités (par centre de leur boîte englobante, le long de l'axe)
+    /// restent fixes, les calques intermédiaires sont espacés uniformément
+    /// entre eux, comme la répartition d'éléments déjà existante (`align`
+    /// avec `AlignMode::DistributeH/V`). Un seul pas d'annulation
+    /// (`SetDoc`) : plusieurs calques bougent à la fois, pas de commande
+    /// existante qui couvre un déplacement inter-calques.
+    pub fn distribute_layers(&mut self, horizontal: bool) {
+        let ids = self.layer_multi_select.clone();
+        let mut items: Vec<LayerBounds> = self
+            .doc
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| ids.contains(&l.id))
+            .filter_map(|(i, l)| Self::layer_content_bounds(l).map(|b| (i, b)))
+            .collect();
+        if items.len() < 3 {
+            self.info(t(
+                "Répartir : sélectionne au moins 3 calques non vides.",
+                "Distribute: select at least 3 non-empty layers.",
+            ));
+            return;
+        }
+        let center = |b: &((f32, f32), (f32, f32))| {
+            if horizontal {
+                (b.0 .0 + b.1 .0) * 0.5
+            } else {
+                (b.0 .1 + b.1 .1) * 0.5
+            }
+        };
+        items.sort_by(|a, b| center(&a.1).total_cmp(&center(&b.1)));
+        let n = items.len();
+        let first_c = center(&items[0].1);
+        let last_c = center(&items[n - 1].1);
+        let step = (last_c - first_c) / (n as f32 - 1.0);
+
+        let mut after = self.doc.clone();
+        for (k, (li, b)) in items.iter().enumerate().skip(1).take(n - 2) {
+            let target = first_c + step * k as f32;
+            let delta = target - center(b);
+            if horizontal {
+                Self::shift_layer_content(&mut after.layers[*li], delta, 0.0);
+            } else {
+                Self::shift_layer_content(&mut after.layers[*li], 0.0, delta);
+            }
+        }
+        self.push_doc_snapshot(
+            after,
+            if horizontal { "Calques répartis horizontalement" } else { "Calques répartis verticalement" },
+        );
     }
 
     /// Aplatit tous les calques (visibles) en un seul. Annulable.
@@ -4617,6 +4866,7 @@ impl PaintApp {
         let radius = match self.active_tool {
             ActiveTool::Eraser | ActiveTool::PixelEraser => self.eraser.width * 0.5 * self.zoom,
             ActiveTool::Brush
+            | ActiveTool::Pencil
             | ActiveTool::PixelBrush
             | ActiveTool::Airbrush
             | ActiveTool::Line
@@ -5204,6 +5454,39 @@ impl PaintApp {
         let layer_id = self.doc.active_id();
         let target = if mask { RasterTarget::Mask } else { RasterTarget::Content };
         let before = std::mem::take(&mut self.raster_touch);
+
+        // Verrouillage granulaire — transparence (audit point 28) : ne
+        // s'applique qu'au contenu (pas au masque de calque peint, qui n'a
+        // pas de notion de « transparence » comparable). Restaure l'alpha
+        // d'origine de chaque pixel des tuiles touchées par ce geste (la
+        // couleur du nouveau tampon est conservée) directement sur les
+        // tuiles vivantes, avant de calculer l'« après » ci-dessous — donc
+        // avant l'écran ET avant l'historique voient la même chose. Une
+        // tuile absente avant le geste (entièrement transparente) reste
+        // ainsi entièrement transparente : peindre ne peut pas rendre
+        // opaque un pixel qui ne l'était pas.
+        if !mask && self.doc.layers.iter().find(|l| l.id == layer_id).is_some_and(|l| l.lock_alpha) {
+            if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+                for (key, b) in &before {
+                    if let Some(after_tile) = layer.raster.tiles.get_mut(key) {
+                        let n = after_tile.px.len() / 4;
+                        match b {
+                            Some(before_tile) => {
+                                for i in 0..n {
+                                    after_tile.px[i * 4 + 3] = before_tile.px[i * 4 + 3];
+                                }
+                            }
+                            None => {
+                                for i in 0..n {
+                                    after_tile.px[i * 4 + 3] = 0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         let Some(layer) = self.doc.layers.iter().find(|l| l.id == layer_id) else { return };
         let current = Self::active_raster(layer, mask);
         let mut tiles = Vec::with_capacity(before.len());
@@ -6127,10 +6410,75 @@ mod tests {
         assert!(!layer_lock_blocks_tool(ActiveTool::Eyedropper));
         assert!(!layer_lock_blocks_tool(ActiveTool::Measure));
         assert!(layer_lock_blocks_tool(ActiveTool::Brush));
+        assert!(layer_lock_blocks_tool(ActiveTool::Pencil));
         assert!(layer_lock_blocks_tool(ActiveTool::Eraser));
         assert!(layer_lock_blocks_tool(ActiveTool::Select));
         assert!(layer_lock_blocks_tool(ActiveTool::Text));
         assert!(layer_lock_blocks_tool(ActiveTool::Bucket));
+    }
+
+    #[test]
+    fn push_move_is_blocked_when_position_is_locked() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (10.0, 10.0));
+        app.selection = [1].into_iter().collect();
+        app.doc.layers[0].lock_position = true;
+
+        app.push_move(5.0, 5.0);
+
+        assert_eq!(app.doc.layers[0].strokes[0].points[0].pos, (10.0, 10.0), "position verrouillée : pas de déplacement");
+    }
+
+    #[test]
+    fn push_move_works_normally_without_lock_position() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (10.0, 10.0));
+        app.selection = [1].into_iter().collect();
+
+        app.push_move(5.0, 5.0);
+
+        assert_eq!(app.doc.layers[0].strokes[0].points[0].pos, (15.0, 15.0));
+    }
+
+    #[test]
+    fn lock_alpha_prevents_painting_into_transparent_pixels() {
+        let mut app = app_with_layers(1);
+        app.doc.layers[0].lock_alpha = true;
+        let layer_id = app.doc.active_id();
+        app.touch_raster_tiles(10.0, 10.0, 3.0, false);
+        if let Some(layer) = app.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.stamp(10.0, 10.0, 3.0, 1.0, [255, 0, 0, 255], false, None);
+        }
+        app.commit_raster_stroke(RasterOp::Brush, false);
+
+        let px = app.doc.layers[0].raster.get_pixel(10, 10);
+        assert_eq!(px[3], 0, "transparence verrouillée : le pixel reste transparent malgré la peinture");
+    }
+
+    #[test]
+    fn lock_alpha_preserves_existing_alpha_when_repainting_color() {
+        let mut app = app_with_layers(1);
+        let layer_id = app.doc.active_id();
+        // D'abord peindre normalement (pas verrouillé) un pixel semi-opaque.
+        app.touch_raster_tiles(10.0, 10.0, 3.0, false);
+        if let Some(layer) = app.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.stamp(10.0, 10.0, 3.0, 1.0, [0, 0, 0, 128], false, None);
+        }
+        app.commit_raster_stroke(RasterOp::Brush, false);
+        let before_alpha = app.doc.layers[0].raster.get_pixel(10, 10)[3];
+        assert!(before_alpha > 0);
+
+        // Verrouiller la transparence puis repeindre une autre couleur.
+        app.doc.layers[0].lock_alpha = true;
+        app.touch_raster_tiles(10.0, 10.0, 3.0, false);
+        if let Some(layer) = app.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            layer.raster.stamp(10.0, 10.0, 3.0, 1.0, [255, 0, 0, 255], false, None);
+        }
+        app.commit_raster_stroke(RasterOp::Brush, false);
+
+        let after = app.doc.layers[0].raster.get_pixel(10, 10);
+        assert_eq!(after[3], before_alpha, "alpha inchangé malgré la nouvelle couleur peinte par-dessus");
+        assert_eq!(after[0], 255, "la couleur, elle, a bien changé");
     }
 
     /// UX-3.1 : glisser-déposer un calque vers l'avant (index croissant) ou
@@ -6311,6 +6659,65 @@ mod tests {
         app.upscale_selection(2);
         let after = &app.doc.layers[0].images[0];
         assert_eq!((after.w, after.h), (4, 3));
+    }
+
+    #[test]
+    fn merge_selection_to_image_replaces_selected_elements_with_one_image() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (10.0, 10.0));
+        add_stroke_at(&mut app, 0, 2, (20.0, 20.0));
+        app.selection = [1, 2].into_iter().collect();
+        let ctx = egui::Context::default();
+
+        app.merge_selection_to_image(&ctx);
+
+        let l = &app.doc.layers[0];
+        assert!(l.strokes.is_empty(), "les traits fusionnés doivent disparaître");
+        assert_eq!(l.images.len(), 1, "remplacés par une seule image");
+        assert_eq!(app.selection.len(), 1, "la sélection ne porte plus que la nouvelle image");
+        assert!(app.selection.contains(&l.images[0].id));
+    }
+
+    #[test]
+    fn merge_selection_to_image_is_a_noop_with_a_single_element() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (10.0, 10.0));
+        app.selection = [1].into_iter().collect();
+        let ctx = egui::Context::default();
+
+        app.merge_selection_to_image(&ctx);
+
+        assert_eq!(app.doc.layers[0].strokes.len(), 1, "un seul élément : pas de fusion");
+        assert!(app.doc.layers[0].images.is_empty());
+    }
+
+    #[test]
+    fn group_selection_into_layer_moves_elements_to_a_new_layer_above() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (10.0, 10.0));
+        add_stroke_at(&mut app, 0, 2, (20.0, 20.0));
+        add_stroke_at(&mut app, 0, 3, (30.0, 30.0)); // reste sur le calque source
+        app.selection = [1, 2].into_iter().collect();
+
+        app.group_selection_into_layer();
+
+        assert_eq!(app.doc.layers.len(), 2, "un nouveau calque a été inséré");
+        assert_eq!(app.doc.layers[0].strokes.len(), 1, "seul l'élément non sélectionné reste");
+        assert_eq!(app.doc.layers[0].strokes[0].id, 3);
+        let group = &app.doc.layers[1];
+        assert_eq!(group.strokes.len(), 2, "les 2 éléments sélectionnés sont dans le nouveau calque");
+        assert_eq!(app.doc.active_layer, 1, "le nouveau calque devient actif");
+    }
+
+    #[test]
+    fn group_selection_into_layer_is_a_noop_with_a_single_element() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (10.0, 10.0));
+        app.selection = [1].into_iter().collect();
+
+        app.group_selection_into_layer();
+
+        assert_eq!(app.doc.layers.len(), 1, "un seul élément : pas de regroupement");
     }
 
     #[test]
@@ -6511,6 +6918,38 @@ mod tests {
         let before = app.doc.layers[0].strokes[0].points[0].pos;
         app.align_layer_to_document(AlignMode::DistributeH);
         assert_eq!(app.doc.layers[0].strokes[0].points[0].pos, before);
+    }
+
+    #[test]
+    fn distribute_layers_spaces_centers_evenly_keeping_endpoints_fixed() {
+        let mut app = app_with_layers(4);
+        // Centres en x avant répartition : 0, 10, 80, 100 — très inégal.
+        add_stroke_at(&mut app, 0, 1, (0.0, 0.0));
+        add_stroke_at(&mut app, 1, 2, (10.0, 0.0));
+        add_stroke_at(&mut app, 2, 3, (80.0, 0.0));
+        add_stroke_at(&mut app, 3, 4, (100.0, 0.0));
+        app.layer_multi_select = [1, 2, 3, 4].into_iter().collect();
+
+        app.distribute_layers(true);
+
+        let x = |i: usize| app.doc.layers[i].strokes[0].points[0].pos.0;
+        assert_eq!(x(0), 0.0, "extrémité basse inchangée");
+        assert_eq!(x(3), 100.0, "extrémité haute inchangée");
+        assert!((x(1) - 33.333_33).abs() < 0.01, "espacement uniforme (1/3)");
+        assert!((x(2) - 66.666_66).abs() < 0.01, "espacement uniforme (2/3)");
+    }
+
+    #[test]
+    fn distribute_layers_is_a_noop_with_fewer_than_three_layers() {
+        let mut app = app_with_layers(2);
+        add_stroke_at(&mut app, 0, 1, (0.0, 0.0));
+        add_stroke_at(&mut app, 1, 2, (100.0, 0.0));
+        app.layer_multi_select = [1, 2].into_iter().collect();
+
+        app.distribute_layers(true);
+
+        assert_eq!(app.doc.layers[0].strokes[0].points[0].pos.0, 0.0);
+        assert_eq!(app.doc.layers[1].strokes[0].points[0].pos.0, 100.0);
     }
 
     fn add_stroke_bbox(app: &mut PaintApp, layer: usize, id: u64, color: [u8; 4], a: (f32, f32), b: (f32, f32)) {

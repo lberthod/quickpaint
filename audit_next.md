@@ -51,7 +51,7 @@ premières colonnes selon la lecture)*
 | 25 | Masque de calque (niveaux de gris) | ✅ | `layer.mask: Option<RasterLayer>`, peint en niveaux de gris. |
 | 26 | Masque d'écrêtage | ✅ | `layer.clip: bool`. |
 | 27 | Groupes de calques | ✅ | `layer.group: Option<String>` + repli/dépli dans l'UI. |
-| 28 | Verrouillage (position, pixels, transparence) | 🟡 | `layer.locked: bool` bloque peinture/édition de contenu (ajouté récemment) — mais c'est un verrou **global** (« tout ou rien »), pas granulaire par type (position seule / pixels seuls / transparence seule comme Photoshop). |
+| 28 | Verrouillage (position, pixels, transparence) | ✅ | `layer.locked` (verrou global, inchangé) + deux verrous granulaires indépendants et cumulables : `layer.lock_position` (bloque `push_move`, le glisser-déplacer, sans bloquer la peinture) et `layer.lock_alpha` (restaure l'alpha d'origine des tuiles touchées à la fin du geste, dans `commit_raster_stroke` — peindre ne peut plus rendre opaque un pixel transparent, ni la gomme en rendre un transparent). Périmètre : `lock_position` ne couvre que le glisser sur le canevas (`push_move`), pas `align()`/`reorder()` ; `lock_alpha` ne couvre que le contenu peint (pas le masque de calque). |
 | 29 | Visibilité par calque | ✅ | `layer.visible` + icône œil. |
 | 30 | Renommage et code couleur | ✅ | Sprint I.5 : `layer.color_tag: Option<[u8;3]>` (palette 8 couleurs) + renommage. |
 | 31 | Duplication de calque | ✅ | `duplicate_layer()`. |
@@ -59,11 +59,11 @@ premières colonnes selon la lecture)*
 | 33 | Calque de remplissage (uni, dégradé, motif) | ✅ | Sprint I.1 : `Layer::new_fill` + `FillKind::{Solid, Linear, Radial}` (pas de motif/pattern). |
 | 34 | Calques de réglage non-destructifs | ✅ | `layer.adjustment: Option<Adjustment>` — Niveaux, Courbes, Teinte/Saturation, Exposition, Vibrance, Balance des blancs, Réduction de bruit, Flou gaussien/mouvement/bokeh/radial, Duotone, Distorsion, Aberration chromatique, Warp Arc/Vague/Sphère/Tourbillon, Vignette, Mixeur N&B, Pixelisation, Halftone. |
 | 35 | Styles de calque (ombre, contour, lueur) | ✅ | `LayerStyle` — DropShadow/Stroke/Glow (interne/externe). |
-| 36 | Alignement et distribution de calques | 🟡 | Sprint I.2 : `align_layer_to_document()` aligne le contenu entier d'un calque au document (6 modes). **Distribution entre plusieurs calques non traitée** (demande une sélection multi-calque absente de l'UI). |
+| 36 | Alignement et distribution de calques | ✅ | Sprint I.2 : `align_layer_to_document()` aligne le contenu entier d'un calque au document (6 modes). Distribution entre plusieurs calques : `distribute_layers()`, à partir d'une sélection multi-calque dans le panneau (`layer_multi_select`, ⇧/⌘+clic sur un nom de calque) — au moins 3 calques non vides, les deux extrêmes (par centre de boîte englobante) restent fixes, les autres sont espacés uniformément ; un seul pas d'annulation (`Command::SetDoc`). |
 | 37 | Vignettes de prévisualisation | ✅ | Sprint I.3 : miniature par calque (`Compositor::layer_thumbnail`, cache réutilisé, invalidé par hash). |
 | 38 | Recherche/filtre dans la liste des calques | ✅ | Sprint I.4 : champ de filtre (révélé au-delà de 8 calques). |
 
-**Score : 15 ✅ / 2 🟡 / 0 ❌**
+**Score : 17 ✅ / 0 🟡 / 0 ❌**
 
 ---
 
@@ -72,7 +72,7 @@ premières colonnes selon la lecture)*
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
 | 39 | Pinceau à taille et dureté réglables | ✅ | `brush.width` + dureté (pinceau pixel). |
-| 40 | Crayon pixel-perfect | 🟡 | Existe comme préréglage de pinceau (« Crayon fin ») et via le pinceau pixel, pas comme outil dédié séparé. |
+| 40 | Crayon pixel-perfect | ✅ | `ActiveTool::Pencil` : outil dédié dans la barre d'outils, dessine exactement comme le Pinceau (même chemin `handle_draw`, non spécialisé) — la sélection du bouton applique automatiquement le préréglage « Crayon fin » (trait fin, bord net, peu de lissage). Cosmétique/ergonomique par choix, pas un nouveau moteur de dessin. |
 | 41 | Gomme avec opacité | ✅ | `Eraser`/`PixelEraser`, opacité via l'état de l'outil. |
 | 42 | Pot de remplissage avec tolérance | ✅ | `ActiveTool::Bucket` + curseur de tolérance. |
 | 43 | Dégradé linéaire, radial, conique | ✅ | `GradientKind::{Linear, Radial, Conic}`. |
@@ -90,7 +90,7 @@ premières colonnes selon la lecture)*
 | 55 | Règles, guides et grille magnétiques | ✅ | Grille, règles, aimantation (`snap()`, `tools/guides.rs`). |
 | 56 | Prévisualisation du contour de brosse | ✅ | Sprint J.3 : `paint_cursor()` étendu au Pinceau/Gomme pixel et à l'Aérographe (existait déjà pour le pinceau vectoriel). |
 
-**Score : 15 ✅ / 2 🟡 / 0 ❌**
+**Score : 16 ✅ / 1 🟡 / 0 ❌**
 
 ---
 
@@ -146,7 +146,7 @@ premières colonnes selon la lecture)*
 | 84 | Flou gaussien | ✅ | `Adjustment::GaussianBlur` (noyau séparable). |
 | 85 | Flou de mouvement et flou radial/zoom | ✅ | Flou de mouvement directionnel + Sprint K.4 : `Adjustment::RadialBlur` (effet vitesse/explosion). |
 | 86 | Pixelisation / mosaïque | ✅ | Sprint K.1 : `Adjustment::Pixelate { block }`. |
-| 87 | Détection de contours (Sobel / Canny) | 🟡 | Sobel seul (utilisé par Croquis et BD) ; pas de Canny (suppression non-maximale + hystérésis) — priorité basse, voir sprint_next.md K.6. |
+| 87 | Détection de contours (Sobel / Canny) | ✅ | Sobel (utilisé par Croquis et BD) **et** Canny : `Filter::Canny` — lissage, gradients Sobel avec direction, suppression non maximale, double seuil + hystérésis (`tools/filter.rs::canny_edges`). |
 | 88 | Posterisation et seuil (effet BD) | ✅ | `Filter::Comic` (posterisation 5 niveaux + contours Sobel). |
 | 89 | Grain et bruit ajoutable | ✅ | `Filter::FilmGrain` (bruit procédural déterministe). |
 | 90 | Vignette artistique | ✅ | Sprint K.5 : `Adjustment::Vignette { amount }`, extrait du filtre Vintage en réglage autonome. |
@@ -156,7 +156,7 @@ premières colonnes selon la lecture)*
 | 94 | Import de LUT `.cube` | ✅ | `tools/lut.rs` — interpolation trilinéaire, intensité réglable. |
 | 95 | Intensité réglable + aperçu direct pour chaque filtre | ✅ | Tous les `Adjustment` ont des paramètres continus + aperçu en direct (calque de réglage). |
 
-**Score : 11 ✅ / 1 🟡 / 0 ❌**
+**Score : 12 ✅ / 0 🟡 / 0 ❌**
 
 ---
 
@@ -180,20 +180,21 @@ premières colonnes selon la lecture)*
 
 | Statut | Nombre (sur 102 items) | % |
 |---|---|---|
-| ✅ Implémenté | 91 | ~89 % |
-| 🟡 Partiel | 10 | ~10 % |
+| ✅ Implémenté | 95 | ~93 % |
+| 🟡 Partiel | 6 | ~6 % |
 | ❌ Absent | 1 | ~1 % |
 
-*(Mis à jour après les Sprints G, H, K, I, J, M et L (complet, y compris L.5/L.6/L.7) — voir
-[sprint_next.md](sprint_next.md) : G a réglé 61/64/68 (sélection, opérations d'ensemble) ; H a
-réglé 62/63 (masque de sélection en pixels — feather, dilater/contracter) ; K a réglé
-76/80/83/85/86/90/92/93 (filtres & effets) ; I a réglé 30/33/37/38 et partiellement 36
-(calques) ; J a réglé 44/50/56 (dessin) ; M a réglé 98/99 (couleur/transformations) ; L a
-réglé 3/9/14/15/16/17/18/11 (export, dont l'import SVG vectoriel, le PDF vectoriel et le
-GIF animé — `Document::frames`, panneau « Animation », export via `image::codecs::gif`).
-Reste seulement : K.6/Canny (basse priorité). Optionnels non traités par choix : 28
-(verrouillage granulaire), 36 (distribution multi-calque, demande une sélection
-multi-calque absente de l'UI), 40 (outil crayon dédié).)*
+*(Mis à jour après les Sprints G, H, K, I, J, M et L (complet, y compris L.5/L.6/L.7), puis une
+session dédiée aux quatre derniers points optionnels — voir [sprint_next.md](sprint_next.md) : G
+a réglé 61/64/68 (sélection, opérations d'ensemble) ; H a réglé 62/63 (masque de sélection en
+pixels — feather, dilater/contracter) ; K a réglé 76/80/83/85/86/90/92/93 (filtres & effets) ; I
+a réglé 30/33/37/38 (calques) ; J a réglé 44/50/56 (dessin) ; M a réglé 98/99
+(couleur/transformations) ; L a réglé 3/9/14/15/16/17/18/11 (export, dont l'import SVG
+vectoriel, le PDF vectoriel et le GIF animé — `Document::frames`, panneau « Animation », export
+via `image::codecs::gif`). Session suivante : 36 (distribution multi-calque —
+`layer_multi_select` + `distribute_layers`), 87/K.6 (Canny — `Filter::Canny`), 40 (Crayon —
+`ActiveTool::Pencil`), 28 (verrouillage granulaire — `lock_position`/`lock_alpha`). Seul
+100/N.1 (rendu GPU wgpu) reste, décision d'architecture non tranchée.)*
 
 ### Ce qui manque complètement (❌), par ordre d'impact utilisateur probable
 
@@ -208,18 +209,16 @@ opérations d'ensemble, inversion, trim, et désormais feather/dilater/
 contracter via un vrai masque de sélection en pixels)
 
 **Calques**
-(traité par le Sprint I — voir [sprint_next.md](sprint_next.md) ; reste
-seulement la distribution entre plusieurs calques, point 36, qui demande une
-sélection multi-calque absente de l'UI)
+(tout traité — Sprint I, puis distribution multi-calque (point 36) et
+verrouillage granulaire (point 28) dans une session dédiée aux quatre
+derniers points optionnels, voir [sprint_next.md](sprint_next.md))
 
 **Dessin**
-(traité par le Sprint J — voir [sprint_next.md](sprint_next.md) ; reste
-seulement l'outil crayon dédié, point 40, priorité basse — le préréglage
-« Crayon fin » existant est jugé suffisant)
+(tout traité — Sprint J, puis l'outil Crayon dédié (point 40) dans la même
+session)
 
 **Filtres & effets**
-(tout traité par le Sprint K — voir [sprint_next.md](sprint_next.md) ; reste
-seulement Canny/K.6, priorité basse, non bloquant)
+(tout traité — Sprint K, puis Canny (point 87/K.6) dans la même session)
 
 **Moteur**
 - Rendu GPU via `wgpu` spécifiquement (le rendu UI utilise `glow`/OpenGL par défaut d'eframe ; le compositeur photo reste CPU par choix architectural — voir ARCHITECTURE.md)
@@ -245,11 +244,16 @@ seulement Canny/K.6, priorité basse, non bloquant)
    masque — périmètre volontairement limité au point d'intégration le
    plus net (pinceau pixel), à étendre plus tard si le besoin se confirme.
 
-2. **Filtres & effets : quasi complet.** ✅ Résolu par le Sprint K
+2. **Filtres & effets : complet.** ✅ Résolu par le Sprint K
    (voir [sprint_next.md](sprint_next.md)) : pixelisation, halftone,
    vague/sphère/tourbillon, flou radial, vignette autonome, mixeur de
-   canaux N&B, auto-correction. Seule la détection de contours Canny reste
-   absente (K.6, priorité basse — Sobel suffit aux usages actuels).
+   canaux N&B, auto-correction. La détection de contours Canny (point
+   87/K.6) a suivi : `Filter::Canny` (`tools/filter.rs`) — lissage 3×3,
+   gradients Sobel avec direction (pas seulement la magnitude de
+   `sobel_magnitude`, utilisée par Croquis/BD), suppression non maximale le
+   long de la direction du gradient, puis double seuil + hystérésis
+   (8-connexité) — contours fins et continus là où Sobel seul produirait
+   des bords plus épais/bruités.
 
 3. **Rendu GPU : réponse dépend de la définition.** Le rendu de l'interface
    (`egui`) passe par le backend `glow` d'eframe, qui est bien accéléré GPU
@@ -257,22 +261,31 @@ seulement Canny/K.6, priorité basse, non bloquant)
    compositeur photo (calques, filtres, texte rastérisé) est volontairement
    **CPU** (`tiny-skia`), un choix architectural documenté, pas un oubli.
 
-4. **Calques : quasi complet.** ✅ Résolu par le Sprint I (voir
+4. **Calques : complet.** ✅ Résolu par le Sprint I (voir
    [sprint_next.md](sprint_next.md)) : calque de remplissage (uni/dégradé),
    code couleur, vignettes de prévisualisation, recherche/filtre, et
-   alignement du contenu d'un calque par rapport au document. Reste la
-   distribution entre plusieurs calques (point 36), qui suppose une
-   sélection multi-calque non présente dans l'UI actuelle — pas traitée.
-   Verrouillage granulaire (point 28) resté optionnel, comme recommandé par
-   l'audit initial (le verrou global couvre déjà le cas d'usage principal).
+   alignement du contenu d'un calque par rapport au document. Distribution
+   entre plusieurs calques (point 36) et verrouillage granulaire (point 28)
+   ont suivi : sélection multi-calque dans le panneau (`layer_multi_select`,
+   ⇧/⌘+clic sur un nom de calque) puis `distribute_layers()` (au moins 3
+   calques non vides, les deux extrêmes par centre de boîte englobante
+   restent fixes) ; `layer.lock_position` (bloque `push_move`, le
+   glisser-déplacer, sans bloquer la peinture) et `layer.lock_alpha`
+   (restaure l'alpha d'origine des tuiles touchées à la fin du geste de
+   peinture — un pixel transparent ne peut plus devenir opaque, ni
+   l'inverse), indépendants du verrou global existant (`layer.locked`,
+   inchangé) et cumulables avec lui.
 
-5. **Dessin : quasi complet.** ✅ Résolu par le Sprint J (voir
+5. **Dessin : complet.** ✅ Résolu par le Sprint J (voir
    [sprint_next.md](sprint_next.md)) : aérographe, import de brosse depuis
    une image (tampon en niveaux de gris), prévisualisation du contour de
-   brosse étendue au pinceau/gomme pixel et à l'aérographe. Reste l'outil
-   crayon dédié (point 40), laissé de côté comme suggéré par l'audit initial
-   — le préréglage « Crayon fin » couvre déjà le besoin, impact utilisateur
-   probablement faible pour un outil séparé.
+   brosse étendue au pinceau/gomme pixel et à l'aérographe. L'outil Crayon
+   dédié (point 40) a suivi : `ActiveTool::Pencil`, qui dessine exactement
+   comme le Pinceau (même chemin `handle_draw`, non spécialisé pour ce
+   nouvel outil) — la sélection du bouton dans la barre d'outils applique
+   automatiquement le préréglage « Crayon fin » déjà existant. Choix
+   délibérément cosmétique/ergonomique (bouton dédié plus visible qu'un
+   préréglage caché dans un menu), pas un second moteur de dessin.
 
 6. **Texte, vectoriel, couleur : complet.** ✅ Résolu par le Sprint M (voir
    [sprint_next.md](sprint_next.md)) : extraction de palette depuis une

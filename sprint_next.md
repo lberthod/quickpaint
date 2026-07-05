@@ -160,7 +160,18 @@ d'édition éphémère, pas un contenu persisté, cohérence conservée).
       vérifier que le composite est entièrement rouge (sous réserve
       d'opacité/masque par défaut).
 
-### I.2 — Alignement et distribution de calques (point 36) 🟡 PARTIEL (alignement fait, distribution multi-calque non traitée)
+### I.2 — Alignement et distribution de calques (point 36) ✅ FAIT
+
+Distribution : `layer_multi_select: HashSet<u64>` (⇧/⌘+clic sur un nom de
+calque dans `ui/layers.rs`, même pattern que la sélection multiple
+d'éléments) + `PaintApp::distribute_layers(horizontal)` — au moins 3 calques
+non vides, les deux extrêmes (par centre de boîte englobante du contenu
+vectoriel du calque) restent fixes, les autres sont espacés uniformément
+entre eux. Un seul pas d'annulation (`Command::SetDoc`, pas `MoveEach` — ce
+dernier ne couvre qu'un seul calque à la fois, alors que la distribution
+déplace plusieurs calques en une seule action).
+
+<details><summary>Plan initial (pour mémoire)</summary>
 
 - [ ] Différent de l'alignement d'éléments déjà existant (traits/textes/
       images sélectionnés) : ici, aligner le **contenu entier** d'un calque
@@ -174,6 +185,8 @@ d'édition éphémère, pas un contenu persisté, cohérence conservée).
 - [ ] UI : dans le menu déjà existant « Aligner » (voir `ui/toolbar.rs`,
       corrigé récemment pour les icônes de menu), ajouter un sous-menu
       « calques » à côté de celui des éléments.
+
+</details>
 
 ### I.3 — Vignettes de prévisualisation (point 37) ✅ FAIT
 
@@ -210,15 +223,34 @@ d'édition éphémère, pas un contenu persisté, cohérence conservée).
       Photoshop/Figma plutôt qu'un sélecteur de couleur complet (plus rapide
       à l'usage).
 
-### I.6 — Verrouillage granulaire (point 28) 🟡→✅ (optionnel, à évaluer)
+### I.6 — Verrouillage granulaire (point 28) ✅ FAIT
 
-- [ ] Le verrouillage actuel (`layer.locked: bool`) est un verrou global.
-      Granulariser en `LayerLock { position: bool, pixels: bool, alpha: bool
-      }` serait plus fidèle à Photoshop mais complexifie
-      `layer_lock_blocks_tool()` ([app/mod.rs](src/app/mod.rs)) — à évaluer
-      seulement si des utilisateurs le demandent explicitement ; le verrou
-      global couvre déjà le cas d'usage principal (« ne pas modifier ce
-      calque par erreur »).
+Plutôt que remplacer `layer.locked: bool` (verrou global, inchangé — reste le
+gate le plus large, testé par `layer_lock_blocks_tool()`), deux champs
+indépendants et cumulables ont été ajoutés à `Layer` :
+
+- `lock_position: bool` — bloque spécifiquement `PaintApp::push_move` (le
+  glisser-déplacer d'éléments sélectionnés), sans bloquer la peinture ni
+  l'édition de contenu. Périmètre volontairement limité au glisser sur le
+  canevas (pas `align()`/`reorder()`/`distribute_layers()`).
+- `lock_alpha: bool` — protège la transparence existante du contenu peint :
+  dans `commit_raster_stroke` ([app/mod.rs](src/app/mod.rs)), avant de
+  calculer l'« après » pour l'historique, l'alpha des tuiles réellement
+  touchées par le geste est restauré à sa valeur d'avant-geste (la couleur
+  du nouveau tampon est conservée) — peindre ne peut plus rendre opaque un
+  pixel transparent, ni la gomme en rendre un transparent, mais la couleur
+  des pixels déjà opaques reste modifiable. Ne s'applique qu'au contenu, pas
+  au masque de calque peint (pas de notion de « transparence » comparable
+  là). Choix délibéré : corriger au point de commit plutôt que threader un
+  paramètre `lock_alpha` à travers `RasterLayer::stamp`/`stamp_custom`/
+  `stroke_segment` (et casser une quinzaine d'appels de tests existants) —
+  le snapshot « avant » déjà capturé pour l'undo par tuile
+  (`self.raster_touch`) est exactement l'état à restaurer.
+
+UI : deux cases à cocher dans le panneau « Calque actif »
+([ui/layers.rs](src/ui/layers.rs)), plus une icône discrète dans la ligne du
+calque quand l'un des deux est actif (pas une 3e icône permanente à côté du
+verrou global, cas d'usage plus rare).
 
 ---
 
@@ -262,14 +294,17 @@ d'édition éphémère, pas un contenu persisté, cohérence conservée).
 - [ ] Couleur du contour contrastée (ex. inversion ou gris 50 % avec léger
       contour blanc) pour rester visible sur fond clair et sombre.
 
-### J.4 — Outil crayon dédié (point 40) NON TRAITÉ (priorité basse, préréglage existant jugé suffisant)
+### J.4 — Outil crayon dédié (point 40) ✅ FAIT
 
-- [ ] Actuellement un préréglage de pinceau (« Crayon fin ») plutôt qu'un
-      outil séparé. Évaluer si ça vaut la peine d'ajouter
-      `ActiveTool::Pencil` distinct (dureté 100 %, anti-aliasing désactivé
-      pour un rendu pixel-perfect façon éditeur de sprite) ou si le
-      préréglage actuel suffit — impact utilisateur probablement faible,
-      **priorité basse**.
+`ActiveTool::Pencil` ajouté, mais délibérément **pas** un second moteur de
+dessin : `as_shape()` renvoie `None` pour Pencil comme pour Brush, donc son
+geste tombe dans la même branche « trait à main levée » de
+`PaintApp::handle_draw` sans aucun cas spécial. La seule différence tient à
+la sélection du bouton dans la barre d'outils (`ui/toolbar.rs::tool_button`),
+qui applique automatiquement le préréglage « Crayon fin » déjà existant. Un
+bouton dédié, plus visible qu'un préréglage caché dans un menu, pour un coût
+d'implémentation quasi nul (3 matches exhaustifs à compléter : icône,
+couleur d'accent, libellé du footer).
 
 ---
 
@@ -334,14 +369,18 @@ d'édition éphémère, pas un contenu persisté, cohérence conservée).
       propre `Adjustment::Vignette { amount: f32 }` — réutilisation directe
       de code déjà testé, pas une nouvelle formule à inventer.
 
-### K.6 — Détection de contours Canny (point 87) 🟡→✅ (optionnel)
+### K.6 — Détection de contours Canny (point 87) ✅ FAIT
 
-- [ ] Sobel (`sobel_magnitude`, [tools/filter.rs:655](src/tools/filter.rs:655))
-      suffit pour Croquis/BD actuels. Canny (suppression non-maximale +
-      double seuil + hystérésis) n'apporterait de valeur que pour un futur
-      outil de détourage par contours ou un filtre « contours nets »
-      dédié — **priorité basse**, à ne faire que si un besoin concret
-      apparaît (ex. amélioration du Détourage).
+Ajouté comme nouveau preset `Filter::Canny` (« Contours (Canny) »), en plus
+de Sobel (`sobel_magnitude`, toujours utilisé par Croquis/BD, inchangé) :
+lissage boîte 3×3 (réduction de bruit), gradients Sobel avec magnitude **et**
+direction (`canny_edges`, [tools/filter.rs](src/tools/filter.rs)),
+suppression non maximale le long de la direction du gradient (arrondie à
+0°/45°/90°/135°), puis double seuil + hystérésis en 8-connexité (un pixel
+« faible » n'est retenu que s'il est connecté à un pixel « fort ») — élimine
+les faux positifs de bord épais qu'un simple seuil sur la magnitude Sobel
+produirait. Même convention visuelle que Croquis : traits noirs sur fond
+blanc.
 
 ### K.7 — Mixeur de canaux pour le N&B (point 76) ✅ FAIT
 
@@ -556,9 +595,9 @@ seulement le statique.** Les deux sont faits.
 |---|---|---|---|
 | G | 61, 64, 68 | Faible | ✅ Fait |
 | H | 62, 63 | Élevé | ✅ Fait (décision : option 2, ajouter le masque) |
-| I | 28, 30, 33, 36, 37, 38 | Moyen (6 sous-items indépendants) | ✅ Fait (sauf I.6, optionnel non traité ; 36 partiel) |
-| J | 40, 44, 50, 56 | Moyen | ✅ Fait (sauf 40, priorité basse non traité) |
-| K | 76, 83, 85, 86, 87, 90, 92, 93 | Moyen à élevé (8 sous-items indépendants) | ✅ Fait (sauf K.6/87, optionnel non traité) |
+| I | 28, 30, 33, 36, 37, 38 | Moyen (6 sous-items indépendants) | ✅ Fait intégralement (28/36 complétés dans une session dédiée aux 4 derniers points optionnels) |
+| J | 40, 44, 50, 56 | Moyen | ✅ Fait intégralement (40 complété dans la même session) |
+| K | 76, 83, 85, 86, 87, 90, 92, 93 | Moyen à élevé (8 sous-items indépendants) | ✅ Fait intégralement (87/K.6 complété dans la même session) |
 | L | 3, 9, 11, 14, 15, 16, 17, 18 | Variable | ✅ Fait intégralement, y compris L.5 (SVG), L.6 (GIF animé), L.7 (PDF vectoriel) |
 | M | 98, 99 | Faible à moyen | ✅ Fait |
 | N | 100 | Élevé, architecture | Non traité — décision majeure à prendre |

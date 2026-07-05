@@ -9,6 +9,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     let (tool_name, size) = match app.active_tool {
         ActiveTool::Select => (t("↖ Sélection", "↖ Select"), app.brush.width),
         ActiveTool::Brush => (t("Pinceau", "Brush"), app.brush.width),
+        ActiveTool::Pencil => (t("Crayon", "Pencil"), app.brush.width),
         ActiveTool::Eraser => (t("Gomme", "Eraser"), app.eraser.width),
         ActiveTool::PixelBrush => (t("Pinceau pixel", "Pixel brush"), app.brush.width),
         ActiveTool::Airbrush => (t("Aérographe", "Airbrush"), app.brush.width),

@@ -41,11 +41,17 @@ pub enum Filter {
     /// contrairement aux autres presets, les paramètres sont calculés à
     /// partir de l'image elle-même plutôt que fixés d'avance.
     AutoLevels,
+    /// Détection de contours par l'algorithme de Canny (audit K.6) : par
+    /// rapport à Sobel seul (utilisé par Croquis/BD, un simple seuil sur la
+    /// magnitude), ajoute une suppression non maximale le long de la
+    /// direction du gradient puis un double seuil + hystérésis — contours
+    /// fins et continus plutôt que des bords épais/bruités.
+    Canny,
 }
 
 impl Filter {
     /// Tous les filtres, dans l'ordre d'affichage du menu.
-    pub const ALL: [Filter; 16] = [
+    pub const ALL: [Filter; 17] = [
         Filter::Brighter,
         Filter::Darker,
         Filter::Contrast,
@@ -62,6 +68,7 @@ impl Filter {
         Filter::OilPainting,
         Filter::Watercolor,
         Filter::AutoLevels,
+        Filter::Canny,
     ];
 
     pub fn label(self) -> &'static str {
@@ -82,6 +89,7 @@ impl Filter {
             Filter::OilPainting => t("Peinture à l'huile", "Oil painting"),
             Filter::Watercolor => t("Aquarelle", "Watercolor"),
             Filter::AutoLevels => t("Correction automatique", "Auto correction"),
+            Filter::Canny => t("Contours (Canny)", "Edges (Canny)"),
         }
     }
 }
@@ -1194,6 +1202,7 @@ pub fn apply(filter: Filter, rgba: &mut Vec<u8>, w: u32, h: u32) {
         Filter::OilPainting => *rgba = oil_painting(rgba, w as usize, h as usize, 3),
         Filter::Watercolor => *rgba = watercolor(rgba, w as usize, h as usize),
         Filter::AutoLevels => auto_levels(rgba),
+        Filter::Canny => *rgba = canny_filter(rgba, w as usize, h as usize),
     }
 }
 
@@ -1257,6 +1266,144 @@ fn sobel_magnitude(gray: &[f32], w: usize, h: usize) -> Vec<f32> {
                 + at(xi + 1, yi + 1);
             out[y * w + x] = (gx * gx + gy * gy).sqrt();
         }
+    }
+    out
+}
+
+/// Lissage boîte 3×3 sur un buffer de luminance — réduction de bruit avant
+/// dérivation (étape 1 de Canny), plus simple qu'une vraie gaussienne mais
+/// suffisant en pré-passe pour une détection de contours.
+fn blur_gray_3x3(gray: &[f32], w: usize, h: usize) -> Vec<f32> {
+    let at = |x: isize, y: isize| -> f32 {
+        let x = x.clamp(0, w as isize - 1) as usize;
+        let y = y.clamp(0, h as isize - 1) as usize;
+        gray[y * w + x]
+    };
+    let mut out = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let (xi, yi) = (x as isize, y as isize);
+            let mut sum = 0.0;
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    sum += at(xi + dx, yi + dy);
+                }
+            }
+            out[y * w + x] = sum / 9.0;
+        }
+    }
+    out
+}
+
+/// Détection de contours de Canny (audit K.6) : lissage, gradients Sobel
+/// (magnitude *et* direction, contrairement à `sobel_magnitude`), suppression
+/// non maximale le long de la direction du gradient (garde seulement les
+/// maxima locaux perpendiculaires au contour), puis double seuil +
+/// hystérésis (un pixel « faible » n'est retenu que s'il est connecté à un
+/// pixel « fort », 8-connexité) — élimine les faux positifs de bord épais
+/// que produirait un simple seuil sur la magnitude Sobel.
+fn canny_edges(gray: &[f32], w: usize, h: usize, low: f32, high: f32) -> Vec<bool> {
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+    let blurred = blur_gray_3x3(gray, w, h);
+    let at = |g: &[f32], x: isize, y: isize| -> f32 {
+        let x = x.clamp(0, w as isize - 1) as usize;
+        let y = y.clamp(0, h as isize - 1) as usize;
+        g[y * w + x]
+    };
+    let mut mag = vec![0.0f32; w * h];
+    let mut dir = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let (xi, yi) = (x as isize, y as isize);
+            let gx = -at(&blurred, xi - 1, yi - 1) - 2.0 * at(&blurred, xi - 1, yi) - at(&blurred, xi - 1, yi + 1)
+                + at(&blurred, xi + 1, yi - 1)
+                + 2.0 * at(&blurred, xi + 1, yi)
+                + at(&blurred, xi + 1, yi + 1);
+            let gy = -at(&blurred, xi - 1, yi - 1) - 2.0 * at(&blurred, xi, yi - 1) - at(&blurred, xi + 1, yi - 1)
+                + at(&blurred, xi - 1, yi + 1)
+                + 2.0 * at(&blurred, xi, yi + 1)
+                + at(&blurred, xi + 1, yi + 1);
+            mag[y * w + x] = (gx * gx + gy * gy).sqrt();
+            dir[y * w + x] = gy.atan2(gx);
+        }
+    }
+    let mut nms = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let m = mag[y * w + x];
+            if m <= 0.0 {
+                continue;
+            }
+            // Direction arrondie à l'un des 4 axes (0°/45°/90°/135°) : compare
+            // la magnitude aux deux voisins perpendiculaires au contour.
+            let angle = dir[y * w + x].to_degrees().rem_euclid(180.0);
+            let (dx1, dy1, dx2, dy2): (isize, isize, isize, isize) = if !(22.5..157.5).contains(&angle) {
+                (1, 0, -1, 0)
+            } else if angle < 67.5 {
+                (1, -1, -1, 1)
+            } else if angle < 112.5 {
+                (0, 1, 0, -1)
+            } else {
+                (1, 1, -1, -1)
+            };
+            let (xi, yi) = (x as isize, y as isize);
+            let m1 = at(&mag, xi + dx1, yi + dy1);
+            let m2 = at(&mag, xi + dx2, yi + dy2);
+            if m >= m1 && m >= m2 {
+                nms[y * w + x] = m;
+            }
+        }
+    }
+    let mut strong = vec![false; w * h];
+    let mut weak = vec![false; w * h];
+    for i in 0..w * h {
+        if nms[i] >= high {
+            strong[i] = true;
+        } else if nms[i] >= low {
+            weak[i] = true;
+        }
+    }
+    let mut edge = strong.clone();
+    let mut stack: Vec<usize> = (0..w * h).filter(|&i| strong[i]).collect();
+    while let Some(i) = stack.pop() {
+        let (x, y) = (i % w, i / w);
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 {
+                    continue;
+                }
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    continue;
+                }
+                let ni = ny as usize * w + nx as usize;
+                if weak[ni] && !edge[ni] {
+                    edge[ni] = true;
+                    stack.push(ni);
+                }
+            }
+        }
+    }
+    edge
+}
+
+/// Filtre « Contours (Canny) » : traits noirs sur fond blanc, même
+/// convention visuelle que Croquis (`sketch`) — seuils fixes calibrés sur
+/// l'échelle de `sobel_magnitude` (0..~1020, non normalisée).
+fn canny_filter(src: &[u8], w: usize, h: usize) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 {
+        return src.to_vec();
+    }
+    let gray = luma_buffer(src, w, h);
+    let edges = canny_edges(&gray, w, h, 200.0, 500.0);
+    let mut out = src.to_vec();
+    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+        let v = if edges[i] { 0u8 } else { 255u8 };
+        px[0] = v;
+        px[1] = v;
+        px[2] = v;
     }
     out
 }
@@ -1616,6 +1763,42 @@ mod tests {
         let mut rgba = vec![128u8, 128, 128, 255, 128, 128, 128, 255];
         apply(Filter::AutoLevels, &mut rgba, 2, 1);
         assert_eq!(rgba, vec![128u8, 128, 128, 255, 128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn canny_marks_a_sharp_vertical_edge_and_nothing_in_flat_regions() {
+        // Damier 20x20 : moitié gauche noire, moitié droite blanche — un seul
+        // bord net vertical à x=10, tout le reste parfaitement plat.
+        let (w, h) = (20usize, 20usize);
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if x < 10 { 0u8 } else { 255u8 };
+                let i = (y * w + x) * 4;
+                rgba[i..i + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let out = canny_filter(&rgba, w, h);
+        // Loin du bord (à ±4 colonnes), aucun contour détecté (fond blanc partout).
+        for y in 0..h {
+            for x in [0usize, 1, 2, 18, 19] {
+                let i = (y * w + x) * 4;
+                assert_eq!(out[i], 255, "pas de contour loin du bord (x={x})");
+            }
+        }
+        // Autour de x=10, au moins un pixel de contour (noir) par ligne.
+        for y in 2..h - 2 {
+            let has_edge = (7..13).any(|x| out[(y * w + x) * 4] == 0);
+            assert!(has_edge, "contour attendu près du bord vertical (y={y})");
+        }
+    }
+
+    #[test]
+    fn canny_is_all_white_on_a_perfectly_flat_image() {
+        let (w, h) = (8usize, 8usize);
+        let rgba = vec![200u8, 200, 200, 255].repeat(w * h);
+        let out = canny_filter(&rgba, w, h);
+        assert!(out.chunks_exact(4).all(|px| px[0] == 255), "aucun contour sur une image plate");
     }
 
     #[test]

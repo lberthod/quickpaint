@@ -136,6 +136,24 @@ pub struct Layer {
     /// pas un calque figé qu'on ne peut plus du tout gérer.
     #[serde(default)]
     pub locked: bool,
+    /// Verrouillage granulaire — position (point 28 de l'audit) : en plus du
+    /// verrou global ci-dessus (`locked`, tout ou rien), bloque
+    /// spécifiquement le glisser-déplacer d'éléments sélectionnés
+    /// (`PaintApp::push_move`) même quand `locked` est faux — pour figer la
+    /// position d'un calque sans empêcher d'y peindre/éditer le contenu.
+    /// N'affecte pas le réordonnancement des calques (z-order de la pile),
+    /// périmètre volontairement limité au déplacement du contenu.
+    #[serde(default)]
+    pub lock_position: bool,
+    /// Verrouillage granulaire — transparence (point 28 de l'audit) :
+    /// protège l'alpha existant du contenu peint (pinceau/gomme pixel,
+    /// aérographe) — peindre ne peut plus rendre opaque un pixel
+    /// transparent, ni la gomme en rendre un transparent ; la couleur des
+    /// pixels déjà opaques reste modifiable. Indépendant de `locked`/
+    /// `lock_position` ; ne s'applique qu'au contenu (pas au masque de
+    /// calque peint, qui n'a pas de notion de « transparence » comparable).
+    #[serde(default)]
+    pub lock_alpha: bool,
     /// Code couleur (Sprint I.5) : étiquette visuelle uniquement, aucun
     /// effet sur le rendu — sert à repérer un groupe de calques d'un coup
     /// d'œil dans une pile chargée, façon Photoshop/Figma.
@@ -261,6 +279,8 @@ impl Layer {
             mask_origin: (0, 0),
             styles: Vec::new(),
             locked: false,
+            lock_position: false,
+            lock_alpha: false,
             color_tag: None,
         }
     }
