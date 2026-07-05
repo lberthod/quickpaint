@@ -17,11 +17,34 @@ pub enum Asset {
     Cross,
     Checkmark,
     Banner,
+    /// audit_sprint_xx.md F.1 : icônes vectorielles additionnelles.
+    ArrowRight,
+    ArrowUp,
+    Bolt,
+    Pin,
+    Home,
+    Gear,
+    Sun,
+    Cloud,
 }
 
 impl Asset {
-    pub const ALL: [Asset; 6] =
-        [Asset::Heart, Asset::SpeechBubble, Asset::Badge, Asset::Cross, Asset::Checkmark, Asset::Banner];
+    pub const ALL: [Asset; 14] = [
+        Asset::Heart,
+        Asset::SpeechBubble,
+        Asset::Badge,
+        Asset::Cross,
+        Asset::Checkmark,
+        Asset::Banner,
+        Asset::ArrowRight,
+        Asset::ArrowUp,
+        Asset::Bolt,
+        Asset::Pin,
+        Asset::Home,
+        Asset::Gear,
+        Asset::Sun,
+        Asset::Cloud,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -31,6 +54,14 @@ impl Asset {
             Asset::Cross => t("Croix", "Cross"),
             Asset::Checkmark => t("Coche", "Checkmark"),
             Asset::Banner => t("Bannière", "Banner"),
+            Asset::ArrowRight => t("Flèche →", "Arrow →"),
+            Asset::ArrowUp => t("Flèche ↑", "Arrow ↑"),
+            Asset::Bolt => t("Éclair", "Bolt"),
+            Asset::Pin => t("Repère", "Pin"),
+            Asset::Home => t("Maison", "Home"),
+            Asset::Gear => t("Engrenage", "Gear"),
+            Asset::Sun => t("Soleil", "Sun"),
+            Asset::Cloud => t("Nuage", "Cloud"),
         }
     }
 
@@ -48,6 +79,14 @@ impl Asset {
             Asset::Cross => cross(),
             Asset::Checkmark => checkmark(),
             Asset::Banner => banner(),
+            Asset::ArrowRight => arrow_right(),
+            Asset::ArrowUp => arrow_up(),
+            Asset::Bolt => bolt(),
+            Asset::Pin => pin(),
+            Asset::Home => home(),
+            Asset::Gear => gear(),
+            Asset::Sun => sun(),
+            Asset::Cloud => cloud(),
         }
     }
 }
@@ -163,6 +202,127 @@ fn banner() -> Vec<(f32, f32)> {
     ]
 }
 
+/// Flèche pleine pointant vers la droite : hampe rectangulaire + pointe
+/// triangulaire, contour fermé en sens horaire.
+fn arrow_right() -> Vec<(f32, f32)> {
+    vec![
+        (-1.0, -0.25),
+        (0.2, -0.25),
+        (0.2, -0.6),
+        (1.0, 0.0),
+        (0.2, 0.6),
+        (0.2, 0.25),
+        (-1.0, 0.25),
+        (-1.0, -0.25),
+    ]
+}
+
+/// Flèche pleine pointant vers le haut — mêmes proportions que
+/// [`arrow_right`], coordonnées transposées (x ↔ y, signe adapté) plutôt que
+/// dérivées par rotation générique, pour rester lisible et facile à vérifier.
+fn arrow_up() -> Vec<(f32, f32)> {
+    vec![
+        (-0.25, 1.0),
+        (-0.25, -0.2),
+        (-0.6, -0.2),
+        (0.0, -1.0),
+        (0.6, -0.2),
+        (0.25, -0.2),
+        (0.25, 1.0),
+        (-0.25, 1.0),
+    ]
+}
+
+/// Éclair : zigzag classique en « Z » épaissi, contour fermé.
+fn bolt() -> Vec<(f32, f32)> {
+    vec![
+        (0.15, -1.0),
+        (-0.55, 0.15),
+        (-0.05, 0.15),
+        (-0.15, 1.0),
+        (0.55, -0.05),
+        (0.05, -0.05),
+        (0.15, -1.0),
+    ]
+}
+
+/// Repère de carte (goutte d'eau) : demi-cercle supérieur + pointe inférieure.
+fn pin() -> Vec<(f32, f32)> {
+    let n = 20;
+    let mut pts: Vec<(f32, f32)> = (0..=n)
+        .map(|i| {
+            let a = std::f32::consts::PI * (1.0 - i as f32 / n as f32);
+            (a.cos(), -0.15 - a.sin() * 0.85)
+        })
+        .collect();
+    pts.push((0.0, 1.0)); // pointe basse
+    pts.push(pts[0]);
+    pts
+}
+
+/// Maison : toit triangulaire + base carrée, contour fermé à 6 sommets.
+fn home() -> Vec<(f32, f32)> {
+    vec![(-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (1.0, 1.0), (-1.0, 1.0), (-1.0, 0.0)]
+}
+
+/// Engrenage : anneau à dents rectangulaires (contrairement à `badge`, qui a
+/// des festons arrondis) — alterne rayon plein et rayon de dent.
+fn gear() -> Vec<(f32, f32)> {
+    let teeth = 8;
+    let (r_out, r_in) = (1.0, 0.72);
+    let mut pts = Vec::new();
+    for i in 0..teeth {
+        let a0 = i as f32 / teeth as f32 * std::f32::consts::TAU;
+        let a1 = (i as f32 + 0.5) / teeth as f32 * std::f32::consts::TAU;
+        let a2 = (i as f32 + 1.0) / teeth as f32 * std::f32::consts::TAU;
+        pts.push((a0.cos() * r_in, a0.sin() * r_in));
+        pts.push((a0.cos() * r_out, a0.sin() * r_out));
+        pts.push((a1.cos() * r_out, a1.sin() * r_out));
+        pts.push((a1.cos() * r_in, a1.sin() * r_in));
+        pts.push((a2.cos() * r_in, a2.sin() * r_in));
+    }
+    if let Some(&first) = pts.first() {
+        pts.push(first);
+    }
+    pts
+}
+
+/// Soleil : même principe que `badge` (festons alternés), mais rayons fins et
+/// contrastés (rayon intérieur bien plus petit) pour un rendu « rayons »
+/// plutôt que « sceau ».
+fn sun() -> Vec<(f32, f32)> {
+    let n = 12;
+    (0..=2 * n)
+        .map(|i| {
+            let a = -std::f32::consts::FRAC_PI_2 + i as f32 / (2 * n) as f32 * std::f32::consts::TAU;
+            let r = if i % 2 == 0 { 1.0 } else { 0.55 };
+            (a.cos() * r, a.sin() * r)
+        })
+        .collect()
+}
+
+/// Nuage : plusieurs bosses circulaires accolées sur une base plate.
+fn cloud() -> Vec<(f32, f32)> {
+    let bumps: [((f32, f32), f32); 4] = [((-0.55, 0.15), 0.45), ((-0.05, -0.15), 0.6), ((0.45, 0.05), 0.5), ((0.75, 0.3), 0.25)];
+    let mut pts = Vec::new();
+    for &((cx, cy), r) in &bumps {
+        let n = 10;
+        for k in 0..=n {
+            let a = std::f32::consts::PI * (1.0 - k as f32 / n as f32);
+            pts.push((cx + a.cos() * r, cy - a.sin() * r));
+        }
+    }
+    pts.push((-1.0, 0.5));
+    if let Some(&first) = pts.first() {
+        pts.push(first);
+    }
+    // Filet de sécurité : les rayons/centres ci-dessus sont ajustés à la
+    // main pour rester dans [-1,1] mais restent approximatifs — un clamp
+    // final garantit le contrat de `Asset::points` (case normalisée) sans
+    // dépendre de recalculs manuels à chaque changement de paramètre.
+    pts.into_iter().map(|(x, y)| (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +331,18 @@ mod tests {
     fn all_assets_produce_at_least_a_triangle() {
         for asset in Asset::ALL {
             assert!(asset.points().len() >= 3, "{:?} has too few points", asset);
+        }
+    }
+
+    #[test]
+    fn all_assets_stay_within_the_normalized_square() {
+        // Tolérance de 1% : certains contours utilisent des rayons/sommes
+        // trigonométriques qui peuvent dépasser [-1,1] de façon négligeable.
+        for asset in Asset::ALL {
+            for (x, y) in asset.points() {
+                assert!((-1.01..=1.01).contains(&x), "{asset:?}: x={x} hors [-1,1]");
+                assert!((-1.01..=1.01).contains(&y), "{asset:?}: y={y} hors [-1,1]");
+            }
         }
     }
 

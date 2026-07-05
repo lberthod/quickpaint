@@ -114,6 +114,28 @@ pub enum Adjustment {
     /// l'image comme une bannière, façon Photoshop Edit ▸ Transform ▸ Warp
     /// ▸ Arc. `amount` en fraction de la hauteur (-1..=1).
     ArcWarp { amount: f32 },
+    /// Exposition (audit_sprint_xx.md D.1) : gain multiplicatif en stops
+    /// (`2^ev`), appliqué avant tout autre ajustement — contrairement à
+    /// Luminosité (`Filter::Brighter`/`Darker`) qui est un facteur fixe, ici
+    /// réglable en continu et centré sur 0 = identité.
+    Exposure { ev: f32 },
+    /// Vibrance (audit_sprint_xx.md D.2) : sature davantage les couleurs déjà
+    /// peu saturées et épargne celles qui le sont déjà — contrairement à
+    /// `HueSaturation.sat` qui sature tout uniformément. `amount` -1.0..=1.0.
+    Vibrance { amount: f32 },
+    /// Balance des blancs (audit_sprint_xx.md D.2) : `temp` décale vers le
+    /// bleu (négatif) ou l'orange (positif), `tint` vers le vert (négatif)
+    /// ou le magenta (positif). Les deux -1.0..=1.0, 0 = identité.
+    WhiteBalance { temp: f32, tint: f32 },
+    /// Réduction de bruit (audit_sprint_xx.md D.3) : réutilise le lissage
+    /// bilatéral de `smooth_skin` (préserve les contours) sur toute l'image.
+    /// `strength` 0.0..=1.0, 0 = identité.
+    Denoise { strength: f32 },
+    /// Flou gaussien réel (audit_sprint_xx.md E.1), noyau séparable —
+    /// contrairement à `Filter::Blur` (moyenne de boîte répétée), le rayon
+    /// est continu et le profil de poids est une vraie gaussienne. `radius`
+    /// en pixels, <= 0 = identité.
+    GaussianBlur { radius: f32 },
 }
 
 impl Adjustment {
@@ -129,6 +151,11 @@ impl Adjustment {
             Adjustment::Bokeh { .. } => t("Bokeh", "Bokeh").to_string(),
             Adjustment::Duotone { .. } => t("Duotone", "Duotone").to_string(),
             Adjustment::ArcWarp { .. } => t("Warp : Arc", "Warp: Arc").to_string(),
+            Adjustment::Exposure { .. } => t("Exposition", "Exposure").to_string(),
+            Adjustment::Vibrance { .. } => t("Vibrance", "Vibrance").to_string(),
+            Adjustment::WhiteBalance { .. } => t("Balance des blancs", "White balance").to_string(),
+            Adjustment::Denoise { .. } => t("Réduction de bruit", "Noise reduction").to_string(),
+            Adjustment::GaussianBlur { .. } => t("Flou gaussien", "Gaussian blur").to_string(),
         }
     }
 
@@ -168,6 +195,26 @@ impl Adjustment {
 
     pub fn default_arc_warp() -> Self {
         Adjustment::ArcWarp { amount: 0.2 }
+    }
+
+    pub fn default_exposure() -> Self {
+        Adjustment::Exposure { ev: 0.0 }
+    }
+
+    pub fn default_vibrance() -> Self {
+        Adjustment::Vibrance { amount: 0.0 }
+    }
+
+    pub fn default_white_balance() -> Self {
+        Adjustment::WhiteBalance { temp: 0.0, tint: 0.0 }
+    }
+
+    pub fn default_denoise() -> Self {
+        Adjustment::Denoise { strength: 0.0 }
+    }
+
+    pub fn default_gaussian_blur() -> Self {
+        Adjustment::GaussianBlur { radius: 0.0 }
     }
 
     /// Signature FNV-1a des paramètres, pour l'invalidation du cache de rendu
@@ -228,6 +275,27 @@ impl Adjustment {
                 mix(10);
                 mix(amount.to_bits() as u64);
             }
+            Adjustment::Exposure { ev } => {
+                mix(11);
+                mix(ev.to_bits() as u64);
+            }
+            Adjustment::Vibrance { amount } => {
+                mix(12);
+                mix(amount.to_bits() as u64);
+            }
+            Adjustment::WhiteBalance { temp, tint } => {
+                mix(13);
+                mix(temp.to_bits() as u64);
+                mix(tint.to_bits() as u64);
+            }
+            Adjustment::Denoise { strength } => {
+                mix(14);
+                mix(strength.to_bits() as u64);
+            }
+            Adjustment::GaussianBlur { radius } => {
+                mix(15);
+                mix(radius.to_bits() as u64);
+            }
         }
         h
     }
@@ -247,7 +315,119 @@ pub fn apply_adjustment(adj: Adjustment, rgba: &mut Vec<u8>, w: u32, h: u32) {
         Adjustment::Bokeh { radius, boost } => *rgba = bokeh_blur(rgba, w as usize, h as usize, radius, boost),
         Adjustment::Duotone { shadow, highlight } => duotone(rgba, shadow, highlight),
         Adjustment::ArcWarp { amount } => *rgba = arc_warp(rgba, w as usize, h as usize, amount),
+        Adjustment::Exposure { ev } => exposure(rgba, ev),
+        Adjustment::Vibrance { amount } => vibrance(rgba, amount),
+        Adjustment::WhiteBalance { temp, tint } => white_balance(rgba, temp, tint),
+        Adjustment::Denoise { strength } => {
+            let full_mask = vec![true; (w as usize) * (h as usize)];
+            smooth_skin(rgba, w as usize, h as usize, &full_mask, strength.clamp(0.0, 1.0));
+        }
+        Adjustment::GaussianBlur { radius } => *rgba = gaussian_blur(rgba, w as usize, h as usize, radius),
     }
+}
+
+/// Exposition (audit_sprint_xx.md D.1) : gain multiplicatif en stops,
+/// `out = in * 2^ev`. `ev = 0` laisse l'image inchangée.
+fn exposure(rgba: &mut [u8], ev: f32) {
+    if ev.abs() < 1e-4 {
+        return;
+    }
+    let gain = 2f32.powf(ev);
+    for px in rgba.chunks_exact_mut(4) {
+        for c in px.iter_mut().take(3) {
+            *c = (*c as f32 * gain).clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Vibrance (audit_sprint_xx.md D.2) : comme `saturate`, mais le gain de
+/// saturation est pondéré par `1 - saturation_actuelle` — les couleurs déjà
+/// vives changent peu, les couleurs ternes gagnent le plus. `amount = 0` est
+/// un no-op exact (facteur toujours 1).
+fn vibrance(rgba: &mut [u8], amount: f32) {
+    if amount.abs() < 1e-4 {
+        return;
+    }
+    for px in rgba.chunks_exact_mut(4) {
+        let (_, s, _) = rgb_to_hsl(px[0], px[1], px[2]);
+        let factor = 1.0 + amount * (1.0 - s);
+        let g = luma(px);
+        for c in px.iter_mut().take(3) {
+            *c = (g + (*c as f32 - g) * factor).clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// Balance des blancs (audit_sprint_xx.md D.2) : décalage linéaire simple —
+/// `temp` pousse R à la hausse et B à la baisse (ou l'inverse si négatif),
+/// `tint` pousse G à la hausse et R+B à la baisse (ou l'inverse). Formule
+/// volontairement simple (pas d'estimation de température de couleur en
+/// Kelvin) : suffisante pour corriger une dominante, pas une calibration
+/// colorimétrique. `(0, 0)` est un no-op exact.
+fn white_balance(rgba: &mut [u8], temp: f32, tint: f32) {
+    if temp.abs() < 1e-4 && tint.abs() < 1e-4 {
+        return;
+    }
+    let (dr, db) = (temp * 40.0, -temp * 40.0);
+    let (dg, drb) = (tint * 40.0, -tint * 20.0);
+    for px in rgba.chunks_exact_mut(4) {
+        px[0] = (px[0] as f32 + dr + drb).clamp(0.0, 255.0) as u8;
+        px[1] = (px[1] as f32 + dg).clamp(0.0, 255.0) as u8;
+        px[2] = (px[2] as f32 + db + drb).clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// Poids gaussiens 1D normalisés (somme = 1) pour un rayon donné — 3 écarts
+/// types couvrent le rayon demandé, comme une implémentation Gaussienne
+/// classique tronquée.
+fn gaussian_kernel(radius: f32) -> Vec<f32> {
+    let r = radius.max(0.5);
+    let sigma = r / 3.0;
+    let n = r.ceil() as i32;
+    let mut kernel: Vec<f32> = (-n..=n).map(|i| (-((i * i) as f32) / (2.0 * sigma * sigma)).exp()).collect();
+    let sum: f32 = kernel.iter().sum();
+    for v in kernel.iter_mut() {
+        *v /= sum;
+    }
+    kernel
+}
+
+/// Flou gaussien séparable (audit_sprint_xx.md E.1) : passe horizontale puis
+/// verticale avec un vrai noyau gaussien (contrairement à `box_blur`, qui
+/// moyenne uniformément). `radius <= 0` = identité.
+fn gaussian_blur(src: &[u8], w: usize, h: usize, radius: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || radius <= 0.05 {
+        return src.to_vec();
+    }
+    let kernel = gaussian_kernel(radius);
+    let n = (kernel.len() / 2) as i32;
+    let pass = |src: &[u8], horizontal: bool| -> Vec<u8> {
+        let mut out = vec![0u8; w * h * 4];
+        let at = |x: i32, y: i32, c: usize| -> f32 {
+            let x = x.clamp(0, w as i32 - 1) as usize;
+            let y = y.clamp(0, h as i32 - 1) as usize;
+            src[(y * w + x) * 4 + c] as f32
+        };
+        for y in 0..h as i32 {
+            for x in 0..w as i32 {
+                let mut sum = [0.0f32; 4];
+                for (k, &weight) in kernel.iter().enumerate() {
+                    let d = k as i32 - n;
+                    let (sx, sy) = if horizontal { (x + d, y) } else { (x, y + d) };
+                    for (c, s) in sum.iter_mut().enumerate() {
+                        *s += at(sx, sy, c) * weight;
+                    }
+                }
+                let didx = (y as usize * w + x as usize) * 4;
+                for c in 0..4 {
+                    out[didx + c] = sum[c].round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        out
+    };
+    let tmp = pass(src, true);
+    pass(&tmp, false)
 }
 
 /// Warp « Arc » (Sprint 7.2) : décale la colonne `x` verticalement de
@@ -1453,5 +1633,116 @@ mod tests {
         apply_adjustment(Adjustment::HueSaturation { hue: 0.0, sat: -1.0, light: 0.0 }, &mut px, 1, 1);
         assert_eq!(px[0], px[1]);
         assert_eq!(px[1], px[2]);
+    }
+
+    #[test]
+    fn exposure_identity_at_zero_ev_is_noop() {
+        let original = vec![10u8, 120, 240, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_exposure(), &mut px, 1, 1);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn exposure_one_stop_doubles_values_before_clamp() {
+        let mut px = vec![50u8, 50, 50, 255];
+        apply_adjustment(Adjustment::Exposure { ev: 1.0 }, &mut px, 1, 1);
+        assert_eq!(px[0], 100);
+    }
+
+    #[test]
+    fn vibrance_identity_at_zero_is_noop() {
+        let original = vec![200u8, 100, 50, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_vibrance(), &mut px, 1, 1);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn vibrance_boosts_dull_colors_more_than_saturated_ones() {
+        // Couleur déjà très saturée : la vibrance doit peu la changer.
+        let mut saturated = vec![255u8, 0, 0, 255];
+        apply_adjustment(Adjustment::Vibrance { amount: 1.0 }, &mut saturated, 1, 1);
+        assert_eq!(saturated, vec![255, 0, 0, 255]);
+        // Couleur terne (proche du gris) : la vibrance doit visiblement l'écarter.
+        let mut dull = vec![140u8, 120, 130, 255];
+        let before = dull.clone();
+        apply_adjustment(Adjustment::Vibrance { amount: 1.0 }, &mut dull, 1, 1);
+        assert_ne!(dull, before);
+    }
+
+    #[test]
+    fn white_balance_identity_at_zero_is_noop() {
+        let original = vec![10u8, 120, 240, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_white_balance(), &mut px, 1, 1);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn white_balance_warms_toward_orange() {
+        let mut px = vec![128u8, 128, 128, 255];
+        apply_adjustment(Adjustment::WhiteBalance { temp: 1.0, tint: 0.0 }, &mut px, 1, 1);
+        assert!(px[0] > 128, "le rouge doit augmenter");
+        assert!(px[2] < 128, "le bleu doit diminuer");
+    }
+
+    #[test]
+    fn denoise_identity_at_zero_strength_is_noop() {
+        let original = vec![10u8, 120, 240, 255];
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_denoise(), &mut px, 1, 1);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn denoise_reduces_local_variance() {
+        let w = 12;
+        let h = 12;
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if (x + y) % 2 == 0 { 140 } else { 120 };
+                let i = (y * w + x) * 4;
+                rgba[i..i + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let original = rgba.clone();
+        apply_adjustment(Adjustment::Denoise { strength: 1.0 }, &mut rgba, w as u32, h as u32);
+        let variance = |data: &[u8]| -> f32 {
+            let vals: Vec<f32> = data.chunks_exact(4).map(|p| p[0] as f32).collect();
+            let mean = vals.iter().sum::<f32>() / vals.len() as f32;
+            vals.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / vals.len() as f32
+        };
+        assert!(variance(&rgba) < variance(&original));
+    }
+
+    #[test]
+    fn gaussian_blur_identity_at_zero_radius_is_noop() {
+        let original: Vec<u8> = (0..(8 * 8 * 4)).map(|i| (i % 256) as u8).collect();
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::default_gaussian_blur(), &mut px, 8, 8);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn gaussian_blur_spreads_a_single_bright_pixel_isotropically() {
+        let w = 15;
+        let h = 15;
+        let mut rgba = vec![0u8; w * h * 4];
+        let ci = ((h / 2) * w + w / 2) * 4;
+        rgba[ci..ci + 4].copy_from_slice(&[255, 255, 255, 255]);
+        apply_adjustment(Adjustment::GaussianBlur { radius: 3.0 }, &mut rgba, w as u32, h as u32);
+        let right_i = ((h / 2) * w + w / 2 + 2) * 4;
+        let below_i = ((h / 2 + 2) * w + w / 2) * 4;
+        assert!(rgba[right_i] > 0, "le flou doit s'étaler horizontalement");
+        assert!(rgba[below_i] > 0, "le flou doit s'étaler verticalement");
+        // Isotrope : étalement comparable dans les deux directions (± tolérance).
+        assert!(
+            (rgba[right_i] as i32 - rgba[below_i] as i32).abs() < 5,
+            "le flou gaussien doit être isotrope, eu {} vs {}",
+            rgba[right_i],
+            rgba[below_i]
+        );
     }
 }

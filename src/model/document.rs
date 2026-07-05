@@ -103,6 +103,14 @@ pub struct Layer {
     /// `render::compositor::apply_layer_styles`.
     #[serde(default)]
     pub styles: Vec<LayerStyle>,
+    /// Verrouillage (audit_sprint_xx.md B.1) : bloque toute peinture/édition
+    /// de contenu sur ce calque (traits, raster, texte, images,
+    /// déplacement/transformation) tant qu'il est vrai. La visibilité,
+    /// l'opacité et le réordonnancement restent autorisés — un calque
+    /// verrouillé sert de référence qu'on ne veut pas modifier par erreur,
+    /// pas un calque figé qu'on ne peut plus du tout gérer.
+    #[serde(default)]
+    pub locked: bool,
 }
 
 fn default_opacity() -> f32 {
@@ -221,6 +229,7 @@ impl Layer {
             mask_png: String::new(),
             mask_origin: (0, 0),
             styles: Vec::new(),
+            locked: false,
         }
     }
 

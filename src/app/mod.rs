@@ -35,6 +35,15 @@ fn clamp_doc_dims(w: u32, h: u32) -> (u32, u32) {
     (w.clamp(1, max), h.clamp(1, max))
 }
 
+/// Un calque verrouillé (audit_sprint_xx.md B.1) bloque-t-il ce geste pour
+/// `tool` ? Seuls les outils jamais destructifs restent autorisés (Main,
+/// Pipette, Règle) — tout le reste modifierait potentiellement le contenu du
+/// calque actif (peinture, formes, texte, déplacement/transformation…), donc
+/// reste bloqué tant que le calque est verrouillé.
+fn layer_lock_blocks_tool(tool: ActiveTool) -> bool {
+    !matches!(tool, ActiveTool::Pan | ActiveTool::Eyedropper | ActiveTool::Measure)
+}
+
 /// (id d'élément, boîte englobante (min, max)) en coordonnées document.
 type ElemBounds = (u64, ((f32, f32), (f32, f32)));
 
@@ -219,6 +228,8 @@ pub struct PaintApp {
     pub style_preset_name: String,
     /// Panneau de préférences des raccourcis ouvert ?
     pub show_shortcuts_prefs: bool,
+    /// Fenêtre de documentation des outils (À propos ▸ Documentation) ouverte ?
+    pub show_help: bool,
     /// Action en attente d'une nouvelle touche (capture au prochain appui).
     pub capturing_shortcut: Option<crate::keybindings::ShortcutAction>,
     /// Message éphémère affiché dans le footer (export, sauvegarde, etc.).
@@ -344,6 +355,11 @@ pub struct PaintApp {
     /// la couleur proche dans la zone visible, pas seulement la région
     /// connectée au clic — utile pour un fond visible par bouts (feuillage…).
     pub cutout_global: bool,
+    /// Affiner les bords (audit_sprint_xx.md C.1) : après le dégradé de
+    /// `soft_edge`, repousse la couverture vers 0/255 dans les zones à forte
+    /// variance de luminance locale (mèches de cheveux, fourrure, grillage)
+    /// pour éviter qu'un flou générique ne noie ces détails fins.
+    pub cutout_refine_edges: bool,
     last_canvas_rect: Rect,
     // Document à taille fixe (roadmap #3).
     last_doc_rect: Rect,
@@ -437,6 +453,7 @@ impl Default for PaintApp {
             show_style_presets: false,
             style_preset_name: String::new(),
             show_shortcuts_prefs: false,
+            show_help: false,
             capturing_shortcut: None,
             status: None,
             status_error: false,
@@ -497,6 +514,7 @@ impl Default for PaintApp {
             cutout_click: None,
             cutout_tolerance: 32,
             cutout_global: false,
+            cutout_refine_edges: false,
             last_canvas_rect: Rect::ZERO,
             last_doc_rect: Rect::ZERO,
             view_initialized: false,
@@ -3087,6 +3105,15 @@ impl PaintApp {
         self.compositor.render_to_rgba(ctx, &self.doc, self.bg)
     }
 
+    /// Histogramme RGB du canevas entier (audit_sprint_xx.md D.4), en dehors
+    /// de toute sélection d'image — réutilise le même chemin de rendu que
+    /// l'export (`render_for_export`) plutôt qu'une capture d'écran du
+    /// viewport, pour ne pas dépendre du zoom/de la taille de fenêtre.
+    pub fn canvas_histogram(&mut self, ctx: &egui::Context) -> Option<[[u32; 256]; 3]> {
+        let (_, _, rgba) = self.render_for_export(ctx)?;
+        Some(crate::tools::filter::histogram_rgb(&rgba))
+    }
+
     /// Exporte le document au format `format`, à sa résolution native.
     pub fn request_export(&mut self, ctx: &egui::Context, format: crate::export::ExportFormat) {
         let Some((w, h, rgba)) = self.render_for_export(ctx) else {
@@ -3443,7 +3470,10 @@ impl PaintApp {
         // Degré d'appartenance au fond dégradé par proximité de couleur
         // (Sprint 9.1, bords plus fins qu'un flou uniforme — voir
         // `bucket::soft_edge`) : 255 = pleinement fond, 0 = pleinement sujet.
-        let membership = crate::tools::bucket::soft_edge(&region, rw, rh, cx as usize, cy as usize, tolerance, &flooded);
+        let mut membership = crate::tools::bucket::soft_edge(&region, rw, rh, cx as usize, cy as usize, tolerance, &flooded);
+        if self.cutout_refine_edges {
+            membership = crate::tools::bucket::refine_edges(&region, rw, rh, &membership, 2);
+        }
         // En retrait, la visibilité est l'inverse de l'appartenance au fond
         // (fond franc → invisible) ; en restauration, elle la suit directement
         // (zone repeinte franchement fond → pleinement restaurée).
@@ -4120,6 +4150,19 @@ impl PaintApp {
             if response.dragged() {
                 self.pan += response.drag_delta();
             }
+            return;
+        }
+
+        // Verrouillage de calque (audit_sprint_xx.md B.1) : bloque tout geste
+        // qui modifierait le contenu du calque actif — un seul point de
+        // contrôle avant le dispatch par outil, plutôt qu'une vérification
+        // dispersée dans chaque branche. Pan/Pipette/Règle restent autorisés
+        // (jamais destructifs, cf. `layer_lock_blocks_tool`).
+        if self.doc.layers[self.doc.active_layer].locked
+            && layer_lock_blocks_tool(self.active_tool)
+            && (response.clicked() || response.dragged() || response.drag_started())
+        {
+            self.info(t("Calque verrouillé : déverrouille-le pour le modifier.", "Layer locked: unlock it to edit."));
             return;
         }
 
@@ -5036,7 +5079,11 @@ impl eframe::App for PaintApp {
                                         [im.w.max(1) as usize, im.h.max(1) as usize],
                                         &im.rgba,
                                     );
-                                    ctx.load_texture(format!("img{}", im.id), ci, egui::TextureOptions::LINEAR)
+                                    // Mipmaps : évite le scintillement/pointillé quand
+                                    // l'image est affichée plus petite que sa résolution.
+                                    let opts = egui::TextureOptions::LINEAR
+                                        .with_mipmap_mode(Some(egui::TextureFilter::Linear));
+                                    ctx.load_texture(format!("img{}", im.id), ci, opts)
                                 });
                                 draw_image(&content, im, tex, &view, layer.opacity);
                             }
@@ -5411,6 +5458,18 @@ fn draw_text_arc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn layer_lock_allows_only_non_destructive_tools() {
+        assert!(!layer_lock_blocks_tool(ActiveTool::Pan));
+        assert!(!layer_lock_blocks_tool(ActiveTool::Eyedropper));
+        assert!(!layer_lock_blocks_tool(ActiveTool::Measure));
+        assert!(layer_lock_blocks_tool(ActiveTool::Brush));
+        assert!(layer_lock_blocks_tool(ActiveTool::Eraser));
+        assert!(layer_lock_blocks_tool(ActiveTool::Select));
+        assert!(layer_lock_blocks_tool(ActiveTool::Text));
+        assert!(layer_lock_blocks_tool(ActiveTool::Bucket));
+    }
 
     /// UX-3.1 : glisser-déposer un calque vers l'avant (index croissant) ou
     /// vers l'arrière (index décroissant) doit produire le même ordre que le

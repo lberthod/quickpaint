@@ -16,7 +16,7 @@
 //! raccourcis clavier déjà câblés dans `app/mod.rs::handle_shortcuts`.
 
 use muda::accelerator::{Accelerator, Code, Modifiers};
-use muda::{Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{AboutMetadata, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
 /// Identifiants des entrées « Édition » à faire correspondre aux méthodes de
 /// [`crate::app::PaintApp`] lors du dépouillement des évènements de menu.
@@ -34,9 +34,24 @@ pub struct EditMenuIds {
 pub fn install() -> EditMenuIds {
     let menu = Menu::new();
 
+    // Métadonnées explicites : sans elles, `about(None, None)` délègue à
+    // `orderFrontStandardAboutPanel` (le panneau système), qui lit le nom et
+    // la version dans le `Info.plist` du bundle. Ce binaire n'est pas
+    // empaqueté en `.app` (lancé directement en dev via `cargo run`, ou tout
+    // simplement copié tel quel) : il n'y a pas de bundle, donc pas de
+    // plist — AppKit tente quand même de construire les chaînes du panneau à
+    // partir d'entrées absentes et plante (SIGSEGV dans
+    // `CFStringCreateImmutableFunnel3`, adresse nulle). En fournissant nos
+    // propres chaînes, `orderFrontStandardAboutPanelWithOptions` est utilisé
+    // à la place et ne dépend d'aucune info de bundle.
+    let about_meta = AboutMetadata {
+        name: Some("QuickPaint".into()),
+        version: Some(env!("CARGO_PKG_VERSION").into()),
+        ..Default::default()
+    };
     let app_menu = Submenu::new("QuickPaint", true);
     let _ = app_menu.append_items(&[
-        &PredefinedMenuItem::about(None, None),
+        &PredefinedMenuItem::about(None, Some(about_meta)),
         &PredefinedMenuItem::separator(),
         &PredefinedMenuItem::services(None),
         &PredefinedMenuItem::separator(),

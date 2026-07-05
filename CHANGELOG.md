@@ -2,6 +2,44 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.15.0 — juillet 2026 (audit fonctionnel de suivi — Sprints A à F)
+
+Détail complet, priorisation et raisonnement : [audit_newxxx.md](audit_newxxx.md)
+(audit) et [audit_sprint_xx.md](audit_sprint_xx.md) (plan de sprints).
+211 tests au total (+15), 0 warning clippy.
+
+- **Sprint D — Retouche photo** : calques de réglage **Exposition** (gain en
+  stops), **Vibrance** (pondérée par la saturation existante, épargne les
+  couleurs déjà vives) et **Balance des blancs** (température/teinte) ;
+  **réduction de bruit** (réutilise le lissage bilatéral existant) ;
+  **histogramme étendu au canevas entier** quand aucune image n'est
+  sélectionnée (auparavant limité à une image du calque actif).
+- **Sprint E — Filtres** : vrai **flou gaussien** (noyau séparable, rayon
+  continu) en complément du flou de boîte existant. L'effet « Bande
+  dessinée » s'est révélé déjà présent à l'audit (posterisation + contours
+  Sobel) — aucun changement nécessaire.
+- **Sprint C — Détourage** : option **« Affiner les bords »** — repousse la
+  couverture du masque vers 0/255 dans les zones à forte variance de
+  luminance locale (mèches de cheveux, fourrure), au lieu du dégradé uniforme
+  générique de `soft_edge` seul.
+- **Sprint F — Bibliothèque d'éléments** : 8 icônes vectorielles
+  supplémentaires (flèches, éclair, repère, maison, engrenage, soleil,
+  nuage), éditables comme les icônes existantes (trait plein, pas une image
+  figée).
+- **Sprint B — Calques** : **verrouillage de calque** (icône cadenas, bloque
+  peinture/édition tout en gardant visibilité/opacité/réordonnancement
+  possibles). Le masque de calque peint et les « objets intelligents »
+  (redimensionnement sans perte) se sont révélés déjà entièrement couverts
+  par l'architecture existante à l'audit — seul un badge de résolution
+  native a été ajouté au panneau de calques pour rendre ce dernier point
+  visible.
+- **Documentation intégrée** : nouvelle fenêtre (À propos ▸ Documentation)
+  expliquant chaque outil (icône, nom, description) ainsi que la philosophie
+  du projet (pourquoi QuickPaint, pourquoi tactile, pourquoi Rust).
+- **Décision actée, pas un oubli** : qualité WebP réglable à l'export
+  toujours écartée (nécessiterait `libwebp`, une dépendance système C) —
+  même logique que le refus de HEIC/RAW.
+
 ## 0.14.0 — juillet 2026 (Sprints 1 à 9 — audit fonctionnel complet)
 
 Détail complet, priorisation et raisonnement : [FEATURE_SPRINTS.md](FEATURE_SPRINTS.md).

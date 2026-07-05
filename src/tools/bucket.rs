@@ -98,6 +98,71 @@ pub fn soft_edge(rgba: &[u8], w: usize, h: usize, sx: usize, sy: usize, tol: i32
     out
 }
 
+/// Luminance (Rec. 601) par pixel, pour la détection de texture fine.
+fn luma_at(rgba: &[u8], i: usize) -> f32 {
+    rgba[i * 4] as f32 * 0.299 + rgba[i * 4 + 1] as f32 * 0.587 + rgba[i * 4 + 2] as f32 * 0.114
+}
+
+/// Variance locale de luminance dans une fenêtre `(2*radius+1)²` autour de
+/// chaque pixel — sert de détecteur de texture fine (cheveux, fourrure,
+/// grillage) : une zone plate a une variance quasi nulle, une zone texturée
+/// une variance élevée.
+fn local_luma_variance(rgba: &[u8], w: usize, h: usize, radius: i32) -> Vec<f32> {
+    let at = |x: i32, y: i32| -> f32 {
+        let x = x.clamp(0, w as i32 - 1) as usize;
+        let y = y.clamp(0, h as i32 - 1) as usize;
+        luma_at(rgba, y * w + x)
+    };
+    let mut out = vec![0.0f32; w * h];
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            let mut sum = 0.0f32;
+            let mut sumsq = 0.0f32;
+            let mut n = 0.0f32;
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let v = at(x + dx, y + dy);
+                    sum += v;
+                    sumsq += v * v;
+                    n += 1.0;
+                }
+            }
+            let mean = sum / n;
+            out[(y as usize) * w + x as usize] = (sumsq / n - mean * mean).max(0.0);
+        }
+    }
+    out
+}
+
+/// Affine un masque de bord dégradé (`soft_edge`) en préservant les détails
+/// fins (audit_sprint_xx.md C.1) : `soft_edge` applique un rayon
+/// d'adoucissement uniforme, ce qui noie les mèches de cheveux/la fourrure
+/// dans un flou générique. Ici, les zones à forte variance de luminance
+/// locale (texture fine) voient leur couverture repoussée vers 0/255
+/// proportionnellement à cette variance — un bord nettement texturé reste
+/// contrasté (donc net brin par brin) tandis que le reste du contour garde
+/// le dégradé uniforme d'origine. `radius` : rayon (px) de la fenêtre de
+/// variance locale (typiquement 2-3).
+pub fn refine_edges(rgba: &[u8], w: usize, h: usize, mask: &[u8], radius: i32) -> Vec<u8> {
+    if rgba.len() < w * h * 4 || mask.len() != w * h || w == 0 || h == 0 {
+        return mask.to_vec();
+    }
+    let variance = local_luma_variance(rgba, w, h, radius.max(1));
+    let max_var = variance.iter().cloned().fold(0.0f32, f32::max).max(1.0);
+    mask.iter()
+        .zip(variance.iter())
+        .map(|(&m, &v)| {
+            let texture = (v / max_var).clamp(0.0, 1.0);
+            if texture < 0.15 {
+                return m; // zone plate : le dégradé uniforme de soft_edge reste tel quel
+            }
+            let m = m as f32;
+            let sharpened = if m >= 128.0 { m + (255.0 - m) * texture } else { m - m * texture };
+            sharpened.round().clamp(0.0, 255.0) as u8
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +211,39 @@ mod tests {
         let flooded = vec![true, true];
         let soft = soft_edge(&rgba, 2, 1, 0, 0, 16, &flooded);
         assert_eq!(soft, vec![255, 255]);
+    }
+
+    #[test]
+    fn refine_edges_sharpens_boundary_more_in_textured_zones() {
+        // 10×1 : moitié gauche plate (variance nulle), moitié droite en
+        // damier haute fréquence (variance élevée) — même valeur de masque
+        // intermédiaire (128) partout, pour isoler l'effet de la texture.
+        let w = 10;
+        let h = 1;
+        let mut rgba = vec![0u8; w * h * 4];
+        for x in 0..w {
+            let v = if x < 5 { 128u8 } else if x % 2 == 0 { 0 } else { 255 };
+            let i = x * 4;
+            rgba[i..i + 4].copy_from_slice(&[v, v, v, 255]);
+        }
+        let mask = vec![128u8; w * h];
+        let refined = refine_edges(&rgba, w, h, &mask, 2);
+        let flat_shift = (refined[2] as i32 - 128).abs();
+        let textured_shift = (refined[7] as i32 - 128).abs();
+        assert!(
+            textured_shift > flat_shift,
+            "la zone texturée doit s'écarter davantage de 128 que la zone plate : {textured_shift} vs {flat_shift}"
+        );
+    }
+
+    #[test]
+    fn refine_edges_leaves_flat_regions_untouched() {
+        let w = 6;
+        let h = 6;
+        let rgba = vec![100u8; w * h * 4];
+        let mask: Vec<u8> = (0..w * h).map(|i| (i * 20 % 256) as u8).collect();
+        let refined = refine_edges(&rgba, w, h, &mask, 2);
+        assert_eq!(refined, mask, "aucune texture : le masque ne doit pas bouger");
     }
 
     #[test]

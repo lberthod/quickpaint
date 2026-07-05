@@ -265,6 +265,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     histogram_window(ctx, app);
     lut_window(ctx, app);
     perspective_window(ctx, app);
+    help_window(ctx, app);
 }
 
 /// Bibliothèque d'éléments réutilisables (Sprint 10.1) : pictogrammes et
@@ -320,6 +321,211 @@ fn asset_library_window(ctx: &egui::Context, app: &mut PaintApp) {
         app.show_asset_library = false;
     } else if want_close || !open {
         app.show_asset_library = false;
+    }
+}
+
+/// Titres de catégorie associés aux groupes de `tool_groups()`, dans le même
+/// ordre — uniquement utilisés ici pour structurer la documentation en
+/// sections (la barre d'outils elle-même n'affiche pas ces titres).
+const TOOL_CATEGORY_TITLES: &[&str] = &[
+    "Navigation",
+    "Dessin de base",
+    "Retouche photo (pixel)",
+    "Formes",
+    "Plume et texte",
+    "Retouche avancée",
+    "Utilitaires",
+];
+
+/// Documentation intégrée des outils (À propos ▸ Documentation), en français
+/// uniquement pour l'instant. Génère les sections à partir de `tool_groups()`
+/// pour ne jamais désynchroniser la doc de la barre d'outils réelle — un
+/// outil ajouté/renommé là-bas apparaît ici automatiquement.
+fn help_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_help {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new("📖 Documentation de QuickPaint")
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(true)
+        .default_size(egui::vec2(500.0, 620.0))
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.set_min_width(460.0);
+                ui.heading("QuickPaint");
+                ui.label(
+                    "Éditeur de dessin et de retouche en local, pensé pour \
+                     le doigt et le stylet autant que pour la souris.",
+                );
+                ui.add_space(6.0);
+
+                ui.collapsing("Pourquoi QuickPaint ?", |ui| {
+                    ui.label(
+                        "QuickPaint est né du constat que les grands \
+                         éditeurs (Photoshop, GIMP, Krita…) sont pensés \
+                         d'abord pour un clavier et une souris : menus \
+                         denses, cibles cliquables minuscules, raccourcis \
+                         indispensables pour aller vite. Sur un iPad ou un \
+                         écran tactile/stylet, cette densité devient vite \
+                         pénible — les outils sont dans le même esprit que \
+                         le presse-papiers d'un couteau suisse, mais mal \
+                         taillés pour un doigt.",
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        "QuickPaint part de l'inverse : une barre d'outils \
+                         à grosses cibles, des gestes tactiles direct sur le \
+                         canevas (pincer pour zoomer, glisser à deux doigts \
+                         pour déplacer la vue), et un outillage de retouche \
+                         photo (tampon, correcteur, densité +/-, éponge…) \
+                         habituellement réservé aux logiciels professionnels, \
+                         mais rendu accessible aussi bien au doigt qu'au \
+                         stylet ou à la souris.",
+                    );
+                });
+
+                ui.collapsing("Pourquoi « tactile » ?", |ui| {
+                    ui.label(
+                        "Le nom du dépôt (« macos_paint_tactile ») rappelle \
+                         l'objectif premier : dessiner confortablement sur un \
+                         écran tactile macOS (trackpad multitouch, écran \
+                         tactile externe, tablette graphique). Concrètement, \
+                         cela influence des choix directs dans le code :",
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        "• Cibles de la barre d'outils volontairement larges \
+                         (34×30 px) plutôt que des icônes minuscules serrées.",
+                    );
+                    ui.label(
+                        "• Épaisseur du Pinceau qui suit la vitesse du geste \
+                         — comme un vrai pinceau qu'on appuie plus ou moins \
+                         fort, sans passer par un réglage manuel.",
+                    );
+                    ui.label(
+                        "• Lissage/stabilisation du trait réglable, pour \
+                         compenser le tremblement naturel d'un doigt par \
+                         rapport à un stylet.",
+                    );
+                    ui.label(
+                        "• Zoom/pan par gestes (pincer, glisser à deux \
+                         doigts) en plus des raccourcis clavier, pour ne \
+                         jamais dépendre d'un clavier physique.",
+                    );
+                });
+
+                ui.collapsing("Pourquoi Rust ?", |ui| {
+                    ui.label(
+                        "L'application est écrite en Rust, avec l'interface \
+                         graphique « egui » (immédiate, redessinée à chaque \
+                         image) et un compositeur d'image en logiciel \
+                         (« tiny-skia », qui tourne sur le CPU plutôt que sur \
+                         la carte graphique). Trois raisons à ce choix :",
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        "• Performance et stabilité : peindre au doigt exige \
+                         un rendu fluide à chaque frame, sans latence — Rust \
+                         compile en code natif sans ramasse-miettes, et \
+                         empêche à la compilation des familles entières de \
+                         bugs mémoire (accès invalides, corruptions) qui \
+                         causent crashs et glitches visuels dans ce genre \
+                         d'application.",
+                    );
+                    ui.label(
+                        "• Application native macOS légère : un seul \
+                         exécutable, sans moteur web ni runtime lourd \
+                         embarqué, avec un vrai menu ⌘ système (voir plus \
+                         bas) et une intégration Mac soignée (retina, \
+                         trackpad, raccourcis).",
+                    );
+                    ui.label(
+                        "• 100 % local : aucune fonctionnalité (détourage, \
+                         retouche, filtres) ne dépend d'un serveur ou d'un \
+                         modèle distant — tout le traitement d'image se fait \
+                         sur la machine, hors-ligne, sans compte ni envoi de \
+                         données.",
+                    );
+                });
+
+                ui.separator();
+                ui.heading("Guide des outils");
+                ui.label(
+                    "Chaque outil ci-dessous reprend l'icône exacte de la \
+                     barre supérieure (même glyphe, même couleur), pour \
+                     repérer facilement de quoi il s'agit. Les raccourcis \
+                     clavier entre parenthèses fonctionnent quel que soit \
+                     l'outil actif.",
+                );
+                ui.separator();
+
+                for (title, group) in TOOL_CATEGORY_TITLES.iter().zip(tool_groups()) {
+                    ui.collapsing(*title, |ui| {
+                        for (tool, name, hint) in group {
+                            ui.horizontal(|ui| {
+                                let accent = tool_accent(tool);
+                                let (rect, _) =
+                                    ui.allocate_exact_size(egui::vec2(26.0, 24.0), egui::Sense::hover());
+                                ui.painter().rect_filled(rect, 5.0, accent.gamma_multiply(0.22));
+                                ui.painter().text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    tool_glyph(tool),
+                                    fill_font(15.0),
+                                    accent,
+                                );
+                                ui.vertical(|ui| {
+                                    ui.strong(name);
+                                    ui.label(hint);
+                                });
+                            });
+                            ui.add_space(6.0);
+                        }
+                    });
+                }
+
+                ui.separator();
+                ui.collapsing("Gomme : modes objet et pixel", |ui| {
+                    ui.label(
+                        "La Gomme (E) a deux comportements distincts selon le \
+                         mode choisi dans sa barre d'options :",
+                    );
+                    ui.add_space(4.0);
+                    ui.strong("Mode objet (par défaut)");
+                    ui.label(
+                        "Survoler un trait, un texte ou une image l'efface \
+                         entièrement — l'élément entier disparaît d'un coup, \
+                         pas seulement la partie sous le curseur.",
+                    );
+                    ui.add_space(4.0);
+                    ui.strong("Mode partiel");
+                    ui.label(
+                        "Glisser sur un trait ne supprime que le segment \
+                         survolé : le trait est coupé en morceaux, le reste \
+                         est conservé.",
+                    );
+                    ui.add_space(4.0);
+                    ui.strong("Gomme pixel");
+                    ui.label(
+                        "Outil séparé de la Gomme classique : elle retire de \
+                         l'alpha dans la couche raster du calque actif (les \
+                         pixels posés par le Pinceau pixel, le Pot de \
+                         peinture ou le Tampon de clonage), sans toucher aux \
+                         traits vectoriels, au texte ni aux images.",
+                    );
+                });
+
+                ui.separator();
+                if ui.button(t("Fermer", "Close")).clicked() {
+                    app.show_help = false;
+                }
+            });
+        });
+    if !open {
+        app.show_help = false;
     }
 }
 
@@ -392,11 +598,13 @@ fn style_presets_window(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
-/// Histogramme RGB + comparaison avant/après (Sprint 4.1). L'histogramme
-/// porte sur l'image seule sélectionnée sur le calque actif (calcul cher sur
-/// tout le canevas sinon) ; le bouton « Avant » ne fait qu'annuler/réappliquer
-/// la dernière action pendant que le clic est maintenu — voir
-/// `PaintApp::begin_compare_before`.
+/// Histogramme RGB + comparaison avant/après (Sprint 4.1 ; étendu au canevas
+/// entier par audit_sprint_xx.md D.4). Priorité à l'image sélectionnée sur le
+/// calque actif si présente (évite de recomposer tout le document à chaque
+/// frame quand ce n'est pas nécessaire) ; sinon, histogramme du rendu
+/// composite entier via `PaintApp::canvas_histogram`. Le bouton « Avant » ne
+/// fait qu'annuler/réappliquer la dernière action pendant que le clic est
+/// maintenu — voir `PaintApp::begin_compare_before`.
 fn histogram_window(ctx: &egui::Context, app: &mut PaintApp) {
     if !app.show_histogram {
         return;
@@ -415,12 +623,15 @@ fn histogram_window(ctx: &egui::Context, app: &mut PaintApp) {
                     let hist = crate::tools::filter::histogram_rgb(&im.rgba);
                     paint_histogram(ui, &hist);
                 }
-                None => {
-                    ui.label(t(
-                        "Sélectionne une image (outil Sélection) pour voir son histogramme.",
-                        "Select an image (Select tool) to see its histogram.",
-                    ));
-                }
+                None => match app.canvas_histogram(ctx) {
+                    Some(hist) => {
+                        ui.label(t("Canevas entier (aucune image sélectionnée) :", "Whole canvas (no image selected):"));
+                        paint_histogram(ui, &hist);
+                    }
+                    None => {
+                        ui.label(t("Impossible de calculer l'histogramme.", "Could not compute the histogram."));
+                    }
+                },
             }
             ui.separator();
             let resp = ui.add_enabled(
@@ -836,7 +1047,7 @@ fn mtitle(glyph: &str, label: &str) -> String {
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     use egui_phosphor::regular as ic;
     egui::menu::bar(ui, |ui| {
-        ui.menu_button(mtitle(ic::FILE, t("Fichier", "File")), |ui| {
+        ui.menu_button(t("Fichier", "File"), |ui| {
             if ui.button(mtitle(ic::FILE_PLUS, t("Nouveau (⌘N)", "New (⌘N)"))).clicked() {
                 app.new_document();
                 ui.close_menu();
@@ -922,7 +1133,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(mtitle(ic::PENCIL_SIMPLE, t("Édition", "Edit")), |ui| {
+        ui.menu_button(t("Édition", "Edit"), |ui| {
             if ui.add_enabled(app.history.can_undo(), egui::Button::new(t("↶ Annuler (⌘Z)", "↶ Undo (⌘Z)"))).clicked() {
                 app.undo();
                 ui.close_menu();
@@ -1096,7 +1307,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(mtitle(ic::STACK_SIMPLE, t("Calque", "Layer")), |ui| {
+        ui.menu_button(t("Calque", "Layer"), |ui| {
             if ui.button(t("Ajouter", "Add")).clicked() {
                 app.add_layer();
                 ui.close_menu();
@@ -1159,7 +1370,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        ui.menu_button(mtitle(ic::IMAGE, t("Image", "Image")), |ui| {
+        ui.menu_button(t("Image", "Image"), |ui| {
             if ui.button(t("Redimensionner l'image…", "Resize image…")).clicked() {
                 app.open_resize_dialog(false);
                 ui.close_menu();
@@ -1183,7 +1394,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
         });
 
-        ui.menu_button(mtitle(ic::EYE, t("Vue", "View")), |ui| {
+        ui.menu_button(t("Vue", "View"), |ui| {
             ui.horizontal(|ui| {
                 if ui.button(egui::RichText::new("−").monospace()).clicked() {
                     app.zoom_out();
@@ -1219,7 +1430,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
         });
 
-        ui.menu_button(mtitle(ic::SLIDERS, t("Filtres", "Filters")), |ui| {
+        ui.menu_button(t("Filtres", "Filters"), |ui| {
             for f in crate::tools::filter::Filter::ALL {
                 if ui.button(f.label()).clicked() {
                     app.filter_selection(f);
@@ -1228,26 +1439,26 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
         });
 
-        if ui.button(mtitle(ic::CHART_BAR, t("Histogramme", "Histogram"))).clicked() {
+        if ui.button(t("Histogramme", "Histogram")).clicked() {
             app.show_histogram = !app.show_histogram;
         }
 
-        if ui.button(mtitle(ic::PALETTE, t("LUT", "LUT"))).clicked() {
+        if ui.button(t("LUT", "LUT")).clicked() {
             app.show_lut_panel = !app.show_lut_panel;
         }
 
-        if ui.button(mtitle(ic::PERSPECTIVE, t("Perspective", "Perspective"))).clicked() {
+        if ui.button(t("Perspective", "Perspective")).clicked() {
             app.show_perspective_panel = !app.show_perspective_panel;
         }
 
-        ui.menu_button(mtitle(ic::GEAR, t("Préférences", "Preferences")), |ui| {
+        ui.menu_button(t("Préférences", "Preferences"), |ui| {
             if ui.button(t("Raccourcis clavier…", "Keyboard shortcuts…")).clicked() {
                 app.show_shortcuts_prefs = true;
                 ui.close_menu();
             }
         });
 
-        ui.menu_button(mtitle(ic::INFO, t("À propos", "About")), |ui| {
+        ui.menu_button(t("À propos", "About"), |ui| {
             ui.strong("QuickPaint");
             ui.label(t("Éditeur de dessin tactile · Rust + egui", "Touch drawing editor · Rust + egui"));
             ui.separator();
@@ -1256,13 +1467,32 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 ui.hyperlink_to("Loïc Berthod", "https://github.com/lberthod");
             });
             ui.hyperlink_to("github.com/lberthod/quickpaint", "https://github.com/lberthod/quickpaint");
+            ui.separator();
+            if ui.button(t("📖 Documentation des outils", "📖 Tool documentation")).clicked() {
+                app.show_help = true;
+                ui.close_menu();
+            }
         });
 
         // Côté droit : langue + zoom + annuler/rétablir rapides.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             language_switch(ui);
             ui.separator();
-            ui.label(format!("{} {:.0} %", t("Zoom", "Zoom"), app.zoom * 100.0));
+            // Layout droite→gauche : le premier widget ajouté est le plus à
+            // droite, donc l'ordre visuel « − / % / + » s'écrit à l'envers.
+            if ui.small_button("+").on_hover_text(t("Zoom avant (⌘+)", "Zoom in (⌘+)")).clicked() {
+                app.zoom_in();
+            }
+            if ui
+                .small_button(format!("{:.0} %", app.zoom * 100.0))
+                .on_hover_text(t("Réinitialiser le zoom (100 %)", "Reset zoom (100%)"))
+                .clicked()
+            {
+                app.reset_view();
+            }
+            if ui.small_button("−").on_hover_text(t("Zoom arrière (⌘−)", "Zoom out (⌘−)")).clicked() {
+                app.zoom_out();
+            }
             ui.separator();
             // Icônes Phosphor (UX-1.3) : le reste de l'interface (outils,
             // calques, menus) utilise déjà cette police vectorielle —
@@ -1974,6 +2204,10 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             ui.checkbox(&mut app.cutout_global, t("Global", "Global")).on_hover_text(t(
                 "Sélectionne toute la couleur proche dans la zone visible, pas seulement la région connectée au clic — utile pour un fond visible par bouts (feuillage…)",
                 "Selects all similar color in the visible area, not just the region connected to the click — useful for a background visible through gaps (foliage…)",
+            ));
+            ui.checkbox(&mut app.cutout_refine_edges, t("Affiner les bords", "Refine edges")).on_hover_text(t(
+                "Préserve les détails fins (mèches de cheveux, fourrure) au lieu de les noyer dans le dégradé uniforme du bord",
+                "Preserves fine detail (hair strands, fur) instead of blurring it into the uniform edge gradient",
             ));
             ui.label(t("⌥+clic : restaurer", "⌥+click: restore"));
         }

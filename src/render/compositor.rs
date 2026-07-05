@@ -16,7 +16,7 @@
 use crate::model::raster::{Tile, TileKey, TILE};
 use crate::model::{BlendMode, Document, ImageItem, Stroke, Tool};
 use crate::render::ribbon;
-use egui::{Color32, ColorImage, TextureHandle, TextureOptions};
+use egui::{Color32, ColorImage, TextureFilter, TextureHandle, TextureOptions};
 use std::collections::HashMap;
 use tiny_skia::{
     BlendMode as SkBlend, Color, FillRule, FilterQuality, GradientStop, LinearGradient, Mask, Paint,
@@ -69,7 +69,11 @@ impl Compositor {
     ) -> Option<&TextureHandle> {
         if self.tex.is_none() || self.sig != sig {
             if let Some(ci) = self.rebuild(ctx, doc, skip_text, None) {
-                self.tex = Some(ctx.load_texture("composite", ci, TextureOptions::LINEAR));
+                // Mipmaps : sans eux, la texture composite (résolution native du
+                // document) affichée plus petite que 1:1 est minifiée en bilinéaire
+                // pur — les traits fins deviennent pointillés/dédoublés (moiré).
+                let opts = TextureOptions::LINEAR.with_mipmap_mode(Some(TextureFilter::Linear));
+                self.tex = Some(ctx.load_texture("composite", ci, opts));
             }
             self.sig = sig;
         }
@@ -400,6 +404,14 @@ fn raster_stroke(pm: &mut Pixmap, stroke: &Stroke) {
         let a = mesh.vertices[tri[0] as usize].pos;
         let b = mesh.vertices[tri[1] as usize].pos;
         let c = mesh.vertices[tri[2] as usize].pos;
+        // Orientation homogène : le ruban mélange quads (sens dépendant de la
+        // direction du tracé) et disques (sens fixe) qui se recouvrent. En
+        // règle `Winding`, deux triangles superposés de sens opposés (+1/−1)
+        // s'annulent → trous en damier le long du trait. On force donc tous
+        // les triangles dans le même sens : les recouvrements s'additionnent
+        // (+2) au lieu de se creuser.
+        let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
+        let (b, c) = if area < 0.0 { (c, b) } else { (b, c) };
         pb.move_to(a.0, a.1);
         pb.line_to(b.0, b.1);
         pb.line_to(c.0, c.1);
@@ -1111,6 +1123,33 @@ mod tests {
         let mut pm = Pixmap::new(100, 100).unwrap();
         raster_stroke(&mut pm, &s);
         assert!(pm.pixels().iter().any(|p| p.alpha() > 0));
+    }
+
+    /// Régression : le ruban mélange quads et disques superposés dont le sens
+    /// d'enroulement diffère selon la direction du tracé. Sans normalisation
+    /// de l'orientation des triangles, la règle `Winding` annulait les
+    /// recouvrements (+1/−1) → trait en pointillés/damier après passage en
+    /// mode composite (bug pot de peinture). L'axe du trait doit être opaque
+    /// sur toute sa longueur, quel que soit le sens du tracé.
+    #[test]
+    fn raster_stroke_has_no_holes_along_the_centerline() {
+        for pts in [
+            vec![(10.0, 50.0), (50.0, 50.0), (90.0, 50.0)],
+            vec![(90.0, 50.0), (50.0, 50.0), (10.0, 50.0)], // sens inverse
+        ] {
+            let mut s = crate::model::Stroke::new([0, 0, 0, 255], 6.0, crate::model::Tool::Brush);
+            s.points = pts.iter().map(|&pos| crate::model::StrokePoint { pos, width: 6.0 }).collect();
+            let mut pm = Pixmap::new(100, 100).unwrap();
+            raster_stroke(&mut pm, &s);
+            for x in 12..88 {
+                let px = pm.pixel(x, 50).unwrap();
+                assert!(
+                    px.alpha() == 255,
+                    "trou à x={x} (alpha={}) — annulation de winding dans le ruban",
+                    px.alpha()
+                );
+            }
+        }
     }
 
     /// Roadmap ANALYSE.md §12.2 : l'export doit rendre le document à sa

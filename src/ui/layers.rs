@@ -139,6 +139,21 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     {
                         layer.visible = !layer.visible;
                     }
+                    // Verrouillage (audit_sprint_xx.md B.1) : bloque la
+                    // peinture/édition de contenu sur ce calque tant qu'actif
+                    // (voir `layer_lock_blocks_tool` dans `app/mod.rs`) — la
+                    // visibilité, l'opacité et le réordonnancement restent
+                    // possibles, volontairement pas bloqués ici.
+                    let lock_icon = if layer.locked { egui_phosphor::regular::LOCK } else { egui_phosphor::regular::LOCK_OPEN };
+                    if icon_button(ui, layer.locked, lock_icon)
+                        .on_hover_text(t(
+                            "Verrouiller / déverrouiller (bloque la peinture, pas la visibilité)",
+                            "Lock / unlock (blocks painting, not visibility)",
+                        ))
+                        .clicked()
+                    {
+                        layer.locked = !layer.locked;
+                    }
                     let dim = if layer.opacity < 0.999 {
                         format!(" · {:.0}%", layer.opacity * 100.0)
                     } else {
@@ -265,6 +280,12 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 ui.selectable_value(&mut adj, Adjustment::default_bokeh(), t("Bokeh", "Bokeh"));
                 ui.selectable_value(&mut adj, Adjustment::default_duotone(), t("Duotone", "Duotone"));
                 ui.selectable_value(&mut adj, Adjustment::default_arc_warp(), t("Warp : Arc", "Warp: Arc"));
+                ui.separator();
+                ui.selectable_value(&mut adj, Adjustment::default_exposure(), t("Exposition", "Exposure"));
+                ui.selectable_value(&mut adj, Adjustment::default_vibrance(), t("Vibrance", "Vibrance"));
+                ui.selectable_value(&mut adj, Adjustment::default_white_balance(), t("Balance des blancs", "White balance"));
+                ui.selectable_value(&mut adj, Adjustment::default_denoise(), t("Réduction de bruit", "Noise reduction"));
+                ui.selectable_value(&mut adj, Adjustment::default_gaussian_blur(), t("Flou gaussien", "Gaussian blur"));
             });
         });
         match &mut adj {
@@ -360,6 +381,42 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     ui.label(t("Quantité", "Amount"));
                     ui.add(egui::Slider::new(amount, -1.0..=1.0))
                         .on_hover_text(t("Positif = bombé vers le haut, négatif = vers le bas", "Positive = bulges upward, negative = downward"));
+                });
+            }
+            Adjustment::Exposure { ev } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Exposition", "Exposure"));
+                    ui.add(egui::Slider::new(ev, -3.0..=3.0).suffix(" EV"));
+                });
+            }
+            Adjustment::Vibrance { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Vibrance", "Vibrance"));
+                    ui.add(egui::Slider::new(amount, -1.0..=1.0));
+                });
+            }
+            Adjustment::WhiteBalance { temp, tint } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Température", "Temperature"));
+                    ui.add(egui::Slider::new(temp, -1.0..=1.0))
+                        .on_hover_text(t("Positif = plus chaud (orange), négatif = plus froid (bleu)", "Positive = warmer (orange), negative = cooler (blue)"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Teinte", "Tint"));
+                    ui.add(egui::Slider::new(tint, -1.0..=1.0))
+                        .on_hover_text(t("Positif = magenta, négatif = vert", "Positive = magenta, negative = green"));
+                });
+            }
+            Adjustment::Denoise { strength } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Intensité", "Strength"));
+                    ui.add(egui::Slider::new(strength, 0.0..=1.0));
+                });
+            }
+            Adjustment::GaussianBlur { radius } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Rayon", "Radius"));
+                    ui.add(egui::Slider::new(radius, 0.0..=40.0).suffix(" px"));
                 });
             }
             Adjustment::Preset(_) => {}
@@ -486,7 +543,21 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 (txt.id, short(&txt.text).to_string())
             } else if row < nt + ni {
                 let im = &l.images[ni - 1 - (row - nt)];
-                (im.id, format!("{} {}×{}", t("Image", "Image"), im.w, im.h))
+                // Objet intelligent léger (audit_sprint_xx.md B.3) : `size`
+                // (affichage) est toujours découplé de `w`/`h` (résolution
+                // source conservée telle quelle, jamais rééchantillonnée par
+                // un redimensionnement) — d'où l'indicateur : tant que la
+                // taille affichée reste sous la résolution source, on peut
+                // encore agrandir sans perte ; au-delà, l'image est
+                // suréchantillonnée (badge « ↑ » pour le signaler).
+                let native = format!("{}×{}", im.w, im.h);
+                let shown = (im.size.0.round() as i64, im.size.1.round() as i64);
+                let badge = if shown.0 > im.w as i64 || shown.1 > im.h as i64 {
+                    format!(" ⚠ {}×{} > {native}", shown.0, shown.1)
+                } else {
+                    format!(" · {native}")
+                };
+                (im.id, format!("{}{badge}", t("Image", "Image")))
             } else {
                 let s = &l.strokes[ns - 1 - (row - nt - ni)];
                 let kind = if s.fill { t("forme", "shape") } else { t("trait", "stroke") };
