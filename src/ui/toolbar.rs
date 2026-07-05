@@ -123,6 +123,14 @@ fn tool_groups() -> Vec<Vec<(ActiveTool, &'static str, &'static str)>> {
                 ),
             ),
             (
+                ActiveTool::Airbrush,
+                t("Aérographe", "Airbrush"),
+                t(
+                    "Dépose en continu tant que le clic est maintenu, même immobile",
+                    "Deposits continuously while held, even without moving",
+                ),
+            ),
+            (
                 ActiveTool::CloneStamp,
                 t("Tampon de clonage", "Clone stamp"),
                 t(
@@ -259,6 +267,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     template_gallery(ctx, app);
     shortcuts_prefs_window(ctx, app);
     batch_export_window(ctx, app);
+    export_preview_window(ctx, app);
     style_presets_window(ctx, app);
     asset_library_window(ctx, app);
     brush_library_window(ctx, app);
@@ -852,6 +861,21 @@ fn brush_library_window(ctx: &egui::Context, app: &mut PaintApp) {
                 app.delete_brush_preset(&name);
             }
             ui.separator();
+            ui.label(t("Tampon personnalisé (Pinceau pixel) :", "Custom stamp (Pixel brush):"));
+            ui.horizontal(|ui| {
+                if ui.button(t("Importer une image comme brosse…", "Import an image as brush…")).clicked() {
+                    app.import_brush_stamp();
+                }
+                if app.brush.custom_stamp.is_some() && ui.button(t("Retirer", "Remove")).clicked() {
+                    app.brush.custom_stamp = None;
+                }
+            })
+            .response
+            .on_hover_text(t(
+                "Luminance de l'image = couverture, remplace la formule de couverture circulaire",
+                "Image luminance = coverage, replaces the circular coverage formula",
+            ));
+            ui.separator();
             if ui.button(t("Fermer", "Close")).clicked() {
                 app.show_brush_library = false;
             }
@@ -881,7 +905,7 @@ fn batch_export_window(ctx: &egui::Context, app: &mut PaintApp) {
             ui.set_min_width(300.0);
             ui.label(t("Format :", "Format:"));
             ui.horizontal(|ui| {
-                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Pdf] {
+                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Gif, ExportFormat::Pdf] {
                     ui.radio_value(&mut app.batch_export.format, fmt, fmt.label());
                 }
             });
@@ -906,6 +930,34 @@ fn batch_export_window(ctx: &egui::Context, app: &mut PaintApp) {
                 );
             });
             ui.separator();
+            ui.label(t("Profils d'export nommés :", "Named export profiles:"));
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut app.export_profile_name).hint_text(t("Nom du profil", "Profile name")));
+                if ui.button(t("Enregistrer", "Save")).clicked() {
+                    let name = std::mem::take(&mut app.export_profile_name);
+                    app.save_export_profile(name);
+                }
+            });
+            let mut to_apply: Option<crate::export::ExportProfile> = None;
+            let mut to_delete: Option<String> = None;
+            for profile in app.export_profiles.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(&profile.name);
+                    if ui.button(t("Appliquer", "Apply")).clicked() {
+                        to_apply = Some(profile.clone());
+                    }
+                    if ui.button("🗑").on_hover_text(t("Supprimer", "Delete")).clicked() {
+                        to_delete = Some(profile.name.clone());
+                    }
+                });
+            }
+            if let Some(profile) = to_apply {
+                app.apply_export_profile(&profile);
+            }
+            if let Some(name) = to_delete {
+                app.delete_export_profile(&name);
+            }
+            ui.separator();
             ui.label(t(
                 "Un seul dossier sera demandé pour tous les fichiers.",
                 "You'll be asked for one folder for all files.",
@@ -923,6 +975,98 @@ fn batch_export_window(ctx: &egui::Context, app: &mut PaintApp) {
         app.request_batch_export(ctx);
     } else if want_cancel || !open {
         app.show_batch_export = false;
+    }
+}
+
+/// Formatte une taille en octets en Ko/Mo lisibles (Sprint L.2).
+fn human_size(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    let b = bytes as f64;
+    if b >= MB {
+        format!("{:.1} Mo", b / MB)
+    } else {
+        format!("{:.0} Ko", (b / KB).max(1.0))
+    }
+}
+
+/// Aperçu et poids estimé avant export (Sprint L.2), avec case « exporter
+/// uniquement la sélection » (Sprint L.1) — un seul dialogue, l'aperçu se
+/// recalcule à chaque changement de format ou de la case.
+fn export_preview_window(ctx: &egui::Context, app: &mut PaintApp) {
+    let Some(d) = &app.export_dialog else { return };
+    let mut open = true;
+    let mut want_export = false;
+    let mut want_cancel = false;
+    let mut new_format = d.format;
+    let mut new_selection_only = d.selection_only;
+    let has_selection = !app.selection.is_empty();
+    egui::Window::new(t("Aperçu de l'export", "Export preview"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(280.0);
+            let d = app.export_dialog.as_ref().unwrap();
+            let max_side = 220.0f32;
+            let scale = (max_side / d.w.max(d.h) as f32).min(1.0);
+            let size = egui::Vec2::new(d.w as f32 * scale, d.h as f32 * scale);
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Image::from_texture((d.texture.id(), d.texture.size_vec2())).fit_to_exact_size(size));
+            });
+            ui.label(format!(
+                "{} × {} · ≈ {}",
+                d.w,
+                d.h,
+                human_size(d.bytes.len())
+            ));
+            ui.separator();
+            ui.horizontal(|ui| {
+                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Gif, ExportFormat::Pdf] {
+                    ui.radio_value(&mut new_format, fmt, fmt.label());
+                }
+            });
+            if matches!(new_format, ExportFormat::Jpg | ExportFormat::Pdf) {
+                ui.horizontal(|ui| {
+                    ui.label(t("Qualité JPEG :", "JPEG quality:"));
+                    ui.add(egui::Slider::new(&mut app.jpeg_quality, 1..=100));
+                });
+            }
+            ui.add_enabled_ui(has_selection, |ui| {
+                ui.checkbox(&mut new_selection_only, t("Exporter uniquement la sélection", "Export selection only"))
+                    .on_hover_text(if has_selection {
+                        t("Limite l'export à la boîte englobante de la sélection", "Limits the export to the selection's bounding box")
+                    } else {
+                        t("Aucune sélection active", "No active selection")
+                    });
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button(t("Exporter…", "Export…")).clicked() {
+                    want_export = true;
+                }
+                if ui.button(t("Annuler", "Cancel")).clicked() {
+                    want_cancel = true;
+                }
+            });
+        });
+    if want_export {
+        app.confirm_export_dialog();
+        return;
+    }
+    if want_cancel || !open {
+        app.export_dialog = None;
+        return;
+    }
+    let format_changed = app.export_dialog.as_ref().is_some_and(|d| d.format != new_format);
+    let selection_changed = app.export_dialog.as_ref().is_some_and(|d| d.selection_only != new_selection_only);
+    if format_changed || selection_changed {
+        if let Some(d) = &mut app.export_dialog {
+            d.format = new_format;
+            d.selection_only = new_selection_only;
+        }
+        app.refresh_export_dialog(ctx);
     }
 }
 
@@ -1095,6 +1239,17 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.import_psd();
                 ui.close_menu();
             }
+            if ui
+                .button(t("Importer un SVG…", "Import SVG…"))
+                .on_hover_text(t(
+                    "Ouvre un SVG comme nouveau document vectoriel éditable (traits/textes déplaçables)",
+                    "Opens an SVG as a new editable vector document (movable strokes/text)",
+                ))
+                .clicked()
+            {
+                app.import_svg();
+                ui.close_menu();
+            }
             if ui.button(t("Coller une image (⌘V)", "Paste image (⌘V)")).clicked() {
                 app.paste_image();
                 ui.close_menu();
@@ -1111,15 +1266,30 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                         .on_hover_text(t("S'applique aussi au JPEG embarqué dans le PDF", "Also applies to the JPEG embedded in the PDF"));
                 });
                 ui.separator();
-                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Pdf] {
-                    if ui.button(fmt.label()).clicked() {
-                        app.request_export(ctx, fmt);
+                for fmt in [ExportFormat::Png, ExportFormat::Jpg, ExportFormat::Webp, ExportFormat::Gif, ExportFormat::Pdf] {
+                    if ui
+                        .button(fmt.label())
+                        .on_hover_text(t("Ouvre l'aperçu avant export (Sprint L.1/L.2)", "Opens the export preview"))
+                        .clicked()
+                    {
+                        app.open_export_dialog(ctx, fmt);
                         ui.close_menu();
                     }
                 }
                 ui.separator();
                 if ui.button(t("SVG (vectoriel)", "SVG (vector)")).clicked() {
                     app.export_svg();
+                    ui.close_menu();
+                }
+                if ui
+                    .button(t("PDF (vectoriel)", "PDF (vector)"))
+                    .on_hover_text(t(
+                        "Texte et formes restent nets à toute résolution (police standard, sans dégradés/texte courbe)",
+                        "Text and shapes stay crisp at any resolution (standard font, no gradients/curved text)",
+                    ))
+                    .clicked()
+                {
+                    app.export_pdf_vector();
                     ui.close_menu();
                 }
             });
@@ -1163,6 +1333,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             if ui.add_enabled(has_sel, egui::Button::new(t("Supprimer (Suppr)", "Delete (Del)"))).clicked() {
                 app.delete_selection();
+                ui.close_menu();
+            }
+            if ui.button(t("Inverser la sélection (⌘⇧I)", "Invert selection (⌘⇧I)")).clicked() {
+                app.invert_selection();
                 ui.close_menu();
             }
             ui.separator();
@@ -1296,6 +1470,28 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     app.align(AlignMode::DistributeV);
                     ui.close_menu();
                 }
+                ui.separator();
+                ui.menu_button(t("Calques", "Layers"), |ui| {
+                    let items: &[(&str, AlignMode)] = &[
+                        (t("Bords gauches", "Left edges"), AlignMode::Left),
+                        (t("centres (H)", "centers (H)"), AlignMode::CenterH),
+                        (t("Bords droits", "Right edges"), AlignMode::Right),
+                        (t("Bords hauts", "Top edges"), AlignMode::Top),
+                        (t("centres (V)", "centers (V)"), AlignMode::MiddleV),
+                        (t("Bords bas", "Bottom edges"), AlignMode::Bottom),
+                    ];
+                    for (label, mode) in items {
+                        if ui.button(*label).clicked() {
+                            app.align_layer_to_document(*mode);
+                            ui.close_menu();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(t(
+                    "Aligne tout le contenu du calque actif par rapport au document",
+                    "Aligns the active layer's whole content relative to the document",
+                ));
             });
             if ui.button(t("Effacer le calque", "Clear layer")).clicked() {
                 app.clear_active_layer();
@@ -1339,6 +1535,34 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 "Non destructif : réversible, re-réglable (change le filtre à tout moment)",
                 "Non-destructive: reversible, re-adjustable (change the filter anytime)",
             ));
+            ui.menu_button(t("Nouveau calque de remplissage", "New fill layer"), |ui| {
+                let (dw, dh) = app.doc.size;
+                let bounds = ((0.0, 0.0), (dw as f32, dh as f32));
+                if ui.button(t("Uni", "Solid")).clicked() {
+                    app.add_fill_layer(crate::model::FillKind::Solid([128, 128, 128, 255]));
+                    ui.close_menu();
+                }
+                if ui.button(t("Dégradé linéaire", "Linear gradient")).clicked() {
+                    let g = crate::model::Gradient::two_stop(
+                        crate::model::GradientKind::Linear,
+                        bounds,
+                        [0, 0, 0, 255],
+                        [255, 255, 255, 255],
+                    );
+                    app.add_fill_layer(crate::model::FillKind::Linear(g));
+                    ui.close_menu();
+                }
+                if ui.button(t("Dégradé radial", "Radial gradient")).clicked() {
+                    let g = crate::model::Gradient::two_stop(
+                        crate::model::GradientKind::Radial,
+                        bounds,
+                        [255, 255, 255, 255],
+                        [0, 0, 0, 255],
+                    );
+                    app.add_fill_layer(crate::model::FillKind::Radial(g));
+                    ui.close_menu();
+                }
+            });
             if ui.button(t("Dupliquer", "Duplicate")).clicked() {
                 app.duplicate_layer();
                 ui.close_menu();
@@ -1373,6 +1597,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             if ui.button(t("Taille du canevas…", "Canvas size…")).clicked() {
                 app.open_resize_dialog(true);
+                ui.close_menu();
+            }
+            if ui.button(t("Rogner les bords vides", "Trim empty borders")).clicked() {
+                app.trim_transparent_borders(ctx);
                 ui.close_menu();
             }
             ui.separator();
@@ -1656,6 +1884,7 @@ fn tool_accent(tool: ActiveTool) -> Color32 {
         ActiveTool::Bucket => Color32::from_rgb(0x00, 0xAC, 0xC1),
         ActiveTool::Eyedropper => Color32::from_rgb(0x00, 0x96, 0x88),
         ActiveTool::PixelBrush => Color32::from_rgb(0xE0, 0x7A, 0x1F),
+        ActiveTool::Airbrush => Color32::from_rgb(0xE8, 0x8C, 0x3D),
         ActiveTool::PixelEraser => Color32::from_rgb(0xD3, 0x3F, 0x3F),
         ActiveTool::CloneStamp => Color32::from_rgb(0x9B, 0x51, 0xE0),
         ActiveTool::Healing => Color32::from_rgb(0xC0, 0x39, 0x2B),
@@ -1696,7 +1925,7 @@ fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hi
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tool_glyph(tool), fill_font(18.0), icon_col);
     // Badge damier en coin : signale les outils « pixel » (peignent le
     // calque raster) par opposition à leurs équivalents vectoriels.
-    if matches!(tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser) {
+    if matches!(tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::Airbrush) {
         let badge = rect.center() + Vec2::new(9.0, 8.0);
         ui.painter().text(
             badge,
@@ -1741,6 +1970,7 @@ fn tool_glyph(tool: ActiveTool) -> &'static str {
         ActiveTool::Brush => PAINT_BRUSH,
         ActiveTool::Eraser => ERASER,
         ActiveTool::PixelBrush => PAINT_BRUSH,
+        ActiveTool::Airbrush => SPRAY_BOTTLE,
         ActiveTool::PixelEraser => ERASER,
         ActiveTool::CloneStamp => STAMP,
         ActiveTool::Healing => FIRST_AID,
@@ -2287,6 +2517,16 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
             .clicked()
         {
             app.add_to_palette(current);
+        }
+        if ui
+            .button(t("Extraire d'une image", "Extract from image"))
+            .on_hover_text(t(
+                "Sélectionne une image (outil Sélection) puis extrait ses couleurs dominantes",
+                "Select an image (Select tool), then extract its dominant colors",
+            ))
+            .clicked()
+        {
+            app.extract_palette_from_selection();
         }
 
         ui.separator();

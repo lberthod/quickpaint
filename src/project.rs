@@ -83,6 +83,13 @@ pub fn import_image_dialog() -> Option<Result<ImagePixels, String>> {
     Some(load_image_from_path(&path))
 }
 
+/// Charge une image depuis un chemin déjà connu (glisser-déposer, Sprint
+/// L.4) — pas de dialogue, mêmes règles de validation que
+/// [`import_image_dialog`].
+pub fn import_image_from_path(path: &std::path::Path) -> Result<ImagePixels, String> {
+    load_image_from_path(path)
+}
+
 fn load_image_from_path(path: &std::path::Path) -> Result<ImagePixels, String> {
     let img = image::open(path)
         .map_err(|e| format!("{} : {e}", t("image illisible", "unreadable image")))?
@@ -159,6 +166,20 @@ pub(crate) fn home_env_lock() -> &'static std::sync::Mutex<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_image_from_path_decodes_gif() {
+        // Régression (Sprint L.6) : la feature `gif` de la crate `image`
+        // n'était pas activée dans Cargo.toml malgré le filtre de fichiers
+        // l'annonçant déjà — un .gif déposé/importé échouait silencieusement.
+        let path = std::env::temp_dir().join("quickpaint-test-import.gif");
+        image::RgbaImage::from_fn(3, 2, |x, _| image::Rgba([x as u8 * 60, 100, 150, 255]))
+            .save(&path)
+            .expect("write gif");
+        let (w, h, _) = import_image_from_path(&path).expect("decode gif");
+        assert_eq!((w, h), (3, 2));
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn rejects_a_format_version_from_the_future() {

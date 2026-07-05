@@ -3,19 +3,37 @@
 //! roadmap ANALYSE.md §12.2) — plus de dépendance à une capture d'écran du
 //! viewport, donc plus de perte de résolution liée au zoom ou à la taille de
 //! la fenêtre. Ce module se contente d'encoder le buffer RGBA reçu au format
-//! choisi : PNG, JPG, WebP ou PDF (mono-page).
+//! choisi : PNG, JPG, WebP, GIF (statique) ou PDF (mono-page).
+//!
+//! GIF (Sprint L.6) : export **statique** uniquement — une palette 256
+//! couleurs (quantification de la crate `image`), pas d'animation. Le GIF
+//! animé demande d'abord une notion de frames/timeline absente du modèle de
+//! document actuel (le document est une image fixe) ; voir `sprint_next.md`
+//! L.6 pour ce que ça impliquerait de concevoir avant de coder l'export
+//! animé lui-même — hors de portée de ce module.
+//!
+//! Métadonnées (Sprint L.3, point 17 de l'audit) : aucune n'est jamais
+//! écrite. L'export part toujours d'un buffer RGBA fraîchement rendu par le
+//! compositeur (`render_to_rgba`), jamais des octets d'un fichier source —
+//! il n'y a donc aucun EXIF/IPTC à faire transiter, même quand l'image
+//! d'origine (import PNG/JPEG/PSD…) en portait. Les encodeurs de la crate
+//! `image` (PNG/WebP/JPEG) et le PDF construit à la main n'ajoutent rien
+//! non plus de leur propre chef. Vérifié par lecture de code plutôt que par
+//! un ajout de case à cocher qui n'aurait rien à faire.
 
 use crate::i18n::t;
-use std::io::Write;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Formats d'export bitmap proposés dans le menu Fichier.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExportFormat {
     Png,
     Jpg,
     Webp,
+    /// GIF statique (Sprint L.6) — voir la doc de module pour l'animé.
+    Gif,
     Pdf,
 }
 
@@ -25,6 +43,7 @@ impl ExportFormat {
             ExportFormat::Png => "PNG",
             ExportFormat::Jpg => "JPEG",
             ExportFormat::Webp => "WebP",
+            ExportFormat::Gif => "GIF",
             ExportFormat::Pdf => "PDF",
         }
     }
@@ -34,9 +53,27 @@ impl ExportFormat {
             ExportFormat::Png => "png",
             ExportFormat::Jpg => "jpg",
             ExportFormat::Webp => "webp",
+            ExportFormat::Gif => "gif",
             ExportFormat::Pdf => "pdf",
         }
     }
+}
+
+/// Profil d'export nommé (Sprint L.8) : regroupe format + qualité JPEG +
+/// tailles du batch export en un préréglage réutilisable en un clic — même
+/// mécanisme de persistance que `style_presets`/`brush_presets`
+/// (`i18n::{load,save}_export_profiles`), pas une nouvelle infrastructure.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ExportProfile {
+    pub name: String,
+    pub format: ExportFormat,
+    pub jpeg_quality: u8,
+    pub scale_half: bool,
+    pub scale_1: bool,
+    pub scale_2: bool,
+    pub scale_3: bool,
+    pub custom_enabled: bool,
+    pub custom_width: String,
 }
 
 /// Exporte simultanément plusieurs tailles dans un dossier choisi une seule
@@ -105,27 +142,67 @@ pub fn save_dialog(w: u32, h: u32, rgba: &[u8], format: ExportFormat, jpeg_quali
 
 /// Encode et écrit le buffer RGBA dans `path` selon le format.
 fn encode_to(path: &PathBuf, w: u32, h: u32, rgba: &[u8], format: ExportFormat, jpeg_quality: u8) -> std::io::Result<()> {
+    let bytes = encode_to_bytes(w, h, rgba, format, jpeg_quality)?;
+    std::fs::write(path, bytes)
+}
+
+/// Encode le buffer RGBA en mémoire selon le format, sans écrire sur disque
+/// (Sprint L.2) — sert à l'aperçu/poids estimé avant export, et réutilisé
+/// tel quel par `encode_to` pour ne coder la logique d'encodage qu'une fois.
+pub fn encode_to_bytes(w: u32, h: u32, rgba: &[u8], format: ExportFormat, jpeg_quality: u8) -> std::io::Result<Vec<u8>> {
     let buf = image::RgbaImage::from_raw(w, h, rgba.to_vec())
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "buffer invalide"))?;
     let to_io = |e: image::ImageError| std::io::Error::other(e.to_string());
+    let mut out = Vec::new();
     match format {
-        ExportFormat::Png => buf.save(path).map_err(to_io),
-        ExportFormat::Webp => buf.save(path).map_err(to_io),
+        ExportFormat::Png => {
+            image::DynamicImage::ImageRgba8(buf)
+                .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+                .map_err(to_io)?;
+        }
+        ExportFormat::Webp => {
+            image::DynamicImage::ImageRgba8(buf)
+                .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::WebP)
+                .map_err(to_io)?;
+        }
+        ExportFormat::Gif => {
+            // GIF statique (Sprint L.6) : une seule image, quantifiée par
+            // l'encodeur GIF de la crate `image` (palette 256 couleurs).
+            image::DynamicImage::ImageRgba8(buf)
+                .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Gif)
+                .map_err(to_io)?;
+        }
         ExportFormat::Jpg => {
             // JPEG est opaque : on aplatit l'alpha sur blanc.
             let rgb = image::DynamicImage::ImageRgba8(buf).to_rgb8();
-            let mut file = std::fs::File::create(path)?;
-            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, jpeg_quality.clamp(1, 100))
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, jpeg_quality.clamp(1, 100))
                 .encode_image(&rgb)
-                .map_err(to_io)
+                .map_err(to_io)?;
         }
-        ExportFormat::Pdf => write_pdf(path, w, h, &buf, jpeg_quality),
+        ExportFormat::Pdf => out = build_pdf_bytes(w, h, &buf, jpeg_quality)?,
     }
+    Ok(out)
 }
 
-/// Écrit un PDF mono-page embarquant l'image en JPEG (filtre DCTDecode). Format
-/// minimal mais valide ; évite une dépendance PDF lourde et changeante.
-fn write_pdf(path: &PathBuf, w: u32, h: u32, buf: &image::RgbaImage, jpeg_quality: u8) -> std::io::Result<()> {
+/// Ouvre un sélecteur « Enregistrer » et écrit `bytes` déjà encodés
+/// (Sprint L.2) — évite un second encodage entre l'aperçu et l'écriture
+/// finale (notamment pour le JPEG, dont l'encodage n'est pas gratuit).
+pub fn save_dialog_bytes(format: ExportFormat, bytes: &[u8]) -> std::io::Result<PathBuf> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter(format.label(), &[format.ext()])
+        .set_file_name(format!("QuickPaint-{stamp}.{}", format.ext()))
+        .save_file()
+    else {
+        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
+    };
+    std::fs::write(&path, bytes)?;
+    Ok(path)
+}
+
+/// Construit un PDF mono-page embarquant l'image en JPEG (filtre DCTDecode).
+/// Format minimal mais valide ; évite une dépendance PDF lourde et changeante.
+fn build_pdf_bytes(w: u32, h: u32, buf: &image::RgbaImage, jpeg_quality: u8) -> std::io::Result<Vec<u8>> {
     // Encode l'image en JPEG en mémoire (flux DCTDecode du PDF).
     let mut jpeg = Vec::new();
     let rgb = image::DynamicImage::ImageRgba8(buf.clone()).to_rgb8();
@@ -194,9 +271,7 @@ fn write_pdf(path: &PathBuf, w: u32, h: u32, buf: &image::RgbaImage, jpeg_qualit
         format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF").as_bytes(),
     );
 
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(&pdf)?;
-    Ok(())
+    Ok(pdf)
 }
 
 #[cfg(test)]
@@ -221,6 +296,7 @@ mod tests {
             (ExportFormat::Png, "p.png"),
             (ExportFormat::Jpg, "p.jpg"),
             (ExportFormat::Webp, "p.webp"),
+            (ExportFormat::Gif, "p.gif"),
         ] {
             let path = tmp(name);
             encode_to(&path, w, h, img.as_raw(), fmt, 90).expect("encode");
@@ -250,10 +326,22 @@ mod tests {
     }
 
     #[test]
+    fn encode_to_bytes_matches_encode_to_file_size() {
+        // L'aperçu en mémoire (Sprint L.2) doit produire exactement les mêmes
+        // octets que l'écriture sur disque — même chemin d'encodage, pas une
+        // approximation.
+        let img = sample();
+        let path = tmp("bytes-vs-file.png");
+        encode_to(&path, img.width(), img.height(), img.as_raw(), ExportFormat::Png, 90).expect("encode");
+        let from_file = std::fs::read(&path).expect("read");
+        let from_bytes = encode_to_bytes(img.width(), img.height(), img.as_raw(), ExportFormat::Png, 90).expect("encode bytes");
+        assert_eq!(from_file, from_bytes);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn pdf_is_well_formed() {
-        let path = tmp("p.pdf");
-        write_pdf(&path, 4, 3, &sample(), 90).expect("pdf");
-        let bytes = std::fs::read(&path).expect("read");
+        let bytes = build_pdf_bytes(4, 3, &sample(), 90).expect("pdf");
         assert!(bytes.starts_with(b"%PDF-1.4"));
         assert!(bytes.ends_with(b"%%EOF"));
         // Doit contenir l'objet image et la table xref.
@@ -261,6 +349,5 @@ mod tests {
         assert!(s.contains("/Subtype /Image"));
         assert!(s.contains("/DCTDecode"));
         assert!(s.contains("startxref"));
-        let _ = std::fs::remove_file(&path);
     }
 }

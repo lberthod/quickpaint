@@ -11,6 +11,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         ActiveTool::Brush => (t("Pinceau", "Brush"), app.brush.width),
         ActiveTool::Eraser => (t("Gomme", "Eraser"), app.eraser.width),
         ActiveTool::PixelBrush => (t("Pinceau pixel", "Pixel brush"), app.brush.width),
+        ActiveTool::Airbrush => (t("Aérographe", "Airbrush"), app.brush.width),
         ActiveTool::PixelEraser => (t("Gomme pixel", "Pixel eraser"), app.eraser.width),
         ActiveTool::CloneStamp => (t("Tampon de clonage", "Clone stamp"), app.brush.width),
         ActiveTool::Healing => (t("Correcteur", "Healing brush"), app.brush.width),

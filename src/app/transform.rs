@@ -17,6 +17,11 @@ use egui::Pos2;
 enum XformKind {
     Scale { anchor: (f32, f32) },              // coin opposé fixe
     Rotate { center: (f32, f32), start: f32 }, // pivot + angle initial du pointeur
+    /// Cisaillement (Sprint M.2), autour du centre de la boîte de sélection :
+    /// `horizontal` (poignée du bord bas, glissé en x) ou vertical (poignée
+    /// du bord droit, glissé en y). `start` = position pointeur (doc) au
+    /// début du geste, pour mesurer le glissé accumulé.
+    Shear { pivot: (f32, f32), horizontal: bool, start: (f32, f32) },
 }
 
 /// Transformation en cours sur la sélection active.
@@ -43,6 +48,17 @@ impl PaintApp {
         Some((corners, rot))
     }
 
+    /// Poignées de cisaillement (Sprint M.2) : milieu du bord bas
+    /// (cisaillement horizontal) et milieu du bord droit (cisaillement
+    /// vertical), distinctes des coins (échelle) et de la poignée au-dessus
+    /// (rotation).
+    pub(super) fn shear_handles(&self, view: &ViewTransform) -> Option<(Pos2, Pos2)> {
+        let (mn, mx) = self.selection_bounds()?;
+        let bottom_mid = view.doc_to_screen(((mn.0 + mx.0) * 0.5, mx.1));
+        let right_mid = view.doc_to_screen((mx.0, (mn.1 + mx.1) * 0.5));
+        Some((Pos2::new(bottom_mid.x, bottom_mid.y + 18.0), Pos2::new(right_mid.x + 18.0, right_mid.y)))
+    }
+
     /// Démarre une transformation si le clic tombe sur une poignée.
     pub(super) fn start_transform_if_handle(&mut self, p: Pos2, view: &ViewTransform) -> bool {
         if self.selection.is_empty() {
@@ -63,6 +79,29 @@ impl PaintApp {
                 angle: 0.0,
             });
             return true;
+        }
+        // Cisaillement (bords bas/droit), avant les coins d'échelle.
+        if let Some((bottom_mid, right_mid)) = self.shear_handles(view) {
+            if (bottom_mid - p).length() <= 10.0 {
+                self.xform = Some(TransformDrag {
+                    kind: XformKind::Shear { pivot: center, horizontal: true, start: view.screen_to_doc(p) },
+                    bbox: (mn, mx),
+                    sx: 0.0,
+                    sy: 0.0,
+                    angle: 0.0,
+                });
+                return true;
+            }
+            if (right_mid - p).length() <= 10.0 {
+                self.xform = Some(TransformDrag {
+                    kind: XformKind::Shear { pivot: center, horizontal: false, start: view.screen_to_doc(p) },
+                    bbox: (mn, mx),
+                    sx: 0.0,
+                    sy: 0.0,
+                    angle: 0.0,
+                });
+                return true;
+            }
         }
         // Coins → échelle.
         let doc_corners = [(mn.0, mn.1), (mx.0, mn.1), (mx.0, mx.1), (mn.0, mx.1)];
@@ -113,6 +152,16 @@ impl PaintApp {
                 }
                 x.angle = da;
             }
+            XformKind::Shear { horizontal, start, .. } => {
+                let d = view.screen_to_doc(p);
+                if horizontal {
+                    let half_h = ((x.bbox.1 .1 - x.bbox.0 .1) * 0.5).max(1e-3);
+                    x.sx = ((d.0 - start.0) / half_h).clamp(-3.0, 3.0);
+                } else {
+                    let half_w = ((x.bbox.1 .0 - x.bbox.0 .0) * 0.5).max(1e-3);
+                    x.sy = ((d.1 - start.1) / half_w).clamp(-3.0, 3.0);
+                }
+            }
         }
     }
 
@@ -143,6 +192,15 @@ impl PaintApp {
                     Command::Rotate { layer, strokes: strokes.clone(), texts, images, pivot: center, angle: x.angle },
                 );
             }
+            XformKind::Shear { pivot, .. } => {
+                if x.sx.abs() < 1e-3 && x.sy.abs() < 1e-3 {
+                    return;
+                }
+                self.history.push(
+                    &mut self.doc,
+                    Command::Shear { layer, strokes: strokes.clone(), texts, images, pivot, shx: x.sx, shy: x.sy },
+                );
+            }
         }
         self.cache.invalidate(strokes.iter());
     }
@@ -167,6 +225,10 @@ impl PaintApp {
                             let (co, si) = (x.angle.cos(), x.angle.sin());
                             let (dx, dy) = (c.0 - center.0, c.1 - center.1);
                             (center.0 + dx * co - dy * si, center.1 + dx * si + dy * co)
+                        }
+                        XformKind::Shear { pivot, .. } => {
+                            let (dx, dy) = (c.0 - pivot.0, c.1 - pivot.1);
+                            (pivot.0 + dx + x.sx * dy, pivot.1 + dy + x.sy * dx)
                         }
                     };
                     view.doc_to_screen(t)

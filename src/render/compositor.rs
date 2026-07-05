@@ -80,6 +80,40 @@ impl Compositor {
         self.tex.as_ref()
     }
 
+    /// Hash de contenu déjà mis en cache pour ce calque (repeuplé à chaque
+    /// `rebuild`), pour piloter l'invalidation de la miniature (Sprint I.3)
+    /// sans dépendre d'un second calcul de hash côté appelant.
+    pub fn layer_content_hash(&self, layer_id: u64) -> Option<u64> {
+        self.layers.get(&layer_id).map(|(h, _)| *h)
+    }
+
+    /// Miniature basse résolution d'un calque (Sprint I.3) : redimensionne
+    /// (plus proche voisin) le pixmap déjà rastérisé et mis en cache par
+    /// calque (`self.layers`) plutôt que refaire un rendu dédié. `None` si le
+    /// calque n'a pas encore été rastérisé (calque masqué/vide de contenu,
+    /// ou pas encore de frame de composition) ou n'existe plus.
+    pub fn layer_thumbnail(&self, layer_id: u64, size: u32) -> Option<ColorImage> {
+        let (_, pm) = self.layers.get(&layer_id)?;
+        let (w, h) = (pm.width(), pm.height());
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let scale = (size as f32 / w.max(h) as f32).min(1.0);
+        let tw = ((w as f32 * scale).round() as u32).max(1);
+        let th = ((h as f32 * scale).round() as u32).max(1);
+        let data = pm.data();
+        let mut pixels = Vec::with_capacity((tw * th) as usize);
+        for y in 0..th {
+            for x in 0..tw {
+                let sx = ((x as f32 / scale) as u32).min(w - 1);
+                let sy = ((y as f32 / scale) as u32).min(h - 1);
+                let i = ((sy * w + sx) * 4) as usize;
+                pixels.push(Color32::from_rgba_premultiplied(data[i], data[i + 1], data[i + 2], data[i + 3]));
+            }
+        }
+        Some(ColorImage { size: [tw as usize, th as usize], pixels })
+    }
+
     /// Rendu du document à sa résolution **native** (`doc.size`), pour
     /// l'export (roadmap ANALYSE.md §12.2). Réutilise le même chemin de
     /// composition que l'affichage (calques, modes de fusion, masques,
@@ -163,22 +197,29 @@ impl Compositor {
             let stale = self.layers.get(&layer.id).map(|(h, _)| *h != hash).unwrap_or(true);
             if stale {
                 let mut lp = Pixmap::new(w, h)?;
-                // Contenu peint (pinceau/gomme pixel, F1) : rendu en premier,
-                // sous les éléments vectoriels du calque, depuis un cache
-                // persistant retouché tuile par tuile (roadmap §12.1) plutôt
-                // que ré-aplati en entier à chaque dab.
-                let raster_pm = self.raster_cache.entry(layer.id).or_default();
-                blit_raster_tiles(raster_pm, &layer.raster, w, h);
-                lp.data_mut().copy_from_slice(raster_pm.pm.data());
-                for r in layer.z_order() {
-                    match r {
-                        crate::model::ElemRef::Stroke(i) => raster_stroke(&mut lp, &layer.strokes[i]),
-                        crate::model::ElemRef::Image(i) => raster_image(&mut lp, &layer.images[i]),
-                        crate::model::ElemRef::Text(i) => {
-                            let t = &layer.texts[i];
-                            if Some(t.id) != skip_text {
-                                let atlas = atlas.get_or_insert_with(|| ctx.fonts(|f| f.image()));
-                                raster_text(ctx, &mut lp, t, atlas);
+                if let Some(fill) = &layer.fill {
+                    // Calque de remplissage (Sprint I.1) : aucun contenu
+                    // propre — peint tout son rectangle, sans passer par le
+                    // pipeline raster/traits/textes des calques normaux.
+                    paint_fill_layer(&mut lp, fill, w, h);
+                } else {
+                    // Contenu peint (pinceau/gomme pixel, F1) : rendu en premier,
+                    // sous les éléments vectoriels du calque, depuis un cache
+                    // persistant retouché tuile par tuile (roadmap §12.1) plutôt
+                    // que ré-aplati en entier à chaque dab.
+                    let raster_pm = self.raster_cache.entry(layer.id).or_default();
+                    blit_raster_tiles(raster_pm, &layer.raster, w, h);
+                    lp.data_mut().copy_from_slice(raster_pm.pm.data());
+                    for r in layer.z_order() {
+                        match r {
+                            crate::model::ElemRef::Stroke(i) => raster_stroke(&mut lp, &layer.strokes[i]),
+                            crate::model::ElemRef::Image(i) => raster_image(&mut lp, &layer.images[i]),
+                            crate::model::ElemRef::Text(i) => {
+                                let t = &layer.texts[i];
+                                if Some(t.id) != skip_text {
+                                    let atlas = atlas.get_or_insert_with(|| ctx.fonts(|f| f.image()));
+                                    raster_text(ctx, &mut lp, t, atlas);
+                                }
                             }
                         }
                     }
@@ -249,6 +290,35 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
     mix(l.blend as u64);
     mix(l.raster.content_hash());
     mix(l.mask.as_ref().map(|m| m.content_hash()).unwrap_or(0));
+    if let Some(fill) = &l.fill {
+        use crate::model::FillKind;
+        let gradient = match fill {
+            FillKind::Solid(c) => {
+                mix(0);
+                mix(u32::from_le_bytes(*c) as u64);
+                None
+            }
+            FillKind::Linear(g) => {
+                mix(1);
+                Some(g)
+            }
+            FillKind::Radial(g) => {
+                mix(2);
+                Some(g)
+            }
+        };
+        if let Some(g) = gradient {
+            mix(g.kind as u64);
+            mix(g.from.0.to_bits() as u64);
+            mix(g.from.1.to_bits() as u64);
+            mix(g.to.0.to_bits() as u64);
+            mix(g.to.1.to_bits() as u64);
+            for (pos, c) in &g.stops {
+                mix(pos.to_bits() as u64);
+                mix(u32::from_le_bytes(*c) as u64);
+            }
+        }
+    }
     for style in &l.styles {
         use crate::model::LayerStyle;
         match style {
@@ -661,6 +731,23 @@ fn apply_glow(lp: &mut Pixmap, color: [u8; 4], blur: f32, inner: bool, w: usize,
         let mut result = tint_from_alpha(&mask, color, w, h);
         result.draw_pixmap(0, 0, lp.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
         *lp = result;
+    }
+}
+
+/// Peint un calque de remplissage (Sprint I.1) sur tout son rectangle — cas
+/// le plus simple du pipeline existant, puisqu'il ne lit pas les calques du
+/// dessous (contrairement à un calque d'ajustement).
+fn paint_fill_layer(pm: &mut Pixmap, fill: &crate::model::FillKind, w: u32, h: u32) {
+    match fill {
+        crate::model::FillKind::Solid([r, g, b, a]) => {
+            pm.fill(Color::from_rgba8(*r, *g, *b, *a));
+        }
+        crate::model::FillKind::Linear(gradient) | crate::model::FillKind::Radial(gradient) => {
+            let Some(shader) = gradient_shader(gradient) else { return };
+            let paint = Paint { shader, anti_alias: true, ..Default::default() };
+            let Some(rect) = tiny_skia::Rect::from_xywh(0.0, 0.0, w as f32, h as f32) else { return };
+            pm.fill_rect(rect, &paint, Transform::identity(), None);
+        }
     }
 }
 
@@ -1197,6 +1284,47 @@ mod tests {
         let mut c = Compositor::new();
         let (_, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
         assert!(rgba.chunks_exact(4).any(|px| px != [255, 255, 255, 255]), "le texte devrait marquer des pixels");
+    }
+
+    #[test]
+    fn render_to_rgba_solid_fill_layer_covers_the_whole_document() {
+        let mut doc = crate::model::Document::new((10, 10));
+        // Calque de base vide (transparent) + calque de remplissage rouge uni.
+        doc.layers.push(crate::model::Layer::new_fill(
+            2,
+            "fill",
+            crate::model::FillKind::Solid([255, 0, 0, 255]),
+        ));
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = Compositor::new();
+        let (_, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
+        assert!(rgba.chunks_exact(4).all(|px| px == [255, 0, 0, 255]), "le composite devrait être entièrement rouge");
+    }
+
+    #[test]
+    fn layer_thumbnail_downsizes_and_reflects_layer_content() {
+        let mut doc = crate::model::Document::new((100, 50));
+        doc.layers[0].fill = Some(crate::model::FillKind::Solid([0, 255, 0, 255]));
+        doc.layers[0].id = 7;
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = Compositor::new();
+        // Repeuple le cache par calque (`self.layers`) avant de demander une
+        // vignette — reflète l'usage réel (le canevas est déjà affiché).
+        let _ = c.texture(&ctx, &doc, 1, None);
+        assert_eq!(c.layer_content_hash(7), c.layers.get(&7).map(|(h, _)| *h));
+        let thumb = c.layer_thumbnail(7, 32).expect("thumbnail");
+        // 100x50 mis à l'échelle pour tenir dans 32x32 → 32x16.
+        assert_eq!(thumb.size, [32, 16]);
+        assert!(thumb.pixels.iter().all(|c| *c == Color32::from_rgba_premultiplied(0, 255, 0, 255)));
+    }
+
+    #[test]
+    fn layer_thumbnail_is_none_for_an_unknown_layer() {
+        let c = Compositor::new();
+        assert!(c.layer_thumbnail(999, 32).is_none());
+        assert!(c.layer_content_hash(999).is_none());
     }
 
     #[test]

@@ -41,6 +41,27 @@ impl BlendMode {
     }
 }
 
+/// Remplissage d'un calque de remplissage (Sprint I.1), sur le même modèle
+/// que les calques d'ajustement : pas de contenu propre (traits/textes/
+/// images), peint tout son rectangle (borné par le masque/écrêtage s'il y en
+/// a un) — réutilise le type `Gradient` déjà existant pour les traits pleins.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum FillKind {
+    Solid([u8; 4]),
+    Linear(crate::model::Gradient),
+    Radial(crate::model::Gradient),
+}
+
+impl FillKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            FillKind::Solid(_) => t("Uni", "Solid"),
+            FillKind::Linear(_) => t("Dégradé linéaire", "Linear gradient"),
+            FillKind::Radial(_) => t("Dégradé radial", "Radial gradient"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Layer {
     /// Identifiant stable : l'historique référence les calques par id, pas par
@@ -86,6 +107,10 @@ pub struct Layer {
     /// réversible et re-réglable à tout moment (≠ filtre destructif).
     #[serde(default)]
     pub adjustment: Option<crate::tools::filter::Adjustment>,
+    /// Calque de remplissage (Sprint I.1) : aucun contenu propre, peint tout
+    /// son rectangle (uni/dégradé) — voir [`FillKind`].
+    #[serde(default)]
+    pub fill: Option<FillKind>,
     /// Masque de calque peint (roadmap P2 #14) : réutilise le moteur raster
     /// (F1) comme surface peignable en niveaux de gris. Un pixel jamais peint
     /// est **visible** par défaut (comme un masque tout juste créé, blanc) ;
@@ -111,6 +136,11 @@ pub struct Layer {
     /// pas un calque figé qu'on ne peut plus du tout gérer.
     #[serde(default)]
     pub locked: bool,
+    /// Code couleur (Sprint I.5) : étiquette visuelle uniquement, aucun
+    /// effet sur le rendu — sert à repérer un groupe de calques d'un coup
+    /// d'œil dans une pile chargée, façon Photoshop/Figma.
+    #[serde(default)]
+    pub color_tag: Option<[u8; 3]>,
 }
 
 fn default_opacity() -> f32 {
@@ -225,11 +255,13 @@ impl Layer {
             raster_png: String::new(),
             raster_origin: (0, 0),
             adjustment: None,
+            fill: None,
             mask: None,
             mask_png: String::new(),
             mask_origin: (0, 0),
             styles: Vec::new(),
             locked: false,
+            color_tag: None,
         }
     }
 
@@ -237,6 +269,12 @@ impl Layer {
     /// `adjustment` en direct au rendu des calques du dessous.
     pub fn new_adjustment(id: u64, name: impl Into<String>, adjustment: crate::tools::filter::Adjustment) -> Self {
         Self { adjustment: Some(adjustment), ..Self::new(id, name) }
+    }
+
+    /// Calque de remplissage (Sprint I.1) : aucun contenu propre, peint tout
+    /// son rectangle avec `fill` au rendu (voir `render::compositor::rebuild`).
+    pub fn new_fill(id: u64, name: impl Into<String>, fill: FillKind) -> Self {
+        Self { fill: Some(fill), ..Self::new(id, name) }
     }
 
     /// Encode le raster en PNG base64 si nécessaire (avant sérialisation).

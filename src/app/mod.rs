@@ -19,7 +19,7 @@ use crate::input::GestureCapture;
 use crate::model::{Document, Stroke, Tool};
 use crate::render::canvas::{self, ActiveStroke, StrokeCache, ViewTransform};
 use crate::tools::guides::GuideLine;
-use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser, SelectMode};
+use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser, SelectMode, SelectionCombine};
 use crate::ui::{footer, layers, toolbar};
 use egui::{Color32, Margin, Pos2, Rect, Sense, Vec2};
 use pen_edit::PenNodeTarget;
@@ -42,6 +42,28 @@ fn clamp_doc_dims(w: u32, h: u32) -> (u32, u32) {
 /// reste bloqué tant que le calque est verrouillé.
 fn layer_lock_blocks_tool(tool: ActiveTool) -> bool {
     !matches!(tool, ActiveTool::Pan | ActiveTool::Eyedropper | ActiveTool::Measure)
+}
+
+/// Recadre un buffer RGBA8 `w×h` au rectangle doc-space `(mn, mx)`, borné aux
+/// dimensions du buffer (Sprint L.1 — export d'une zone sélectionnée
+/// uniquement). Renvoie le buffer d'origine inchangé si le rectangle borné
+/// est vide (sélection hors cadre, ou dégénérée).
+fn crop_rgba_to_bounds(w: u32, h: u32, rgba: &[u8], mn: (f32, f32), mx: (f32, f32)) -> (u32, u32, Vec<u8>) {
+    let x0 = mn.0.floor().clamp(0.0, w as f32) as u32;
+    let y0 = mn.1.floor().clamp(0.0, h as f32) as u32;
+    let x1 = mx.0.ceil().clamp(0.0, w as f32) as u32;
+    let y1 = mx.1.ceil().clamp(0.0, h as f32) as u32;
+    if x1 <= x0 || y1 <= y0 {
+        return (w, h, rgba.to_vec());
+    }
+    let (rw, rh) = (x1 - x0, y1 - y0);
+    let mut out = vec![0u8; (rw * rh * 4) as usize];
+    for y in 0..rh {
+        let src = (((y0 + y) * w + x0) * 4) as usize;
+        let dst = (y * rw * 4) as usize;
+        out[dst..dst + (rw * 4) as usize].copy_from_slice(&rgba[src..src + (rw * 4) as usize]);
+    }
+    (rw, rh, out)
 }
 
 /// (id d'élément, boîte englobante (min, max)) en coordonnées document.
@@ -148,6 +170,23 @@ impl Default for BatchExportState {
     }
 }
 
+/// Aperçu et poids estimé avant export (Sprint L.2), avec case à cocher pour
+/// n'exporter que la sélection (Sprint L.1) — un seul dialogue couvre les
+/// deux : la sélection change la région rendue, donc l'aperçu/poids doit de
+/// toute façon se recalculer quand elle change.
+pub struct ExportPreviewDialog {
+    pub format: crate::export::ExportFormat,
+    /// Coché seulement si une sélection non vide existait à l'ouverture ;
+    /// grisé sinon (rien à limiter).
+    pub selection_only: bool,
+    pub w: u32,
+    pub h: u32,
+    /// Octets déjà encodés (Sprint L.2) — réutilisés tels quels à l'export
+    /// final, pas de second encodage.
+    pub bytes: Vec<u8>,
+    pub texture: egui::TextureHandle,
+}
+
 /// Gabarits « riches » avec contenu pré-rempli (Sprint 10.2), au-delà de la
 /// simple taille de document de la galerie de modèles existante.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,6 +287,9 @@ pub struct PaintApp {
     compositor: crate::render::compositor::Compositor,
     /// Textures GPU des images, par id (non sérialisé, reconstruit au besoin).
     image_textures: std::collections::HashMap<u64, egui::TextureHandle>,
+    /// Vignettes de calque (Sprint I.3), par id → (hash de contenu, texture) —
+    /// recalculée seulement quand le hash change, pas à chaque frame.
+    layer_thumbnails: std::collections::HashMap<u64, (u64, egui::TextureHandle)>,
     next_id: u64,
     // Tracé de forme en cours (ligne / rectangle / ellipse).
     shape_start: Option<(f32, f32)>,
@@ -342,6 +384,14 @@ pub struct PaintApp {
     pub show_batch_export: bool,
     /// État des cases à cocher du panneau d'export par lots.
     pub batch_export: BatchExportState,
+    /// Dialogue d'aperçu/poids estimé avant export (Sprint L.1/L.2), `None`
+    /// si fermé.
+    pub export_dialog: Option<ExportPreviewDialog>,
+    /// Profils d'export nommés (Sprint L.8) : format + qualité + tailles du
+    /// batch export, persistés localement.
+    pub export_profiles: Vec<crate::export::ExportProfile>,
+    /// Saisie du nom pour « Enregistrer un profil d'export » (Sprint L.8).
+    pub export_profile_name: String,
     // Pot de peinture : point cliqué (écran) en attente de la capture.
     bucket_click: Option<Pos2>,
     // Détourage en un clic (Sprint 9.1) : point cliqué (écran) + modificateur
@@ -379,12 +429,21 @@ pub struct PaintApp {
     /// (id du calque, texte en cours d'édition). `None` = pas de renommage
     /// actif ; double-clic sur un nom de calque le démarre.
     pub layer_rename: Option<(u64, String)>,
+    /// Filtre texte de la liste des calques (Sprint I.4) : n'affiche que les
+    /// calques dont le nom correspond (insensible à la casse). Vide = pas de
+    /// filtre. Le champ n'est révélé dans l'UI qu'au-delà d'un seuil de
+    /// calques, pour ne pas alourdir les petits documents.
+    pub layer_search: String,
     /// Saisie hexadécimale de la couleur courante (roadmap P0 #6).
     pub hex_field: String,
     // Pinceau / gomme pixel (roadmap F1) : dureté du tampon (0 = dégradé
     // complet, 1 = bord net) + état du geste en cours.
     pub pixel_hardness: f32,
     raster_stroke_last: Option<(f32, f32)>,
+    /// Aérographe (Sprint J.1) : horodatage (`ctx.input(|i| i.time)`) du
+    /// dernier dépôt — pilote l'accumulateur de temps écoulé qui dépose à
+    /// intervalles réguliers tant que le clic est maintenu, même immobile.
+    airbrush_last_dab: Option<f64>,
     /// Tuiles touchées pendant le geste en cours, snapshotées **avant**
     /// modification (undo par tuile, cf. `history::Command::PaintRaster`).
     raster_touch: std::collections::HashMap<crate::model::raster::TileKey, Option<crate::model::raster::Tile>>,
@@ -463,6 +522,7 @@ impl Default for PaintApp {
             active_stroke: ActiveStroke::default(),
             compositor: crate::render::compositor::Compositor::new(),
             image_textures: std::collections::HashMap::new(),
+            layer_thumbnails: std::collections::HashMap::new(),
             next_id: 1, // 0 est réservé au trait en cours
             shape_start: None,
             shape_preview: None,
@@ -510,6 +570,9 @@ impl Default for PaintApp {
             text_focus_pending: false,
             show_batch_export: false,
             batch_export: BatchExportState::default(),
+            export_dialog: None,
+            export_profiles: crate::i18n::load_export_profiles(),
+            export_profile_name: String::new(),
             bucket_click: None,
             cutout_click: None,
             cutout_tolerance: 32,
@@ -526,9 +589,11 @@ impl Default for PaintApp {
             style_clipboard: None,
             editing_mask: false,
             layer_rename: None,
+            layer_search: String::new(),
             hex_field: String::new(),
             pixel_hardness: 0.8,
             raster_stroke_last: None,
+            airbrush_last_dab: None,
             raster_touch: std::collections::HashMap::new(),
             clone_source: None,
             clone_offset: None,
@@ -986,55 +1051,74 @@ impl PaintApp {
         out
     }
 
-    /// Sélectionne les éléments dont la boîte recoupe le rectangle (coords doc).
-    /// `additive` (Maj) conserve la sélection existante.
-    fn select_in_rect(&mut self, a: (f32, f32), b: (f32, f32), additive: bool) {
-        let rect = ((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1)));
-        if !additive {
-            self.selection.clear();
-        }
-        for (id, bb, _) in self.active_elements_geom() {
-            if hit::bbox_intersects(rect, bb) {
-                self.selection.insert(id);
+    /// Applique un ensemble d'ID retenus par un geste à `self.selection`
+    /// selon le mode de combinaison (Sprint G.1) : Replace/Add se comportent
+    /// comme l'ancien booléen `additive`, Subtract/Intersect opèrent sur les
+    /// ensembles sans toucher aux ID non concernés par le geste.
+    fn apply_selection_combine(&mut self, combine: SelectionCombine, hit_ids: &std::collections::HashSet<u64>) {
+        match combine {
+            SelectionCombine::Replace => {
+                self.selection = hit_ids.clone();
+            }
+            SelectionCombine::Add => {
+                self.selection.extend(hit_ids.iter().copied());
+            }
+            SelectionCombine::Subtract => {
+                for id in hit_ids {
+                    self.selection.remove(id);
+                }
+            }
+            SelectionCombine::Intersect => {
+                self.selection.retain(|id| hit_ids.contains(id));
             }
         }
         self.report_selection();
+    }
+
+    /// Sélectionne les éléments dont la boîte recoupe le rectangle (coords doc).
+    /// `combine` pilote comment le résultat se combine à la sélection
+    /// existante (Sprint G.1).
+    fn select_in_rect(&mut self, a: (f32, f32), b: (f32, f32), combine: SelectionCombine) {
+        let rect = ((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1)));
+        let hit_ids: std::collections::HashSet<u64> = self
+            .active_elements_geom()
+            .into_iter()
+            .filter(|(_, bb, _)| hit::bbox_intersects(rect, *bb))
+            .map(|(id, _, _)| id)
+            .collect();
+        self.apply_selection_combine(combine, &hit_ids);
     }
 
     /// Sélectionne les éléments dont le centre tombe dans l'ellipse inscrite
     /// dans le rectangle glissé (Sprint 2.1) — même test « centre » que le
     /// lasso, cohérent pour l'utilisateur.
-    fn select_in_ellipse(&mut self, a: (f32, f32), b: (f32, f32), additive: bool) {
+    fn select_in_ellipse(&mut self, a: (f32, f32), b: (f32, f32), combine: SelectionCombine) {
         let rect = ((a.0.min(b.0), a.1.min(b.1)), (a.0.max(b.0), a.1.max(b.1)));
-        if !additive {
-            self.selection.clear();
-        }
-        for (id, _, center) in self.active_elements_geom() {
-            if hit::point_in_ellipse(rect, center) {
-                self.selection.insert(id);
-            }
-        }
-        self.report_selection();
+        let hit_ids: std::collections::HashSet<u64> = self
+            .active_elements_geom()
+            .into_iter()
+            .filter(|(_, _, center)| hit::point_in_ellipse(rect, *center))
+            .map(|(id, _, _)| id)
+            .collect();
+        self.apply_selection_combine(combine, &hit_ids);
     }
 
     /// Sélectionne les éléments dont le centre tombe dans le tracé du lasso.
-    fn select_in_lasso(&mut self, poly: &[(f32, f32)], additive: bool) {
-        if !additive {
-            self.selection.clear();
-        }
-        for (id, _, center) in self.active_elements_geom() {
-            if hit::point_in_polygon(poly, center) {
-                self.selection.insert(id);
-            }
-        }
-        self.report_selection();
+    fn select_in_lasso(&mut self, poly: &[(f32, f32)], combine: SelectionCombine) {
+        let hit_ids: std::collections::HashSet<u64> = self
+            .active_elements_geom()
+            .into_iter()
+            .filter(|(_, _, center)| hit::point_in_polygon(poly, *center))
+            .map(|(id, _, _)| id)
+            .collect();
+        self.apply_selection_combine(combine, &hit_ids);
     }
 
     /// Baguette magique : sélectionne les traits et textes du calque actif dont
     /// la couleur est proche (par canal, ≤ `wand_tol`) de l'élément cliqué.
     /// Portée pilotée par `wand_global` : toute l'image, ou seulement la
     /// région connexe (voir [`Self::wand_region_ids`]).
-    fn magic_wand(&mut self, d: (f32, f32), additive: bool) {
+    fn magic_wand(&mut self, d: (f32, f32), combine: SelectionCombine) {
         let Some(clicked) = self.topmost_at(d) else {
             self.info(t("Baguette : aucun élément coloré ici.", "Wand: no colored element here."));
             return;
@@ -1047,10 +1131,7 @@ impl PaintApp {
         let close = |c: [u8; 4]| {
             (0..4).all(|i| (c[i] as i32 - target[i] as i32).abs() <= tol)
         };
-        if !additive {
-            self.selection.clear();
-        }
-        let ids: Vec<u64> = if self.wand_global {
+        let hit_ids: std::collections::HashSet<u64> = if self.wand_global {
             let l = &self.doc.layers[self.doc.active_layer];
             l.strokes
                 .iter()
@@ -1059,12 +1140,9 @@ impl PaintApp {
                 .chain(l.texts.iter().filter(|t| close(t.color)).map(|t| t.id))
                 .collect()
         } else {
-            self.wand_region_ids(clicked, close)
+            self.wand_region_ids(clicked, close).into_iter().collect()
         };
-        for id in ids {
-            self.selection.insert(id);
-        }
-        self.report_selection();
+        self.apply_selection_combine(combine, &hit_ids);
     }
 
     /// Région connexe pour la baguette en mode « Contigu » : élargit depuis
@@ -1119,6 +1197,15 @@ impl PaintApp {
             1 => t("1 élément sélectionné.", "1 element selected.").into(),
             _ => format!("{n} {}", t("éléments sélectionnés.", "elements selected.")),
         });
+    }
+
+    /// Inverse la sélection (Sprint G.2) : garde tous les ID du calque actif
+    /// qui n'étaient PAS sélectionnés, et retire ceux qui l'étaient.
+    pub fn invert_selection(&mut self) {
+        let all_ids: std::collections::HashSet<u64> =
+            self.active_elements_geom().into_iter().map(|(id, _, _)| id).collect();
+        self.selection = all_ids.difference(&self.selection).copied().collect();
+        self.report_selection();
     }
 
     // --- Sélections nommées (Sprint 1.2) ------------------------------------
@@ -1508,6 +1595,24 @@ impl PaintApp {
     }
 
     /// Importe une image depuis un fichier.
+    /// Importe une image comme tampon de brosse personnalisé (Sprint J.2) :
+    /// le Pinceau pixel échantillonne ensuite sa luminance (blanc = pleine
+    /// couverture, noir = aucune) au lieu de la formule de couverture
+    /// circulaire habituelle. Réutilise le même dialogue de sélection/décodage
+    /// que `import_image`.
+    pub fn import_brush_stamp(&mut self) {
+        match crate::project::import_image_dialog() {
+            Some(Ok((w, h, rgba))) => {
+                self.brush.custom_stamp = Some(std::sync::Arc::new(crate::tools::brush::BrushStamp::from_rgba(w, h, &rgba)));
+                self.info(t("Tampon de brosse importé.", "Brush stamp imported."));
+            }
+            Some(Err(msg)) => {
+                self.fail(format!("{} : {msg}", t("Image refusée", "Image rejected")));
+            }
+            None => {}
+        }
+    }
+
     pub fn import_image(&mut self) {
         match crate::project::import_image_dialog() {
             Some(Ok((w, h, rgba))) => {
@@ -1535,6 +1640,25 @@ impl PaintApp {
             }
             Err(msg) => {
                 self.fail(format!("{} : {msg}", t("Impossible d'importer le PSD", "Couldn't import the PSD")));
+            }
+        }
+    }
+
+    /// Importe un fichier `.svg` comme nouveau document vectoriel éditable
+    /// (Sprint L.5) — contrairement à `import_image` (qui poserait un rendu
+    /// bitmap dans le document courant), un SVG devient un **nouveau
+    /// document** multi-éléments éditables, comme `import_psd`.
+    pub fn import_svg(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("SVG", &["svg"]).pick_file() else {
+            return;
+        };
+        match crate::svg_import::import_svg_file(&path) {
+            Ok(doc) => {
+                self.apply_loaded(doc);
+                self.info(t("Fichier SVG importé.", "SVG file imported."));
+            }
+            Err(msg) => {
+                self.fail(format!("{} : {msg}", t("Impossible d'importer le SVG", "Couldn't import the SVG")));
             }
         }
     }
@@ -1936,6 +2060,50 @@ impl PaintApp {
         self.history.push(&mut self.doc, Command::MoveEach { layer, moves });
         self.cache.invalidate(ids.iter());
         self.info(t("Éléments alignés.", "Elements aligned."));
+    }
+
+    /// Aligne l'ensemble du contenu du calque actif (traits ∪ textes ∪
+    /// images) par rapport au document (Sprint I.2) — différent de
+    /// `align()`, qui n'agit que sur les éléments sélectionnés. Les modes
+    /// Distribute n'ont pas de sens pour un seul calque (répartir suppose
+    /// plusieurs calques, pas encore de sélection multi-calque dans l'UI).
+    pub fn align_layer_to_document(&mut self, mode: AlignMode) {
+        if matches!(mode, AlignMode::DistributeH | AlignMode::DistributeV) {
+            self.info(t(
+                "Répartir : sélectionne plusieurs calques (pas pris en charge pour l'instant).",
+                "Distribute: select multiple layers (not supported yet).",
+            ));
+            return;
+        }
+        let geoms = self.active_elements_geom();
+        if geoms.is_empty() {
+            self.info(t("Calque vide.", "Empty layer."));
+            return;
+        }
+        let mn_x = geoms.iter().map(|(_, (mn, _), _)| mn.0).fold(f32::INFINITY, f32::min);
+        let mx_x = geoms.iter().map(|(_, (_, mx), _)| mx.0).fold(f32::NEG_INFINITY, f32::max);
+        let mn_y = geoms.iter().map(|(_, (mn, _), _)| mn.1).fold(f32::INFINITY, f32::min);
+        let mx_y = geoms.iter().map(|(_, (_, mx), _)| mx.1).fold(f32::NEG_INFINITY, f32::max);
+        let (dw, dh) = self.doc.size;
+        let (dw, dh) = (dw as f32, dh as f32);
+        let (dx, dy) = match mode {
+            AlignMode::Left => (-mn_x, 0.0),
+            AlignMode::Right => (dw - mx_x, 0.0),
+            AlignMode::CenterH => (dw * 0.5 - (mn_x + mx_x) * 0.5, 0.0),
+            AlignMode::Top => (0.0, -mn_y),
+            AlignMode::Bottom => (0.0, dh - mx_y),
+            AlignMode::MiddleV => (0.0, dh * 0.5 - (mn_y + mx_y) * 0.5),
+            AlignMode::DistributeH | AlignMode::DistributeV => unreachable!("filtré au-dessus"),
+        };
+        if dx.abs() < 1e-3 && dy.abs() < 1e-3 {
+            return;
+        }
+        let moves: Vec<(u64, (f32, f32))> = geoms.iter().map(|(id, _, _)| (*id, (dx, dy))).collect();
+        let ids: Vec<u64> = moves.iter().map(|(id, _)| *id).collect();
+        let layer = self.doc.active_id();
+        self.history.push(&mut self.doc, Command::MoveEach { layer, moves });
+        self.cache.invalidate(ids.iter());
+        self.info(t("Calque aligné.", "Layer aligned."));
     }
 
     /// Aplatit tous les calques (visibles) en un seul. Annulable.
@@ -2564,6 +2732,26 @@ impl PaintApp {
         self.recent_colors.truncate(8);
     }
 
+    /// Extrait 5-8 couleurs dominantes de l'image sélectionnée (Sprint M.1)
+    /// et les ajoute en un clic à la palette personnalisée.
+    pub fn extract_palette_from_selection(&mut self) {
+        let Some(idx) = self.single_image_idx() else {
+            self.info(t("Sélectionne d'abord une image.", "Select an image first."));
+            return;
+        };
+        let im = &self.doc.layers[self.doc.active_layer].images[idx];
+        let colors = crate::tools::palette::extract_palette(&im.rgba, 8);
+        if colors.is_empty() {
+            self.info(t("Aucune couleur extraite (image entièrement transparente ?).", "No color extracted (fully transparent image?)."));
+            return;
+        }
+        let n = colors.len();
+        for c in colors {
+            self.add_to_palette(c);
+        }
+        self.info(format!("{n} {}", t("couleurs ajoutées à la palette.", "colors added to the palette.")));
+    }
+
     /// Ajoute une nuance à la palette personnalisable (Sprint 7.1) et
     /// persiste immédiatement — pas de bouton « enregistrer » séparé.
     pub fn add_to_palette(&mut self, rgb: [u8; 3]) {
@@ -2613,6 +2801,18 @@ impl PaintApp {
         let index = self.doc.active_layer + 1;
         self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
         self.info(format!("{} « {label} » {}", t("Calque d'ajustement", "Adjustment layer"), t("ajouté.", "added.")));
+    }
+
+    /// Ajoute un calque de remplissage (Sprint I.1) au-dessus du calque actif :
+    /// aucun contenu propre, peint tout son rectangle (uni/dégradé).
+    pub fn add_fill_layer(&mut self, fill: crate::model::FillKind) {
+        let id = self.doc.next_layer_id;
+        self.doc.next_layer_id += 1;
+        let label = fill.label();
+        let layer = crate::model::Layer::new_fill(id, format!("{} : {label}", t("Remplissage", "Fill")), fill);
+        let index = self.doc.active_layer + 1;
+        self.history.push(&mut self.doc, Command::AddLayer { index, layer: Box::new(layer) });
+        self.info(format!("{} « {label} » {}", t("Calque de remplissage", "Fill layer"), t("ajouté.", "added.")));
     }
 
     pub fn delete_active_layer(&mut self) {
@@ -3114,6 +3314,48 @@ impl PaintApp {
         Some(crate::tools::filter::histogram_rgb(&rgba))
     }
 
+    /// « Rogner les bords vides » (Sprint G.3) : recadre le canevas au
+    /// rectangle minimal englobant les pixels non transparents du rendu
+    /// composite. Ne fait rien (message d'info) sur un document entièrement
+    /// transparent, plutôt qu'un recadrage à 0×0.
+    pub fn trim_transparent_borders(&mut self, ctx: &egui::Context) {
+        let Some((w, h, rgba)) = self.render_for_export(ctx) else {
+            self.fail(t("Échec du rendu du canevas.", "Canvas render failed."));
+            return;
+        };
+        let Some((x, y, tw, th)) = crate::tools::filter::trim_bounds(&rgba, w as usize, h as usize) else {
+            self.info(t("Document entièrement transparent : rien à rogner.", "Document is fully transparent: nothing to trim."));
+            return;
+        };
+        if (x, y, tw, th) == (0, 0, w, h) {
+            self.info(t("Aucun bord vide à rogner.", "No empty border to trim."));
+            return;
+        }
+        let mut after = self.doc.clone();
+        after.translate_content(-(x as f32), -(y as f32));
+        after.size = (tw, th);
+        self.push_doc_snapshot(after, t("Rogner les bords vides", "Trim empty borders"));
+        self.info(format!("{} : {tw}×{th}", t("Canevas rogné", "Canvas trimmed")));
+    }
+
+    /// Vignette de calque (Sprint I.3), mise en cache par id + hash de
+    /// contenu — recalculée seulement quand le calque change (même logique
+    /// d'invalidation que le compositeur principal), pas à chaque frame.
+    /// `None` si le calque n'a pas encore de pixmap en cache (masqué, ou pas
+    /// encore de frame de composition).
+    pub fn layer_thumbnail(&mut self, ctx: &egui::Context, layer_id: u64) -> Option<egui::TextureHandle> {
+        let hash = self.compositor.layer_content_hash(layer_id)?;
+        if let Some((h, tex)) = self.layer_thumbnails.get(&layer_id) {
+            if *h == hash {
+                return Some(tex.clone());
+            }
+        }
+        let image = self.compositor.layer_thumbnail(layer_id, 32)?;
+        let tex = ctx.load_texture(format!("layer_thumb_{layer_id}"), image, egui::TextureOptions::LINEAR);
+        self.layer_thumbnails.insert(layer_id, (hash, tex.clone()));
+        Some(tex)
+    }
+
     /// Exporte le document au format `format`, à sa résolution native.
     pub fn request_export(&mut self, ctx: &egui::Context, format: crate::export::ExportFormat) {
         let Some((w, h, rgba)) = self.render_for_export(ctx) else {
@@ -3122,6 +3364,65 @@ impl PaintApp {
         };
         match crate::export::save_dialog(w, h, &rgba, format, self.jpeg_quality) {
             Ok(p) => self.info(format!("{} {} : {}", format.label(), t("enregistré", "saved"), p.display())),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => self.info(t("Export annulé.", "Export cancelled.")),
+            Err(e) => self.fail(format!("{} : {e}", t("Échec de l'export", "Export failed"))),
+        }
+    }
+
+    /// Rendu de l'export, éventuellement borné au rectangle englobant de la
+    /// sélection (Sprint L.1) plutôt qu'au document entier — recadre le
+    /// rendu complet déjà produit par `render_for_export` (pas de second
+    /// chemin de rendu à maintenir).
+    fn render_export_region(&mut self, ctx: &egui::Context, selection_only: bool) -> Option<(u32, u32, Vec<u8>)> {
+        let (w, h, rgba) = self.render_for_export(ctx)?;
+        if !selection_only {
+            return Some((w, h, rgba));
+        }
+        let Some((mn, mx)) = self.selection_bounds() else { return Some((w, h, rgba)) };
+        Some(crop_rgba_to_bounds(w, h, &rgba, mn, mx))
+    }
+
+    /// Ouvre le dialogue d'aperçu/poids estimé avant export (Sprint L.1/L.2).
+    /// Coche « sélection uniquement » par défaut si une sélection existe.
+    pub fn open_export_dialog(&mut self, ctx: &egui::Context, format: crate::export::ExportFormat) {
+        let selection_only = !self.selection.is_empty();
+        self.export_dialog = self.build_export_dialog(ctx, format, selection_only);
+        if self.export_dialog.is_none() {
+            self.fail(t("Échec du rendu à l'export.", "Export render failed."));
+        }
+    }
+
+    /// (Re)calcule l'aperçu/poids pour l'état courant du dialogue (format et
+    /// case « sélection uniquement ») — appelé à l'ouverture et à chaque
+    /// changement de ces réglages.
+    fn build_export_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        format: crate::export::ExportFormat,
+        selection_only: bool,
+    ) -> Option<ExportPreviewDialog> {
+        let (w, h, rgba) = self.render_export_region(ctx, selection_only)?;
+        let bytes = crate::export::encode_to_bytes(w, h, &rgba, format, self.jpeg_quality).ok()?;
+        let pixels: Vec<Color32> = rgba.chunks_exact(4).map(|c| Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])).collect();
+        let image = egui::ColorImage { size: [w as usize, h as usize], pixels };
+        let texture = ctx.load_texture("export_preview", image, egui::TextureOptions::LINEAR);
+        Some(ExportPreviewDialog { format, selection_only, w, h, bytes, texture })
+    }
+
+    /// Recalcule l'aperçu après un changement de format ou de la case
+    /// « sélection uniquement » dans le dialogue déjà ouvert.
+    pub fn refresh_export_dialog(&mut self, ctx: &egui::Context) {
+        let Some(d) = &self.export_dialog else { return };
+        let (format, selection_only) = (d.format, d.selection_only);
+        self.export_dialog = self.build_export_dialog(ctx, format, selection_only);
+    }
+
+    /// Valide le dialogue d'export : ouvre le sélecteur « Enregistrer » et
+    /// écrit les octets déjà encodés (pas de second encodage).
+    pub fn confirm_export_dialog(&mut self) {
+        let Some(d) = self.export_dialog.take() else { return };
+        match crate::export::save_dialog_bytes(d.format, &d.bytes) {
+            Ok(p) => self.info(format!("{} {} : {}", d.format.label(), t("enregistré", "saved"), p.display())),
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => self.info(t("Export annulé.", "Export cancelled.")),
             Err(e) => self.fail(format!("{} : {e}", t("Échec de l'export", "Export failed"))),
         }
@@ -3189,6 +3490,48 @@ impl PaintApp {
         }
     }
 
+    /// Enregistre l'état courant du panneau d'export par lots comme profil
+    /// nommé (Sprint L.8) — écrase silencieusement un profil du même nom,
+    /// comme `save_brush_preset`.
+    pub fn save_export_profile(&mut self, name: String) {
+        if name.trim().is_empty() {
+            self.info(t("Donne un nom au profil.", "Give the profile a name."));
+            return;
+        }
+        let profile = crate::export::ExportProfile {
+            name: name.trim().to_string(),
+            format: self.batch_export.format,
+            jpeg_quality: self.jpeg_quality,
+            scale_half: self.batch_export.scale_half,
+            scale_1: self.batch_export.scale_1,
+            scale_2: self.batch_export.scale_2,
+            scale_3: self.batch_export.scale_3,
+            custom_enabled: self.batch_export.custom_enabled,
+            custom_width: self.batch_export.custom_width.clone(),
+        };
+        self.export_profiles.retain(|p| p.name != profile.name);
+        self.export_profiles.push(profile);
+        crate::i18n::save_export_profiles(&self.export_profiles);
+        self.info(t("Profil d'export enregistré.", "Export profile saved."));
+    }
+
+    /// Applique un profil d'export nommé au panneau d'export par lots.
+    pub fn apply_export_profile(&mut self, profile: &crate::export::ExportProfile) {
+        self.batch_export.format = profile.format;
+        self.jpeg_quality = profile.jpeg_quality;
+        self.batch_export.scale_half = profile.scale_half;
+        self.batch_export.scale_1 = profile.scale_1;
+        self.batch_export.scale_2 = profile.scale_2;
+        self.batch_export.scale_3 = profile.scale_3;
+        self.batch_export.custom_enabled = profile.custom_enabled;
+        self.batch_export.custom_width = profile.custom_width.clone();
+    }
+
+    pub fn delete_export_profile(&mut self, name: &str) {
+        self.export_profiles.retain(|p| p.name != name);
+        crate::i18n::save_export_profiles(&self.export_profiles);
+    }
+
     /// Export SVG vectoriel (opacité de calque correcte via `<g opacity>`).
     pub fn export_svg(&mut self) {
         self.encode_all_images();
@@ -3196,6 +3539,18 @@ impl PaintApp {
         match crate::svg::save_to_desktop(&self.doc, bg) {
             Ok(p) => self.info(format!("{} : {}", t("SVG enregistré", "SVG saved"), p.display())),
             Err(e) => self.fail(format!("{} : {e}", t("Échec de l'export SVG", "SVG export failed"))),
+        }
+    }
+
+    /// Export PDF vectoriel (Sprint L.7) : même pipeline que `export_svg`,
+    /// mais écrit de vrais opérateurs de dessin PDF au lieu de balises SVG —
+    /// contrairement à `request_export(ExportFormat::Pdf)`, qui rastérise
+    /// tout le document en une seule image JPEG.
+    pub fn export_pdf_vector(&mut self) {
+        let bg = [self.bg.r(), self.bg.g(), self.bg.b()];
+        match crate::pdf_vector::save_to_desktop(&self.doc, bg, self.jpeg_quality) {
+            Ok(p) => self.info(format!("{} : {}", t("PDF vectoriel enregistré", "Vector PDF saved"), p.display())),
+            Err(e) => self.fail(format!("{} : {e}", t("Échec de l'export PDF vectoriel", "Vector PDF export failed"))),
         }
     }
 
@@ -3563,6 +3918,56 @@ impl PaintApp {
         }
     }
 
+    /// Glisser-déposer de fichiers (Sprint L.4) : `egui::Event::Dropped`
+    /// (déjà géré nativement par `eframe`/`winit`), dispatché selon
+    /// l'extension — `.psd` → nouveau document multi-calques (comme
+    /// `import_psd`), `.json` → projet natif (comme `open_project`), tout le
+    /// reste tenté comme image posée dans le document courant (comme
+    /// `import_image`).
+    fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        let paths: Vec<std::path::PathBuf> =
+            ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        for path in paths {
+            self.import_dropped_file(&path);
+        }
+    }
+
+    /// Importe un seul fichier déposé, sans dialogue (chemin déjà connu).
+    fn import_dropped_file(&mut self, path: &std::path::Path) {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        match ext.as_str() {
+            "psd" => match crate::psd_import::import_psd(path) {
+                Ok(doc) => {
+                    self.apply_loaded(doc);
+                    self.info(t("Fichier PSD importé.", "PSD file imported."));
+                }
+                Err(msg) => self.fail(format!("{} : {msg}", t("Impossible d'importer le PSD", "Couldn't import the PSD"))),
+            },
+            "json" => match crate::project::open_path(path) {
+                Ok(doc) => {
+                    self.apply_loaded(doc);
+                    crate::i18n::push_recent_project(&path.display().to_string());
+                    self.info(t("Projet ouvert.", "Project opened."));
+                }
+                Err(msg) => self.fail(format!("{} : {msg}", t("Impossible d'ouvrir le projet", "Couldn't open the project"))),
+            },
+            "svg" => match crate::svg_import::import_svg_file(path) {
+                Ok(doc) => {
+                    self.apply_loaded(doc);
+                    self.info(t("Fichier SVG importé.", "SVG file imported."));
+                }
+                Err(msg) => self.fail(format!("{} : {msg}", t("Impossible d'importer le SVG", "Couldn't import the SVG"))),
+            },
+            _ => match crate::project::import_image_from_path(path) {
+                Ok((w, h, rgba)) => {
+                    self.place_image(w, h, rgba);
+                    self.info(t("Image importée — déplacez-la (outil Sélection).", "Image imported — move it (Select tool)."));
+                }
+                Err(msg) => self.fail(format!("{} : {msg}", t("Image refusée", "Image rejected"))),
+            },
+        }
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         // Capture d'un nouveau raccourci en cours (panneau de préférences,
         // Sprint 7.2) : la prochaine touche pressée devient le raccourci de
@@ -3615,6 +4020,9 @@ impl PaintApp {
             }
             if !typing && (i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
                 self.delete_selection();
+            }
+            if cmd && i.modifiers.shift && i.key_pressed(egui::Key::I) {
+                self.invert_selection();
             }
             // Fichier (conventions macOS) : ⌘N / ⌘O / ⌘S / ⌘E.
             if cmd && i.key_pressed(egui::Key::N) {
@@ -3931,6 +4339,18 @@ impl PaintApp {
                     painter.rect_stroke(hr, 1.0, egui::Stroke::new(1.5, blue));
                 }
             }
+            // Poignées de cisaillement (Sprint M.2) : losanges, pour rester
+            // visuellement distinctes des carrés (échelle) et du cercle
+            // (rotation).
+            if let Some((bottom_mid, right_mid)) = self.shear_handles(view) {
+                for h in [bottom_mid, right_mid] {
+                    let pts: Vec<Pos2> = [(0.0, -6.0), (6.0, 0.0), (0.0, 6.0), (-6.0, 0.0)]
+                        .into_iter()
+                        .map(|(dx, dy)| Pos2::new(h.x + dx, h.y + dy))
+                        .collect();
+                    painter.add(egui::Shape::convex_polygon(pts, Color32::WHITE, egui::Stroke::new(1.5, blue)));
+                }
+            }
         }
     }
 
@@ -4040,8 +4460,10 @@ impl PaintApp {
     fn paint_cursor(&self, painter: &egui::Painter, response: &egui::Response) {
         let Some(p) = response.hover_pos() else { return };
         let radius = match self.active_tool {
-            ActiveTool::Eraser => self.eraser.width * 0.5 * self.zoom,
+            ActiveTool::Eraser | ActiveTool::PixelEraser => self.eraser.width * 0.5 * self.zoom,
             ActiveTool::Brush
+            | ActiveTool::PixelBrush
+            | ActiveTool::Airbrush
             | ActiveTool::Line
             | ActiveTool::Rectangle
             | ActiveTool::Ellipse
@@ -4169,6 +4591,8 @@ impl PaintApp {
         match self.active_tool {
             ActiveTool::Select => {
                 let shift = ctx.input(|i| i.modifiers.shift);
+                let alt = ctx.input(|i| i.modifiers.alt);
+                let combine = SelectionCombine::from_modifiers(shift, alt);
                 // Édition de nœuds (roadmap P2 #12) : prioritaire tant qu'un
                 // chemin de plume est rouvert.
                 if self.editing_pen.is_some() {
@@ -4292,13 +4716,13 @@ impl PaintApp {
                         self.commit_transform();
                     } else if let Some((a, b)) = self.marquee.take() {
                         if self.select_mode == SelectMode::Ellipse {
-                            self.select_in_ellipse(a, b, shift);
+                            self.select_in_ellipse(a, b, combine);
                         } else {
-                            self.select_in_rect(a, b, shift);
+                            self.select_in_rect(a, b, combine);
                         }
                     } else if !self.lasso.is_empty() {
                         let poly = std::mem::take(&mut self.lasso);
-                        self.select_in_lasso(&poly, shift);
+                        self.select_in_lasso(&poly, combine);
                     } else {
                         self.commit_move();
                     }
@@ -4308,7 +4732,7 @@ impl PaintApp {
                         let d = view.screen_to_doc(p);
                         // Baguette magique : sélection par couleur.
                         if self.select_mode == SelectMode::Wand {
-                            self.magic_wand(d, shift);
+                            self.magic_wand(d, combine);
                         } else {
                             match self.topmost_at(d) {
                                 Some(id) => {
@@ -4449,6 +4873,7 @@ impl PaintApp {
                     self.commit_raster_stroke(if erase { RasterOp::Eraser } else { RasterOp::Brush }, self.editing_mask);
                 }
             }
+            ActiveTool::Airbrush => self.handle_airbrush(ctx, response, view),
             ActiveTool::CloneStamp => self.handle_clone_stamp(ctx, response, view, false),
             ActiveTool::Healing => self.handle_clone_stamp(ctx, response, view, true),
             ActiveTool::Dodge => self.handle_pixel_effect(response, view, crate::model::PixelEffect::Lighten, RasterOp::Dodge),
@@ -4513,8 +4938,15 @@ impl PaintApp {
         let color = self.brush.color;
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
+        // Tampon personnalisé (Sprint J.2) : uniquement pour le pinceau (pas
+        // la gomme), échantillonné à la place de la formule circulaire.
+        let stamp = (!erase).then(|| self.brush.custom_stamp.clone()).flatten();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
-            Self::active_raster_mut(layer, self.editing_mask).stamp(d.0, d.1, radius, hardness, color, erase);
+            let raster = Self::active_raster_mut(layer, self.editing_mask);
+            match &stamp {
+                Some(s) => raster.stamp_custom(d.0, d.1, radius * 2.0, color, s, erase),
+                None => raster.stamp(d.0, d.1, radius, hardness, color, erase),
+            }
         }
         self.history.touch();
     }
@@ -4532,9 +4964,71 @@ impl PaintApp {
         let color = self.brush.color;
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
+        let stamp = (!erase).then(|| self.brush.custom_stamp.clone()).flatten();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
-            Self::active_raster_mut(layer, self.editing_mask)
-                .stroke_segment(from, to, radius, hardness, color, erase);
+            let raster = Self::active_raster_mut(layer, self.editing_mask);
+            match &stamp {
+                // Pas de version « segment » dédiée pour le tampon
+                // personnalisé : on ré-échantillonne au même pas que le
+                // sondage de tuiles ci-dessus, cohérent avec un trait continu.
+                Some(s) => {
+                    for i in 0..=steps {
+                        let t = i as f32 / steps as f32;
+                        let p = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
+                        raster.stamp_custom(p.0, p.1, radius * 2.0, color, s, erase);
+                    }
+                }
+                None => raster.stroke_segment(from, to, radius, hardness, color, erase),
+            }
+        }
+        self.history.touch();
+    }
+
+    /// Intervalle entre deux dépôts d'aérographe (Sprint J.1), en secondes.
+    const AIRBRUSH_INTERVAL: f64 = 0.03;
+
+    /// Aérographe (Sprint J.1) : contrairement au pinceau pixel qui ne dépose
+    /// qu'au fil du glissé (`drag_started`/`dragged`), l'aérographe dépose en
+    /// continu tant que le clic est maintenu, même sans déplacement — piloté
+    /// par un accumulateur de temps écoulé plutôt qu'un événement de geste.
+    fn handle_airbrush(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
+        let held = response.is_pointer_button_down_on();
+        if !held {
+            if self.airbrush_last_dab.is_some() {
+                self.airbrush_last_dab = None;
+                self.raster_stroke_last = None;
+                self.commit_raster_stroke(RasterOp::Brush, self.editing_mask);
+            }
+            return;
+        }
+        let Some(p) = response.interact_pointer_pos().or_else(|| response.hover_pos()) else { return };
+        let d = view.screen_to_doc(p);
+        let now = ctx.input(|i| i.time);
+        let should_dab = self.airbrush_last_dab.is_none_or(|last| now - last >= Self::AIRBRUSH_INTERVAL);
+        if should_dab {
+            self.paint_airbrush_dab(d);
+            self.airbrush_last_dab = Some(now);
+        }
+        // Continu même sans déplacement : force une repaint proche de
+        // l'intervalle de dépôt, sinon egui n'appellerait `update()` de
+        // nouveau qu'au prochain événement d'entrée (mouvement, clic...).
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(Self::AIRBRUSH_INTERVAL));
+    }
+
+    /// Un dépôt d'aérographe : même tampon que le pinceau pixel
+    /// (`RasterLayer::stamp`), mais à une opacité par dépôt plus faible — la
+    /// couverture s'accumule à chaque dépôt successif au même endroit
+    /// (blend source-over répété), plutôt que d'atteindre l'opacité pleine
+    /// dès le premier contact comme un pinceau normal.
+    fn paint_airbrush_dab(&mut self, d: (f32, f32)) {
+        let radius = self.pixel_radius(false);
+        self.touch_raster_tiles(d.0, d.1, radius, self.editing_mask);
+        let mut color = self.brush.color;
+        color[3] = ((color[3] as f32) * 0.25).round().clamp(0.0, 255.0) as u8;
+        let hardness = self.pixel_hardness;
+        let layer_id = self.doc.active_id();
+        if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
+            Self::active_raster_mut(layer, self.editing_mask).stamp(d.0, d.1, radius, hardness, color, false);
         }
         self.history.touch();
     }
@@ -4945,6 +5439,7 @@ impl eframe::App for PaintApp {
         self.handle_screenshot(ctx);
         self.handle_native_menu();
         self.handle_shortcuts(ctx);
+        self.handle_dropped_files(ctx);
         self.show_resize_dialog(ctx);
         // Quitter l'édition de texte si on change d'outil.
         if self.active_tool != ActiveTool::Text && self.editing_text.is_some() {
@@ -5479,6 +5974,82 @@ mod tests {
         app.doc.layers.iter().map(|l| l.id).collect()
     }
 
+    #[test]
+    fn crop_rgba_to_bounds_extracts_the_selection_rectangle() {
+        // 4x4, chaque pixel = son index (0..15), pour vérifier précisément
+        // quels pixels finissent dans le recadrage.
+        let w = 4u32;
+        let h = 4u32;
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for i in 0..(w * h) {
+            let v = i as u8;
+            rgba[(i * 4) as usize..(i * 4 + 4) as usize].copy_from_slice(&[v, v, v, 255]);
+        }
+        // Sélection (1,1)-(3,3) : sous-carré 2x2 au centre (pixels 5,6,9,10).
+        let (rw, rh, out) = crop_rgba_to_bounds(w, h, &rgba, (1.0, 1.0), (3.0, 3.0));
+        assert_eq!((rw, rh), (2, 2));
+        assert_eq!(out[0], 5); // (1,1)
+        assert_eq!(out[4], 6); // (2,1)
+        assert_eq!(out[8], 9); // (1,2)
+        assert_eq!(out[12], 10); // (2,2)
+    }
+
+    #[test]
+    fn crop_rgba_to_bounds_falls_back_to_full_buffer_for_a_degenerate_rect() {
+        let rgba = vec![7u8; 4 * 4 * 4];
+        let (rw, rh, out) = crop_rgba_to_bounds(4, 4, &rgba, (2.0, 2.0), (2.0, 2.0));
+        assert_eq!((rw, rh), (4, 4));
+        assert_eq!(out, rgba);
+    }
+
+    #[test]
+    fn import_dropped_file_routes_a_png_to_place_image() {
+        let mut app = app_with_layers(1);
+        let mut path = std::env::temp_dir();
+        path.push("quickpaint-test-dropped.png");
+        image::RgbaImage::from_fn(3, 2, |_, _| image::Rgba([10, 20, 30, 255])).save(&path).expect("write png");
+        app.import_dropped_file(&path);
+        assert_eq!(app.doc.layers[0].images.len(), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn import_dropped_file_routes_a_json_to_open_project() {
+        let mut app = app_with_layers(1);
+        let mut doc = crate::model::Document::new((50, 40));
+        doc.layers[0].strokes.push({
+            let mut s = crate::model::Stroke::new([1, 2, 3, 255], 2.0, crate::model::stroke::Tool::Brush);
+            s.points.push(crate::model::StrokePoint { pos: (0.0, 0.0), width: 2.0 });
+            s
+        });
+        let mut path = std::env::temp_dir();
+        path.push("quickpaint-test-dropped.json");
+        std::fs::write(&path, serde_json::to_string(&doc).unwrap()).expect("write json");
+        app.import_dropped_file(&path);
+        assert_eq!(app.doc.size, (50, 40));
+        assert_eq!(app.doc.layers[0].strokes.len(), 1);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn import_dropped_file_routes_an_svg_to_editable_strokes() {
+        let mut app = app_with_layers(1);
+        let mut path = std::env::temp_dir();
+        path.push("quickpaint-test-dropped.svg");
+        std::fs::write(
+            &path,
+            br##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30">
+                <rect x="5" y="5" width="10" height="10" fill="#ff0000"/>
+            </svg>"##,
+        )
+        .expect("write svg");
+        app.import_dropped_file(&path);
+        assert_eq!(app.doc.size, (40, 30));
+        assert_eq!(app.doc.layers[0].strokes.len(), 1);
+        assert!(app.doc.layers[0].strokes[0].fill);
+        let _ = std::fs::remove_file(&path);
+    }
+
     fn app_with_layers(n: usize) -> PaintApp {
         let mut app = PaintApp::default();
         app.doc.layers.clear();
@@ -5487,6 +6058,21 @@ mod tests {
         }
         app.doc.active_layer = 0;
         app
+    }
+
+    #[test]
+    fn airbrush_dab_increases_center_alpha_monotonically_when_held_still() {
+        let mut app = app_with_layers(1);
+        app.brush.color = [255, 0, 0, 255];
+        app.brush.width = 20.0;
+        let pos = (50.0, 50.0);
+        let mut prev_alpha = 0u8;
+        for _ in 0..5 {
+            app.paint_airbrush_dab(pos);
+            let alpha = app.doc.layers[0].raster.get_pixel(50, 50)[3];
+            assert!(alpha > prev_alpha, "l'alpha devrait augmenter à chaque dépôt, got {alpha} after prev {prev_alpha}");
+            prev_alpha = alpha;
+        }
     }
 
     #[test]
@@ -5636,8 +6222,76 @@ mod tests {
         add_stroke_at(&mut app, 0, 1, (10.0, 5.0));
         add_stroke_at(&mut app, 0, 2, (0.0, 0.0));
         app.select_mode = SelectMode::Ellipse;
-        app.select_in_ellipse((0.0, 0.0), (20.0, 10.0), false);
+        app.select_in_ellipse((0.0, 0.0), (20.0, 10.0), SelectionCombine::Replace);
         assert_eq!(app.selection, [1].into_iter().collect());
+    }
+
+    #[test]
+    fn select_in_rect_add_unions_with_existing_selection() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (5.0, 5.0));
+        add_stroke_at(&mut app, 0, 2, (50.0, 50.0));
+        app.selection = [1].into_iter().collect();
+        app.select_in_rect((40.0, 40.0), (60.0, 60.0), SelectionCombine::Add);
+        assert_eq!(app.selection, [1, 2].into_iter().collect());
+    }
+
+    #[test]
+    fn select_in_rect_subtract_removes_hit_elements_only() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (5.0, 5.0));
+        add_stroke_at(&mut app, 0, 2, (50.0, 50.0));
+        app.selection = [1, 2].into_iter().collect();
+        app.select_in_rect((0.0, 0.0), (10.0, 10.0), SelectionCombine::Subtract);
+        assert_eq!(app.selection, [2].into_iter().collect());
+    }
+
+    #[test]
+    fn select_in_rect_intersect_keeps_only_common_elements() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (5.0, 5.0));
+        add_stroke_at(&mut app, 0, 2, (50.0, 50.0));
+        add_stroke_at(&mut app, 0, 3, (55.0, 55.0));
+        app.selection = [1, 2].into_iter().collect();
+        // Le rectangle recoupe 2 et 3, mais seul 2 était déjà sélectionné.
+        app.select_in_rect((40.0, 40.0), (60.0, 60.0), SelectionCombine::Intersect);
+        assert_eq!(app.selection, [2].into_iter().collect());
+    }
+
+    #[test]
+    fn invert_selection_keeps_only_the_unselected_elements() {
+        let mut app = app_with_layers(1);
+        for id in 1..=5u64 {
+            add_stroke_at(&mut app, 0, id, (id as f32, id as f32));
+        }
+        app.selection = [1, 2].into_iter().collect();
+        app.invert_selection();
+        assert_eq!(app.selection, [3, 4, 5].into_iter().collect());
+    }
+
+    #[test]
+    fn align_layer_to_document_left_moves_the_whole_layer_content() {
+        let mut app = app_with_layers(1);
+        app.doc.size = (200, 100);
+        add_stroke_at(&mut app, 0, 1, (50.0, 50.0)); // bbox (48,48)-(52,52), width 4
+        add_stroke_at(&mut app, 0, 2, (80.0, 60.0)); // bbox (78,58)-(82,62)
+        app.align_layer_to_document(AlignMode::Left);
+        let geoms = app.active_elements_geom();
+        let min_x = geoms.iter().map(|(_, (mn, _), _)| mn.0).fold(f32::INFINITY, f32::min);
+        assert!(min_x.abs() < 1e-3, "le bord gauche du calque devrait toucher x=0, got {min_x}");
+        // L'espacement relatif entre les deux traits doit être conservé.
+        let stroke1_x = app.doc.layers[0].strokes.iter().find(|s| s.id == 1).unwrap().points[0].pos.0;
+        let stroke2_x = app.doc.layers[0].strokes.iter().find(|s| s.id == 2).unwrap().points[0].pos.0;
+        assert!((stroke2_x - stroke1_x - 30.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn align_layer_to_document_distribute_is_a_noop_with_an_info_message() {
+        let mut app = app_with_layers(1);
+        add_stroke_at(&mut app, 0, 1, (50.0, 50.0));
+        let before = app.doc.layers[0].strokes[0].points[0].pos;
+        app.align_layer_to_document(AlignMode::DistributeH);
+        assert_eq!(app.doc.layers[0].strokes[0].points[0].pos, before);
     }
 
     fn add_stroke_bbox(app: &mut PaintApp, layer: usize, id: u64, color: [u8; 4], a: (f32, f32), b: (f32, f32)) {
@@ -5657,7 +6311,7 @@ mod tests {
         add_stroke_bbox(&mut app, 0, 2, red, (100.0, 100.0), (102.0, 102.0));
         add_stroke_bbox(&mut app, 0, 3, [0, 0, 255, 255], (50.0, 50.0), (52.0, 52.0));
         app.wand_global = true;
-        app.magic_wand((1.0, 1.0), false);
+        app.magic_wand((1.0, 1.0), SelectionCombine::Replace);
         assert_eq!(app.selection, [1, 2].into_iter().collect());
     }
 
@@ -5671,7 +6325,7 @@ mod tests {
         add_stroke_bbox(&mut app, 0, 2, red, (4.0, 4.0), (9.0, 9.0));
         add_stroke_bbox(&mut app, 0, 3, red, (500.0, 500.0), (505.0, 505.0));
         app.wand_global = false;
-        app.magic_wand((1.0, 1.0), false);
+        app.magic_wand((1.0, 1.0), SelectionCombine::Replace);
         assert_eq!(app.selection, [1, 2].into_iter().collect());
     }
 
@@ -5735,6 +6389,36 @@ mod tests {
             assert_eq!(app.pixel_hardness, 0.4);
             assert_eq!(app.stroke_stabilization, 0.7);
             assert_eq!(app.capture_pressure_strength, 0.2);
+        });
+    }
+
+    #[test]
+    fn save_and_apply_export_profile_round_trips_the_settings() {
+        with_temp_home(|| {
+            let mut app = PaintApp::default();
+            app.batch_export.format = crate::export::ExportFormat::Jpg;
+            app.jpeg_quality = 42;
+            app.batch_export.scale_half = true;
+            app.batch_export.scale_2 = false;
+            app.batch_export.custom_enabled = true;
+            app.batch_export.custom_width = "800".into();
+            app.save_export_profile("web".into());
+            assert_eq!(app.export_profiles.len(), 1);
+
+            app.batch_export.format = crate::export::ExportFormat::Png;
+            app.jpeg_quality = 90;
+            app.batch_export.scale_half = false;
+            app.batch_export.scale_2 = true;
+            app.batch_export.custom_enabled = false;
+            app.batch_export.custom_width.clear();
+            let profile = app.export_profiles[0].clone();
+            app.apply_export_profile(&profile);
+            assert_eq!(app.batch_export.format, crate::export::ExportFormat::Jpg);
+            assert_eq!(app.jpeg_quality, 42);
+            assert!(app.batch_export.scale_half);
+            assert!(!app.batch_export.scale_2);
+            assert!(app.batch_export.custom_enabled);
+            assert_eq!(app.batch_export.custom_width, "800");
         });
     }
 

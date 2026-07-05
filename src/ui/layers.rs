@@ -87,6 +87,25 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
 
     ui.separator();
 
+    // Recherche/filtre (Sprint I.4) : complément naturel du renommage
+    // existant, utile seulement à partir d'un nombre significatif de
+    // calques — n'alourdit pas l'UI des petits documents.
+    const SEARCH_THRESHOLD: usize = 8;
+    let filter_active = app.doc.layers.len() > SEARCH_THRESHOLD;
+    if filter_active {
+        ui.horizontal(|ui| {
+            ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
+            ui.add(
+                egui::TextEdit::singleline(&mut app.layer_search)
+                    .hint_text(t("Filtrer les calques…", "Filter layers…"))
+                    .desired_width(f32::INFINITY),
+            );
+        });
+        ui.separator();
+    }
+    let query = app.layer_search.to_lowercase();
+    let ctx = ui.ctx().clone();
+
     // Du dessus (dernier) vers le dessous (premier). En-tête par groupe.
     let count = app.doc.layers.len();
     let mut select: Option<usize> = None;
@@ -111,6 +130,12 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
             }
             prev_group = group.clone();
         }
+        if filter_active && !query.is_empty() && !app.doc.layers[idx].name.to_lowercase().contains(&query) {
+            continue;
+        }
+        // Vignette (Sprint I.3) : calculée avant d'emprunter `layer` en
+        // mutable (le cache vit sur `app`, pas sur le calque lui-même).
+        let thumbnail = app.layer_thumbnail(&ctx, app.doc.layers[idx].id);
         let layer: &mut Layer = &mut app.doc.layers[idx];
         let is_active = idx == app.doc.active_layer;
         let renaming = app.layer_rename.as_ref().is_some_and(|(id, _)| *id == layer.id);
@@ -154,12 +179,56 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     {
                         layer.locked = !layer.locked;
                     }
+                    // Code couleur (Sprint I.5) : étiquette visuelle,
+                    // aucun effet sur le rendu — palette prédéfinie plutôt
+                    // qu'un sélecteur complet, plus rapide à l'usage.
+                    let (swatch_rect, swatch_resp) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::click());
+                    let swatch_color = layer
+                        .color_tag
+                        .map(|c| egui::Color32::from_rgb(c[0], c[1], c[2]))
+                        .unwrap_or(egui::Color32::TRANSPARENT);
+                    ui.painter().rect_filled(swatch_rect, 3.0, swatch_color);
+                    ui.painter().rect_stroke(swatch_rect, 3.0, ui.visuals().widgets.noninteractive.bg_stroke);
+                    let swatch_resp = swatch_resp.on_hover_text(t("Code couleur du calque", "Layer color tag"));
+                    let popup_id = ui.make_persistent_id("layer_color_tag").with(layer_id);
+                    if swatch_resp.clicked() {
+                        ui.memory_mut(|m| m.toggle_popup(popup_id));
+                    }
+                    egui::popup_below_widget(ui, popup_id, &swatch_resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                        ui.horizontal(|ui| {
+                            const PALETTE: [[u8; 3]; 8] = [
+                                [237, 85, 101],  // rouge
+                                [242, 153, 74],  // orange
+                                [235, 210, 80],  // jaune
+                                [95, 191, 128],  // vert
+                                [90, 170, 220],  // bleu
+                                [154, 120, 219], // violet
+                                [200, 200, 200], // gris
+                                [60, 60, 60],    // noir
+                            ];
+                            for c in PALETTE {
+                                let (r, rr) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
+                                ui.painter().rect_filled(r, 3.0, egui::Color32::from_rgb(c[0], c[1], c[2]));
+                                if rr.clicked() {
+                                    layer.color_tag = Some(c);
+                                }
+                            }
+                            if ui.button(t("Aucune", "None")).clicked() {
+                                layer.color_tag = None;
+                            }
+                        });
+                    });
                     let dim = if layer.opacity < 0.999 {
                         format!(" · {:.0}%", layer.opacity * 100.0)
                     } else {
                         String::new()
                     };
                     let clip = if layer.clip { "[clip] " } else { "" };
+                    // Vignette (Sprint I.3) : à gauche du nom, complète le
+                    // texte « (N traits) » plutôt que le remplacer entièrement.
+                    if let Some(tex) = &thumbnail {
+                        ui.add(egui::Image::from_texture((tex.id(), tex.size_vec2())).fit_to_exact_size(Vec2::splat(20.0)));
+                    }
                     if renaming {
                         let (_, buf) = app.layer_rename.as_mut().expect("renaming checked above");
                         let resp = ui.add(egui::TextEdit::singleline(buf).desired_width(100.0));
@@ -286,6 +355,19 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 ui.selectable_value(&mut adj, Adjustment::default_white_balance(), t("Balance des blancs", "White balance"));
                 ui.selectable_value(&mut adj, Adjustment::default_denoise(), t("Réduction de bruit", "Noise reduction"));
                 ui.selectable_value(&mut adj, Adjustment::default_gaussian_blur(), t("Flou gaussien", "Gaussian blur"));
+                ui.separator();
+                ui.selectable_value(&mut adj, Adjustment::default_pixelate(), t("Pixelisation", "Pixelate"));
+                ui.selectable_value(&mut adj, Adjustment::default_halftone(), t("Halftone", "Halftone"));
+                ui.selectable_value(&mut adj, Adjustment::default_wave(), t("Warp : Vague", "Warp: Wave"));
+                ui.selectable_value(&mut adj, Adjustment::default_sphere(), t("Warp : Sphère", "Warp: Sphere"));
+                ui.selectable_value(&mut adj, Adjustment::default_vortex(), t("Warp : Tourbillon", "Warp: Vortex"));
+                ui.selectable_value(&mut adj, Adjustment::default_radial_blur(), t("Flou radial", "Radial blur"));
+                ui.selectable_value(&mut adj, Adjustment::default_vignette(), t("Vignette", "Vignette"));
+                ui.selectable_value(
+                    &mut adj,
+                    Adjustment::default_channel_mixer_bw(),
+                    t("Mixeur de canaux N&B", "Channel mixer B&W"),
+                );
             });
         });
         match &mut adj {
@@ -419,9 +501,101 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     ui.add(egui::Slider::new(radius, 0.0..=40.0).suffix(" px"));
                 });
             }
+            Adjustment::Pixelate { block } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Taille du bloc", "Block size"));
+                    ui.add(egui::Slider::new(block, 1.0..=64.0).suffix(" px"));
+                });
+            }
+            Adjustment::Halftone { cell, angle } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Taille de cellule", "Cell size"));
+                    ui.add(egui::Slider::new(cell, 2.0..=40.0).suffix(" px"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Angle", "Angle"));
+                    ui.add(egui::Slider::new(angle, 0.0..=90.0).suffix("°"));
+                });
+            }
+            Adjustment::Wave { amplitude, wavelength } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Amplitude", "Amplitude"));
+                    ui.add(egui::Slider::new(amplitude, -60.0..=60.0).suffix(" px"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(t("Longueur d'onde", "Wavelength"));
+                    ui.add(egui::Slider::new(wavelength, 4.0..=200.0).suffix(" px"));
+                });
+            }
+            Adjustment::Sphere { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Quantité", "Amount"));
+                    ui.add(egui::Slider::new(amount, -1.0..=1.0));
+                });
+            }
+            Adjustment::Vortex { angle } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Angle", "Angle"));
+                    ui.add(egui::Slider::new(angle, -180.0..=180.0).suffix("°"));
+                });
+            }
+            Adjustment::RadialBlur { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Intensité", "Strength"));
+                    ui.add(egui::Slider::new(amount, 0.0..=1.0));
+                });
+            }
+            Adjustment::Vignette { amount } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Intensité", "Strength"));
+                    ui.add(egui::Slider::new(amount, 0.0..=1.0));
+                });
+            }
+            Adjustment::ChannelMixerBw { r, g, b } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Rouge", "Red"));
+                    ui.add(egui::Slider::new(r, -2.0..=2.0));
+                    ui.label(t("Vert", "Green"));
+                    ui.add(egui::Slider::new(g, -2.0..=2.0));
+                    ui.label(t("Bleu", "Blue"));
+                    ui.add(egui::Slider::new(b, -2.0..=2.0));
+                });
+            }
             Adjustment::Preset(_) => {}
         }
         layer.adjustment = Some(adj);
+    }
+
+    // Calque de remplissage (Sprint I.1) : uni ou dégradé, édité directement
+    // ici comme les calques d'ajustement — pas de fenêtre séparée.
+    if let Some(mut fill) = layer.fill.clone() {
+        use crate::model::{FillKind, Gradient};
+        ui.horizontal(|ui| {
+            ui.label(t("Remplissage", "Fill"));
+            ui.label(fill.label());
+        });
+        match &mut fill {
+            FillKind::Solid(color) => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Couleur", "Color"));
+                    ui.color_edit_button_srgba_unmultiplied(color);
+                });
+            }
+            FillKind::Linear(g) | FillKind::Radial(g) => {
+                let Gradient { stops, .. } = g;
+                ui.horizontal(|ui| {
+                    for (_, c) in stops.iter_mut() {
+                        let mut rgb = [c[0], c[1], c[2]];
+                        if ui.color_edit_button_srgb(&mut rgb).changed() {
+                            c[0] = rgb[0];
+                            c[1] = rgb[1];
+                            c[2] = rgb[2];
+                        }
+                    }
+                });
+            }
+        }
+        layer.fill = Some(fill);
     }
 
     // Masque de calque peint (roadmap P2 #14) : peint en niveaux de gris,

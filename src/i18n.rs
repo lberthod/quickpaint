@@ -103,6 +103,10 @@ struct Settings {
     /// `MAX_RECENT_PROJECTS`.
     #[serde(default)]
     recent_projects: Vec<String>,
+    /// Profils d'export nommés (Sprint L.8) : format + qualité + tailles du
+    /// batch export, réutilisables en un clic.
+    #[serde(default)]
+    export_profiles: Vec<crate::export::ExportProfile>,
 }
 
 /// Groupes de la barre d'outils repliés par défaut (UX-2.1) : les familles
@@ -249,6 +253,17 @@ pub fn load_brush_presets() -> Vec<crate::model::BrushPreset> {
 pub fn save_brush_presets(presets: &[crate::model::BrushPreset]) {
     let mut settings = read_settings();
     settings.brush_presets = presets.to_vec();
+    write_settings(&settings);
+}
+
+/// Profils d'export nommés (Sprint L.8), même fichier local.
+pub fn load_export_profiles() -> Vec<crate::export::ExportProfile> {
+    read_settings().export_profiles
+}
+
+pub fn save_export_profiles(profiles: &[crate::export::ExportProfile]) {
+    let mut settings = read_settings();
+    settings.export_profiles = profiles.to_vec();
     write_settings(&settings);
 }
 

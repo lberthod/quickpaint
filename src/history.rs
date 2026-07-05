@@ -121,6 +121,23 @@ pub enum Command {
         pivot: (f32, f32),
         angle: f32,
     },
+    /// Cisaillement (skew) d'une sélection autour d'un pivot (Sprint M.2) —
+    /// un seul axe actif par geste (`shx` ou `shy`, jamais les deux à la
+    /// fois : l'inverse exact pour l'undo est alors la simple négation de
+    /// l'axe actif, sans avoir à inverser une matrice de cisaillement
+    /// combiné). Les traits sont cisaillés point par point (vraie
+    /// déformation) ; textes/images n'ont pas de représentation « inclinée »
+    /// dans le modèle actuel, seule leur ancre se déplace comme pour
+    /// `Scale`/`Rotate`.
+    Shear {
+        layer: u64,
+        strokes: Vec<u64>,
+        texts: Vec<u64>,
+        images: Vec<u64>,
+        pivot: (f32, f32),
+        shx: f32,
+        shy: f32,
+    },
 }
 
 impl Command {
@@ -133,6 +150,7 @@ impl Command {
                 | Command::MoveEach { .. }
                 | Command::Scale { .. }
                 | Command::Rotate { .. }
+                | Command::Shear { .. }
                 | Command::SetDoc { .. }
                 | Command::EditPenPath { .. }
         )
@@ -150,6 +168,7 @@ impl Command {
             Command::SetZMany { .. } => t("Réordonner", "Reorder"),
             Command::Scale { .. } => t("Mise à l'échelle", "Scale"),
             Command::Rotate { .. } => t("Rotation", "Rotate"),
+            Command::Shear { .. } => t("Cisaillement", "Shear"),
             Command::Clear { .. } => t("Vider le calque", "Clear layer"),
             Command::AddText { .. } => t("Texte", "Text"),
             Command::DeleteText { .. } => t("Suppr. texte", "Delete text"),
@@ -354,6 +373,49 @@ fn rotate_elements(
     }
 }
 
+/// Cisaillement (skew) affine autour d'un pivot (Sprint M.2) :
+/// `x' = x + shx*(y-pivot.y)`, `y' = y + shy*(x-pivot.x)`. Les traits sont
+/// déformés point par point (chaque sommet suit sa propre coordonnée
+/// perpendiculaire à l'axe de cisaillement, contrairement à `Scale`/`Rotate`
+/// qui bougent tous les points d'un même élément de façon rigide/uniforme) ;
+/// textes/images n'ont pas de champ d'inclinaison dans le modèle actuel,
+/// seule leur ancre (`pos`) est déplacée comme pour les autres transformations.
+#[allow(clippy::too_many_arguments)]
+fn shear_elements(
+    doc: &mut Document,
+    layer: u64,
+    strokes: &[u64],
+    texts: &[u64],
+    images: &[u64],
+    pivot: (f32, f32),
+    shx: f32,
+    shy: f32,
+) {
+    let shear = |p: (f32, f32)| {
+        let (dx, dy) = (p.0 - pivot.0, p.1 - pivot.1);
+        (pivot.0 + dx + shx * dy, pivot.1 + dy + shy * dx)
+    };
+    if let Some(l) = layer_mut(doc, layer) {
+        for s in &mut l.strokes {
+            if strokes.contains(&s.id) {
+                for p in &mut s.points {
+                    p.pos = shear(p.pos);
+                }
+            }
+        }
+        for t in &mut l.texts {
+            if texts.contains(&t.id) {
+                t.pos = shear(t.pos);
+            }
+        }
+        for im in &mut l.images {
+            if images.contains(&im.id) {
+                im.pos = shear(im.pos);
+            }
+        }
+    }
+}
+
 /// Translate un seul élément (trait, texte ou image) par son id.
 fn translate_one(doc: &mut Document, layer: u64, id: u64, d: (f32, f32)) {
     if let Some(l) = layer_mut(doc, layer) {
@@ -506,6 +568,9 @@ fn apply(doc: &mut Document, cmd: &Command) {
         Command::Rotate { layer, strokes, texts, images, pivot, angle } => {
             rotate_elements(doc, *layer, strokes, texts, images, *pivot, *angle);
         }
+        Command::Shear { layer, strokes, texts, images, pivot, shx, shy } => {
+            shear_elements(doc, *layer, strokes, texts, images, *pivot, *shx, *shy);
+        }
         Command::AddLayer { index, layer } => {
             let at = (*index).min(doc.layers.len());
             doc.layers.insert(at, (**layer).clone());
@@ -651,6 +716,12 @@ fn revert(doc: &mut Document, cmd: &Command) {
         Command::Rotate { layer, strokes, texts, images, pivot, angle } => {
             rotate_elements(doc, *layer, strokes, texts, images, *pivot, -angle);
         }
+        Command::Shear { layer, strokes, texts, images, pivot, shx, shy } => {
+            // Un seul axe actif par geste (voir la doc du variant) : la
+            // négation du même axe est l'inverse exact, pas besoin d'inverser
+            // une matrice de cisaillement combiné.
+            shear_elements(doc, *layer, strokes, texts, images, *pivot, -shx, -shy);
+        }
         Command::AddLayer { index, .. } => {
             if *index < doc.layers.len() && doc.layers.len() > 1 {
                 doc.layers.remove(*index);
@@ -732,6 +803,36 @@ mod tests {
         assert_eq!(doc.layers[0].strokes.len(), 2);
         h.undo(&mut doc);
         assert_eq!(doc.layers[0].strokes.len(), 3);
+    }
+
+    #[test]
+    fn shear_horizontal_moves_top_and_bottom_in_opposite_directions() {
+        let mut doc = Document::new((100, 100));
+        let id = doc.active_id();
+        let mut stroke = s();
+        stroke.id = 1;
+        // Rectangle vertical : deux points, l'un en haut (y=0) l'autre en
+        // bas (y=20), tous deux à x=10, pivot au centre (10, 10).
+        stroke.points = vec![
+            crate::model::StrokePoint { pos: (10.0, 0.0), width: 4.0 },
+            crate::model::StrokePoint { pos: (10.0, 20.0), width: 4.0 },
+        ];
+        doc.layers[0].strokes.push(stroke);
+        let mut h = History::new();
+        h.push(
+            &mut doc,
+            Command::Shear { layer: id, strokes: vec![1], texts: vec![], images: vec![], pivot: (10.0, 10.0), shx: 0.5, shy: 0.0 },
+        );
+        let top = doc.layers[0].strokes[0].points[0].pos;
+        let bottom = doc.layers[0].strokes[0].points[1].pos;
+        // Haut (dy=-10) et bas (dy=+10) doivent décaler en x en sens opposé.
+        assert!(top.0 < 10.0, "le point du haut devrait décaler vers la gauche, got {top:?}");
+        assert!(bottom.0 > 10.0, "le point du bas devrait décaler vers la droite, got {bottom:?}");
+        assert!((bottom.0 - 10.0 + (top.0 - 10.0)).abs() < 1e-3, "décalages symétriques autour du pivot");
+        h.undo(&mut doc);
+        let restored: Vec<(f32, f32)> = doc.layers[0].strokes[0].points.iter().map(|p| p.pos).collect();
+        assert!((restored[0].0 - 10.0).abs() < 1e-3 && (restored[0].1 - 0.0).abs() < 1e-3);
+        assert!((restored[1].0 - 10.0).abs() < 1e-3 && (restored[1].1 - 20.0).abs() < 1e-3);
     }
 
     #[test]

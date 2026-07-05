@@ -151,6 +151,43 @@ impl RasterLayer {
         }
     }
 
+    /// Dépose un tampon personnalisé (Sprint J.2), importé depuis une image
+    /// en niveaux de gris — échantillonne `stamp` (mis à l'échelle pour tenir
+    /// dans un carré de côté `size`) au lieu de la formule de couverture
+    /// circulaire de `stamp()`. `erase = true` retire de l'alpha existant au
+    /// lieu d'en déposer, comme `stamp()`.
+    pub fn stamp_custom(&mut self, cx: f32, cy: f32, size: f32, rgba: [u8; 4], stamp: &crate::tools::brush::BrushStamp, erase: bool) {
+        if size <= 0.0 || stamp.w == 0 || stamp.h == 0 {
+            return;
+        }
+        let half = size * 0.5;
+        let (x0, x1) = ((cx - half).floor() as i32, (cx + half).ceil() as i32);
+        let (y0, y1) = ((cy - half).floor() as i32, (cy + half).ceil() as i32);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (u, v) = ((x as f32 + 0.5 - (cx - half)) / size, (y as f32 + 0.5 - (cy - half)) / size);
+                if !(0.0..1.0).contains(&u) || !(0.0..1.0).contains(&v) {
+                    continue;
+                }
+                let cov = stamp.sample(u, v);
+                if cov <= 0.0 {
+                    continue;
+                }
+                if erase {
+                    let dst = self.get_pixel(x, y);
+                    if dst[3] == 0 {
+                        continue;
+                    }
+                    let strength = cov * (rgba[3] as f32 / 255.0);
+                    let na = (dst[3] as f32 * (1.0 - strength)).round().clamp(0.0, 255.0) as u8;
+                    self.set_pixel(x, y, [dst[0], dst[1], dst[2], na]);
+                } else {
+                    self.blend_pixel(x, y, rgba, cov);
+                }
+            }
+        }
+    }
+
     /// Trace un tampon échantillonné le long d'un segment (trait continu).
     pub fn stroke_segment(
         &mut self,
@@ -749,6 +786,27 @@ mod tests {
         let p = r.get_pixel(50, 50);
         assert_eq!(&p[0..3], &[200, 100, 50]); // couleur inchangée
         assert!(p[3] < 10); // alpha quasi nulle
+    }
+
+    #[test]
+    fn stamp_custom_follows_the_stamp_coverage_pattern() {
+        // Damier 2x2 : moitié gauche noire (aucune couverture), moitié
+        // droite blanche (pleine couverture).
+        let rgba = [0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255];
+        let stamp = crate::tools::brush::BrushStamp::from_rgba(2, 2, &rgba);
+        let mut r = RasterLayer::default();
+        // Carré 10x10 centré en (50,50) → occupe (45,45)..(55,55).
+        r.stamp_custom(50.0, 50.0, 10.0, [10, 20, 30, 255], &stamp, false);
+        assert_eq!(r.get_pixel(46, 46), [0, 0, 0, 0]); // quadrant gauche : noir, pas peint
+        assert_eq!(r.get_pixel(54, 46), [10, 20, 30, 255]); // quadrant droit : blanc, peint plein
+    }
+
+    #[test]
+    fn stamp_custom_is_a_noop_for_a_zero_size_stamp() {
+        let stamp = crate::tools::brush::BrushStamp::from_rgba(1, 1, &[255, 255, 255, 255]);
+        let mut r = RasterLayer::default();
+        r.stamp_custom(50.0, 50.0, 0.0, [10, 20, 30, 255], &stamp, false);
+        assert!(r.is_empty());
     }
 
     #[test]

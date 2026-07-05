@@ -1,6 +1,6 @@
 [package]
 name = "quickpaint"
-version = "0.15.0"
+version = "0.16.0"
 edition = "2021"
 description = "QuickPaint — éditeur de dessin tactile macOS en Rust (egui)"
 authors = ["Loïc Berthod <https://github.com/lberthod>"]
@@ -16,8 +16,8 @@ egui = { version = "0.29", features = ["accesskit"] }
 # Icônes vectorielles (barre d'outils, calques, menus) — police Phosphor
 # embarquée, rendu net à toute taille, sans dépendre des emojis du système.
 egui-phosphor = { version = "0.7", features = ["fill"] }
-# Encodage images pour l'export (PNG/JPG/WebP). default-features off = build léger.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff"] }
+# Encodage images pour l'export (PNG/JPG/WebP/GIF). default-features off = build léger.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff", "gif"] }
 # Sauvegarde / ouverture de projet vectoriel (.json, étape 7).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -42,6 +42,7 @@ muda = "0.19"
 # celle utilisée en interne par `eframe` 0.29 (winit 0.30), pour rester sur
 # le même type d'`EventLoopBuilder`.
 winit = { version = "0.30", default-features = false }
+usvg = "0.47.0"
 
 [profile.release]
 opt-level = 3

@@ -15,10 +15,12 @@ mod input;
 mod keybindings;
 mod model;
 mod native_menu;
+mod pdf_vector;
 mod project;
 mod psd_import;
 mod render;
 mod svg;
+mod svg_import;
 mod tools;
 mod ui;
 

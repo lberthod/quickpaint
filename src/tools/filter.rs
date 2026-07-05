@@ -36,11 +36,16 @@ pub enum Filter {
     /// saturation légèrement augmentée + contours assombris (pigment qui
     /// s'accumule aux bords, comme du vrai papier aquarelle).
     Watercolor,
+    /// Auto-correction en un clic (Sprint K.8) : étire l'histogramme de
+    /// chaque canal pour que son 1er/99e centile touchent 0/255 —
+    /// contrairement aux autres presets, les paramètres sont calculés à
+    /// partir de l'image elle-même plutôt que fixés d'avance.
+    AutoLevels,
 }
 
 impl Filter {
     /// Tous les filtres, dans l'ordre d'affichage du menu.
-    pub const ALL: [Filter; 15] = [
+    pub const ALL: [Filter; 16] = [
         Filter::Brighter,
         Filter::Darker,
         Filter::Contrast,
@@ -56,6 +61,7 @@ impl Filter {
         Filter::Comic,
         Filter::OilPainting,
         Filter::Watercolor,
+        Filter::AutoLevels,
     ];
 
     pub fn label(self) -> &'static str {
@@ -75,6 +81,7 @@ impl Filter {
             Filter::Comic => t("Bande dessinée", "Comic"),
             Filter::OilPainting => t("Peinture à l'huile", "Oil painting"),
             Filter::Watercolor => t("Aquarelle", "Watercolor"),
+            Filter::AutoLevels => t("Correction automatique", "Auto correction"),
         }
     }
 }
@@ -136,6 +143,42 @@ pub enum Adjustment {
     /// est continu et le profil de poids est une vraie gaussienne. `radius`
     /// en pixels, <= 0 = identité.
     GaussianBlur { radius: f32 },
+    /// Pixelisation / mosaïque (Sprint K.1) : moyenne chaque bloc `n×n` et
+    /// remplace tous ses pixels par cette moyenne. `block` en pixels, <= 1 =
+    /// identité (bloc d'un seul pixel).
+    Pixelate { block: f32 },
+    /// Halftone / trame (Sprint K.2) : convertit en luminance puis dessine,
+    /// pour chaque cellule d'une grille tournée de `angle`, un disque dont le
+    /// rayon est proportionnel à l'obscurité de la cellule (façon impression
+    /// offset). `cell` en pixels, `angle` en degrés.
+    Halftone { cell: f32, angle: f32 },
+    /// Distorsion vague (Sprint K.3) : décale chaque colonne verticalement
+    /// selon un sinus de longueur d'onde réglable — généralise `ArcWarp`, qui
+    /// n'a qu'une seule demi-période fixe. `amplitude` en pixels,
+    /// `wavelength` en pixels (> 0).
+    Wave { amplitude: f32, wavelength: f32 },
+    /// Distorsion sphère (Sprint K.3) : même principe que `Distortion` mais
+    /// avec une formule de projection sphérique, plus prononcée en périphérie
+    /// que le simple bombé actuel. `amount` -1.0..=1.0, 0 = identité.
+    Sphere { amount: f32 },
+    /// Distorsion tourbillon (Sprint K.3) : rotation de l'échantillonnage
+    /// proportionnelle à la distance au centre — angle maximal au centre, nul
+    /// en bordure. `angle` en degrés (rotation max au centre).
+    Vortex { angle: f32 },
+    /// Flou radial / zoom (Sprint K.4) : moyenne le long de rayons partant du
+    /// centre de l'image (effet vitesse/explosion), complète `MotionBlur`
+    /// (directionnel). `amount` 0.0..=1.0, 0 = identité.
+    RadialBlur { amount: f32 },
+    /// Vignette artistique indépendante (Sprint K.5) : assombrit les coins
+    /// proportionnellement à la distance au centre — extrait de `vintage()`
+    /// en un réglage autonome. `amount` 0.0..=1.0, 0 = identité.
+    Vignette { amount: f32 },
+    /// Mixeur de canaux pour le N&B (Sprint K.7) : poids réglables par
+    /// canal (au lieu de la formule fixe 0.299/0.587/0.114 de `Filter::
+    /// Grayscale`), façon « N&B personnalisé » Lightroom. Pas de
+    /// normalisation forcée : l'utilisateur peut sur/sous-exposer certains
+    /// canaux volontairement.
+    ChannelMixerBw { r: f32, g: f32, b: f32 },
 }
 
 impl Adjustment {
@@ -156,6 +199,14 @@ impl Adjustment {
             Adjustment::WhiteBalance { .. } => t("Balance des blancs", "White balance").to_string(),
             Adjustment::Denoise { .. } => t("Réduction de bruit", "Noise reduction").to_string(),
             Adjustment::GaussianBlur { .. } => t("Flou gaussien", "Gaussian blur").to_string(),
+            Adjustment::Pixelate { .. } => t("Pixelisation", "Pixelate").to_string(),
+            Adjustment::Halftone { .. } => t("Halftone", "Halftone").to_string(),
+            Adjustment::Wave { .. } => t("Warp : Vague", "Warp: Wave").to_string(),
+            Adjustment::Sphere { .. } => t("Warp : Sphère", "Warp: Sphere").to_string(),
+            Adjustment::Vortex { .. } => t("Warp : Tourbillon", "Warp: Vortex").to_string(),
+            Adjustment::RadialBlur { .. } => t("Flou radial", "Radial blur").to_string(),
+            Adjustment::Vignette { .. } => t("Vignette", "Vignette").to_string(),
+            Adjustment::ChannelMixerBw { .. } => t("Mixeur de canaux N&B", "Channel mixer B&W").to_string(),
         }
     }
 
@@ -215,6 +266,38 @@ impl Adjustment {
 
     pub fn default_gaussian_blur() -> Self {
         Adjustment::GaussianBlur { radius: 0.0 }
+    }
+
+    pub fn default_pixelate() -> Self {
+        Adjustment::Pixelate { block: 1.0 }
+    }
+
+    pub fn default_halftone() -> Self {
+        Adjustment::Halftone { cell: 8.0, angle: 15.0 }
+    }
+
+    pub fn default_wave() -> Self {
+        Adjustment::Wave { amplitude: 0.0, wavelength: 40.0 }
+    }
+
+    pub fn default_sphere() -> Self {
+        Adjustment::Sphere { amount: 0.0 }
+    }
+
+    pub fn default_vortex() -> Self {
+        Adjustment::Vortex { angle: 0.0 }
+    }
+
+    pub fn default_radial_blur() -> Self {
+        Adjustment::RadialBlur { amount: 0.0 }
+    }
+
+    pub fn default_vignette() -> Self {
+        Adjustment::Vignette { amount: 0.0 }
+    }
+
+    pub fn default_channel_mixer_bw() -> Self {
+        Adjustment::ChannelMixerBw { r: 0.299, g: 0.587, b: 0.114 }
     }
 
     /// Signature FNV-1a des paramètres, pour l'invalidation du cache de rendu
@@ -296,6 +379,42 @@ impl Adjustment {
                 mix(15);
                 mix(radius.to_bits() as u64);
             }
+            Adjustment::Pixelate { block } => {
+                mix(16);
+                mix(block.to_bits() as u64);
+            }
+            Adjustment::Halftone { cell, angle } => {
+                mix(17);
+                mix(cell.to_bits() as u64);
+                mix(angle.to_bits() as u64);
+            }
+            Adjustment::Wave { amplitude, wavelength } => {
+                mix(18);
+                mix(amplitude.to_bits() as u64);
+                mix(wavelength.to_bits() as u64);
+            }
+            Adjustment::Sphere { amount } => {
+                mix(19);
+                mix(amount.to_bits() as u64);
+            }
+            Adjustment::Vortex { angle } => {
+                mix(20);
+                mix(angle.to_bits() as u64);
+            }
+            Adjustment::RadialBlur { amount } => {
+                mix(21);
+                mix(amount.to_bits() as u64);
+            }
+            Adjustment::Vignette { amount } => {
+                mix(22);
+                mix(amount.to_bits() as u64);
+            }
+            Adjustment::ChannelMixerBw { r, g, b } => {
+                mix(23);
+                mix(r.to_bits() as u64);
+                mix(g.to_bits() as u64);
+                mix(b.to_bits() as u64);
+            }
         }
         h
     }
@@ -323,6 +442,14 @@ pub fn apply_adjustment(adj: Adjustment, rgba: &mut Vec<u8>, w: u32, h: u32) {
             smooth_skin(rgba, w as usize, h as usize, &full_mask, strength.clamp(0.0, 1.0));
         }
         Adjustment::GaussianBlur { radius } => *rgba = gaussian_blur(rgba, w as usize, h as usize, radius),
+        Adjustment::Pixelate { block } => pixelate(rgba, w as usize, h as usize, block),
+        Adjustment::Halftone { cell, angle } => *rgba = halftone(rgba, w as usize, h as usize, cell, angle),
+        Adjustment::Wave { amplitude, wavelength } => *rgba = wave_warp(rgba, w as usize, h as usize, amplitude, wavelength),
+        Adjustment::Sphere { amount } => *rgba = sphere_warp(rgba, w as usize, h as usize, amount),
+        Adjustment::Vortex { angle } => *rgba = vortex_warp(rgba, w as usize, h as usize, angle),
+        Adjustment::RadialBlur { amount } => *rgba = radial_blur(rgba, w as usize, h as usize, amount),
+        Adjustment::Vignette { amount } => apply_vignette(rgba, w as usize, h as usize, amount),
+        Adjustment::ChannelMixerBw { r, g, b } => channel_mixer_bw(rgba, r, g, b),
     }
 }
 
@@ -453,6 +580,225 @@ fn arc_warp(src: &[u8], w: usize, h: usize, amount: f32) -> Vec<u8> {
         }
     }
     out
+}
+
+/// Distorsion vague (Sprint K.3) : généralise `arc_warp` avec une longueur
+/// d'onde réglable au lieu d'une seule demi-période fixe sur toute la
+/// largeur. `amplitude <= 0` (en valeur absolue) ou `wavelength <= 0` =
+/// identité.
+fn wave_warp(src: &[u8], w: usize, h: usize, amplitude: f32, wavelength: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || amplitude.abs() < 1e-4 || wavelength <= 1e-4 {
+        return src.to_vec();
+    }
+    let mut out = vec![0u8; w * h * 4];
+    for x in 0..w {
+        let shift = amplitude * (2.0 * std::f32::consts::PI * x as f32 / wavelength).sin();
+        for y in 0..h {
+            let sy = y as f32 - shift;
+            if sy < 0.0 || sy as usize >= h {
+                continue;
+            }
+            let sidx = (sy as usize * w + x) * 4;
+            let didx = (y * w + x) * 4;
+            out[didx..didx + 4].copy_from_slice(&src[sidx..sidx + 4]);
+        }
+    }
+    out
+}
+
+/// Distorsion sphère (Sprint K.3) : même échantillonnage inverse que
+/// `distort_radial`, mais avec un facteur non-linéaire (`1 - amount *
+/// (1 - r²)`) qui pousse davantage la périphérie qu'un simple bombé barrel —
+/// une vraie projection sphérique plutôt qu'une distorsion optique légère.
+/// `amount` -1.0..=1.0, 0 = identité.
+fn sphere_warp(src: &[u8], w: usize, h: usize, amount: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || amount.abs() < 1e-4 {
+        return src.to_vec();
+    }
+    let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+    let scale = (cx * cx + cy * cy).sqrt().max(1.0);
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (nx, ny) = ((x as f32 + 0.5 - cx) / scale, (y as f32 + 0.5 - cy) / scale);
+            let r2 = (nx * nx + ny * ny).min(1.0);
+            let factor = 1.0 - amount * (1.0 - r2);
+            let didx = (y * w + x) * 4;
+            if factor.abs() < 1e-6 {
+                continue;
+            }
+            let (sx, sy) = (cx + (nx / factor) * scale, cy + (ny / factor) * scale);
+            if sx >= 0.0 && sy >= 0.0 && (sx as usize) < w && (sy as usize) < h {
+                let sidx = ((sy as usize) * w + (sx as usize)) * 4;
+                out[didx..didx + 4].copy_from_slice(&src[sidx..sidx + 4]);
+            }
+        }
+    }
+    out
+}
+
+/// Distorsion tourbillon (Sprint K.3) : rotation de l'échantillonnage
+/// proportionnelle à `1 - r` (rotation maximale au centre, nulle en bordure).
+/// `angle` en degrés = rotation maximale au centre ; `angle.abs() < 1e-4` =
+/// identité.
+fn vortex_warp(src: &[u8], w: usize, h: usize, angle_deg: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || angle_deg.abs() < 1e-4 {
+        return src.to_vec();
+    }
+    let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+    let max_r = (cx * cx + cy * cy).sqrt().max(1.0);
+    let max_angle = angle_deg.to_radians();
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let r = (dx * dx + dy * dy).sqrt();
+            let t = (r / max_r).min(1.0);
+            let rot = max_angle * (1.0 - t);
+            let (sin, cos) = rot.sin_cos();
+            let (sx, sy) = (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos);
+            let didx = (y * w + x) * 4;
+            if sx >= 0.0 && sy >= 0.0 && (sx as usize) < w && (sy as usize) < h {
+                let sidx = ((sy as usize) * w + (sx as usize)) * 4;
+                out[didx..didx + 4].copy_from_slice(&src[sidx..sidx + 4]);
+            }
+        }
+    }
+    out
+}
+
+/// Pixelisation / mosaïque (Sprint K.1) : moyenne chaque bloc `n×n` (n =
+/// `block.round()`, minimum 1) et remplace tous ses pixels par cette
+/// moyenne. `block <= 1` = identité.
+fn pixelate(rgba: &mut [u8], w: usize, h: usize, block: f32) {
+    let n = (block.round() as usize).max(1);
+    if w == 0 || h == 0 || n <= 1 {
+        return;
+    }
+    let mut by = 0usize;
+    while by < h {
+        let bh = n.min(h - by);
+        let mut bx = 0usize;
+        while bx < w {
+            let bw = n.min(w - bx);
+            let mut sum = [0u32; 4];
+            for y in by..by + bh {
+                for x in bx..bx + bw {
+                    let i = (y * w + x) * 4;
+                    for c in 0..4 {
+                        sum[c] += rgba[i + c] as u32;
+                    }
+                }
+            }
+            let count = (bw * bh) as u32;
+            let avg: [u8; 4] = std::array::from_fn(|c| (sum[c] / count) as u8);
+            for y in by..by + bh {
+                for x in bx..bx + bw {
+                    let i = (y * w + x) * 4;
+                    rgba[i..i + 4].copy_from_slice(&avg);
+                }
+            }
+            bx += n;
+        }
+        by += n;
+    }
+}
+
+/// Halftone / trame (Sprint K.2) : convertit en luminance puis, pour chaque
+/// cellule d'une grille de taille `cell` tournée de `angle`, dessine un
+/// disque centré sur la cellule dont le rayon est proportionnel à
+/// l'obscurité moyenne de la cellule (cellule noire → disque couvrant toute
+/// la cellule ; blanche → rayon nul). Fond blanc entre les disques, comme un
+/// tramage niveaux de gris classique.
+fn halftone(src: &[u8], w: usize, h: usize, cell: f32, angle_deg: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || cell <= 1e-4 {
+        return src.to_vec();
+    }
+    let (sin, cos) = angle_deg.to_radians().sin_cos();
+    // Repère de la grille tournée : (u, v) = rotation de (x, y) par -angle,
+    // pour que la grille de cellules soit axée sur (u, v).
+    let to_grid = |x: f32, y: f32| -> (f32, f32) { (x * cos + y * sin, -x * sin + y * cos) };
+    let from_grid = |u: f32, v: f32| -> (f32, f32) { (u * cos - v * sin, u * sin + v * cos) };
+    // Rayon max = demi-diagonale de la cellule : une cellule entièrement
+    // noire produit un disque qui couvre exactement toute la cellule
+    // (coins inclus), une cellule blanche un rayon nul.
+    let max_radius = cell * std::f32::consts::SQRT_2 * 0.5;
+    let mut out = vec![255u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (u, v) = to_grid(x as f32 + 0.5, y as f32 + 0.5);
+            let (cu, cv) = ((u / cell).floor() + 0.5, (v / cell).floor() + 0.5);
+            let center_u = cu * cell;
+            let center_v = cv * cell;
+            // Luminance échantillonnée au centre de la cellule (image
+            // d'origine, avant rotation) — suffisant pour un rendu léger.
+            let (center_x, center_y) = from_grid(center_u, center_v);
+            let sx = (center_x as i64).clamp(0, w as i64 - 1) as usize;
+            let sy = (center_y as i64).clamp(0, h as i64 - 1) as usize;
+            let l = luma(&src[(sy * w + sx) * 4..(sy * w + sx) * 4 + 4]) / 255.0;
+            let radius = max_radius * (1.0 - l);
+            let dist = ((u - center_u).powi(2) + (v - center_v).powi(2)).sqrt();
+            let didx = (y * w + x) * 4;
+            let v_out = if dist <= radius { 0u8 } else { 255u8 };
+            out[didx] = v_out;
+            out[didx + 1] = v_out;
+            out[didx + 2] = v_out;
+            out[didx + 3] = src[didx + 3];
+        }
+    }
+    out
+}
+
+/// Flou radial / zoom (Sprint K.4) : moyenne le long de rayons partant du
+/// centre de l'image, complète `motion_blur` (directionnel constant) —
+/// l'échantillonnage suit la direction radiale de chaque pixel plutôt qu'une
+/// direction fixe. `amount <= 0` = identité.
+fn radial_blur(src: &[u8], w: usize, h: usize, amount: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || amount <= 1e-4 {
+        return src.to_vec();
+    }
+    let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+    let steps = 8;
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let mut sum = [0.0f32; 4];
+            let mut count = 0.0f32;
+            for s in 0..=steps {
+                let t = 1.0 - amount.min(1.0) * (s as f32 / steps as f32);
+                let sx = (cx + dx * t) as i64;
+                let sy = (cy + dy * t) as i64;
+                if sx < 0 || sy < 0 || sx as usize >= w || sy as usize >= h {
+                    continue;
+                }
+                let i = (sy as usize * w + sx as usize) * 4;
+                for c in 0..4 {
+                    sum[c] += src[i + c] as f32;
+                }
+                count += 1.0;
+            }
+            let didx = (y * w + x) * 4;
+            if count > 0.0 {
+                for c in 0..4 {
+                    out[didx + c] = (sum[c] / count).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Mixeur de canaux pour le N&B (Sprint K.7) : remplace la formule fixe de
+/// `luma()` (0.299/0.587/0.114) par des poids réglables par canal, façon
+/// « N&B personnalisé » Lightroom. Pas de normalisation forcée des poids.
+fn channel_mixer_bw(rgba: &mut [u8], r: f32, g: f32, b: f32) {
+    for px in rgba.chunks_exact_mut(4) {
+        let v = (px[0] as f32 * r + px[1] as f32 * g + px[2] as f32 * b).clamp(0.0, 255.0) as u8;
+        px[0] = v;
+        px[1] = v;
+        px[2] = v;
+    }
 }
 
 /// Duotone (Sprint 5.2) : luminance → interpolation entre `shadow`/`highlight`.
@@ -803,6 +1149,31 @@ pub fn histogram_rgb(rgba: &[u8]) -> [[u32; 256]; 3] {
     hist
 }
 
+/// Rectangle minimal englobant les pixels d'alpha > 0 (Sprint G.3, « Rogner
+/// les bords vides »). Renvoie `None` si l'image est entièrement transparente
+/// (pas de recadrage à 0×0 dans ce cas).
+pub fn trim_bounds(rgba: &[u8], w: usize, h: usize) -> Option<(u32, u32, u32, u32)> {
+    let mut min_x = w;
+    let mut min_y = h;
+    let mut max_x = 0usize; // exclusif
+    let mut max_y = 0usize; // exclusif
+    for y in 0..h {
+        for x in 0..w {
+            let a = rgba[(y * w + x) * 4 + 3];
+            if a > 0 {
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x + 1);
+                max_y = max_y.max(y + 1);
+            }
+        }
+    }
+    if max_x <= min_x || max_y <= min_y {
+        return None;
+    }
+    Some((min_x as u32, min_y as u32, (max_x - min_x) as u32, (max_y - min_y) as u32))
+}
+
 /// Applique le filtre en place (ou renvoie un nouveau buffer pour les filtres à
 /// voisinage : flou, netteté).
 pub fn apply(filter: Filter, rgba: &mut Vec<u8>, w: u32, h: u32) {
@@ -822,6 +1193,42 @@ pub fn apply(filter: Filter, rgba: &mut Vec<u8>, w: u32, h: u32) {
         Filter::Comic => *rgba = comic(rgba, w as usize, h as usize),
         Filter::OilPainting => *rgba = oil_painting(rgba, w as usize, h as usize, 3),
         Filter::Watercolor => *rgba = watercolor(rgba, w as usize, h as usize),
+        Filter::AutoLevels => auto_levels(rgba),
+    }
+}
+
+/// Auto-correction en un clic (Sprint K.8) : étire l'histogramme de chaque
+/// canal RVB pour que son 1er/99e centile touchent 0/255 — réutilise
+/// `histogram_rgb` déjà existant pour calculer les bornes.
+fn auto_levels(rgba: &mut [u8]) {
+    let hist = histogram_rgb(rgba);
+    let total: u32 = hist[0].iter().sum();
+    if total == 0 {
+        return;
+    }
+    let percentile = |channel: &[u32; 256], p: f32| -> u8 {
+        let target = ((total as f32 * p).round() as u32).max(1);
+        let mut acc = 0u32;
+        for (v, &count) in channel.iter().enumerate() {
+            acc += count;
+            if acc >= target {
+                return v as u8;
+            }
+        }
+        255
+    };
+    // Bornes par canal : (lo, hi), lo < hi sinon pas d'étirement sur ce canal.
+    let bounds: [(u8, u8); 3] = std::array::from_fn(|c| {
+        let lo = percentile(&hist[c], 0.01);
+        let hi = percentile(&hist[c], 0.99);
+        if lo < hi { (lo, hi) } else { (0, 255) }
+    });
+    for px in rgba.chunks_exact_mut(4) {
+        for c in 0..3 {
+            let (lo, hi) = bounds[c];
+            let stretched = (px[c] as f32 - lo as f32) * 255.0 / (hi as f32 - lo as f32);
+            px[c] = stretched.clamp(0.0, 255.0) as u8;
+        }
     }
 }
 
@@ -1009,15 +1416,30 @@ fn vintage(rgba: &mut [u8], w: usize, h: usize) {
         return;
     }
     saturate(rgba, 0.85);
+    for px in rgba.chunks_exact_mut(4) {
+        px[0] = (px[0] as f32 * 1.08).clamp(0.0, 255.0) as u8; // virage chaud : + rouge
+        px[2] = (px[2] as f32 * 0.9).clamp(0.0, 255.0) as u8; // − bleu
+    }
+    apply_vignette(rgba, w, h, 0.5);
+}
+
+/// Vignette artistique indépendante (Sprint K.5) : assombrit les pixels
+/// proportionnellement au carré de leur distance au centre (normalisée par la
+/// demi-diagonale). `amount` 0.0..=1.0 pilote l'assombrissement maximal aux
+/// coins ; extrait de l'ancienne formule fixe de `vintage()` (qui utilisait
+/// `amount = 0.5`) pour en faire un réglage autonome. `amount <= 0` = identité.
+fn apply_vignette(rgba: &mut [u8], w: usize, h: usize, amount: f32) {
+    if w == 0 || h == 0 || amount <= 1e-4 {
+        return;
+    }
+    let amount = amount.min(1.0);
     let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
     let max_dist = (cx * cx + cy * cy).sqrt().max(1.0);
     for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
         let (x, y) = (i % w, i / w);
-        px[0] = (px[0] as f32 * 1.08).clamp(0.0, 255.0) as u8; // virage chaud : + rouge
-        px[2] = (px[2] as f32 * 0.9).clamp(0.0, 255.0) as u8; // − bleu
         let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
         let dist = (dx * dx + dy * dy).sqrt() / max_dist;
-        let vignette = 1.0 - (dist * dist * 0.5).min(0.5); // jusqu'à −50 % aux coins
+        let vignette = 1.0 - (dist * dist * amount).min(amount);
         for c in px.iter_mut().take(3) {
             *c = (*c as f32 * vignette).clamp(0.0, 255.0) as u8;
         }
@@ -1149,6 +1571,177 @@ fn blur_pass(src: &[u8], w: usize, h: usize, r: usize, horizontal: bool) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_bounds_finds_the_opaque_rect_inside_a_transparent_border() {
+        // Image 5x5, entièrement transparente sauf un carré 2x2 aux coords
+        // (1,2)..(3,4) (bornes exclusives).
+        let w = 5usize;
+        let h = 5usize;
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 2..4 {
+            for x in 1..3 {
+                let i = (y * w + x) * 4;
+                rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+        assert_eq!(trim_bounds(&rgba, w, h), Some((1, 2, 2, 2)));
+    }
+
+    #[test]
+    fn trim_bounds_is_none_for_a_fully_transparent_image() {
+        let rgba = vec![0u8; 4 * 4 * 4];
+        assert_eq!(trim_bounds(&rgba, 4, 4), None);
+    }
+
+    #[test]
+    fn auto_levels_stretches_a_low_contrast_image_to_full_range() {
+        // 100 pixels compris entre 100 et 150 seulement (faible contraste) :
+        // après auto-correction, le min doit descendre près de 0 et le max
+        // remonter près de 255 (percentiles 1/99, pas les bornes exactes).
+        let mut rgba = Vec::new();
+        for v in 100u8..150u8 {
+            rgba.extend_from_slice(&[v, v, v, 255]);
+            rgba.extend_from_slice(&[v, v, v, 255]);
+        }
+        apply(Filter::AutoLevels, &mut rgba, 10, 10);
+        let min = rgba.iter().step_by(4).min().copied().unwrap();
+        let max = rgba.iter().step_by(4).max().copied().unwrap();
+        assert!(min < 20, "min should be stretched near 0, got {min}");
+        assert!(max > 235, "max should be stretched near 255, got {max}");
+    }
+
+    #[test]
+    fn auto_levels_is_a_noop_on_an_already_full_range_flat_image() {
+        let mut rgba = vec![128u8, 128, 128, 255, 128, 128, 128, 255];
+        apply(Filter::AutoLevels, &mut rgba, 2, 1);
+        assert_eq!(rgba, vec![128u8, 128, 128, 255, 128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn pixelate_makes_every_pixel_in_a_block_identical() {
+        // Damier fin 4x4 (alternance noir/blanc) : un bloc de taille 4
+        // moyenne tout le damier en un seul gris uniforme.
+        let w = 4usize;
+        let h = 4usize;
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if (x + y) % 2 == 0 { 255 } else { 0 };
+                let i = (y * w + x) * 4;
+                rgba[i..i + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        pixelate(&mut rgba, w, h, 4.0);
+        let first = rgba[0];
+        for px in rgba.chunks_exact(4) {
+            assert_eq!(px[0], first);
+        }
+    }
+
+    #[test]
+    fn pixelate_is_a_noop_for_a_block_of_one_pixel() {
+        let original = vec![10u8, 20, 30, 255, 200, 210, 220, 255];
+        let mut rgba = original.clone();
+        pixelate(&mut rgba, 2, 1, 1.0);
+        assert_eq!(rgba, original);
+    }
+
+    #[test]
+    fn halftone_fully_black_cell_covers_the_whole_cell() {
+        let w = 8usize;
+        let h = 8usize;
+        let rgba = vec![0u8; w * h * 4]; // tout noir, alpha 255... alpha=0 ici mais luma indépendante de l'alpha
+        let out = halftone(&rgba, w, h, 8.0, 0.0);
+        assert!(out.chunks_exact(4).all(|px| px[0] == 0), "cellule noire → disque devrait couvrir toute la cellule");
+    }
+
+    #[test]
+    fn halftone_fully_white_cell_stays_white() {
+        let w = 8usize;
+        let h = 8usize;
+        let rgba = vec![255u8; w * h * 4];
+        let out = halftone(&rgba, w, h, 8.0, 0.0);
+        assert!(out.chunks_exact(4).all(|px| px[0] == 255), "cellule blanche → rayon nul, aucun disque");
+    }
+
+    #[test]
+    fn wave_sphere_vortex_are_noop_at_neutral_parameters() {
+        let original = vec![10u8, 20, 30, 255, 200, 210, 220, 255, 5, 5, 5, 255, 250, 100, 50, 255];
+        assert_eq!(wave_warp(&original, 2, 2, 0.0, 40.0), original);
+        assert_eq!(sphere_warp(&original, 2, 2, 0.0), original);
+        assert_eq!(vortex_warp(&original, 2, 2, 0.0), original);
+    }
+
+    #[test]
+    fn wave_shifts_a_column_vertically() {
+        // Colonne x=2 : à un quart de la longueur d'onde (wavelength=8),
+        // sin(2*pi*2/8) = sin(pi/2) = 1 → décalage vertical maximal, visible
+        // sur un dégradé vertical.
+        let w = 8usize;
+        let h = 8usize;
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) * 4;
+                rgba[i] = (y * 30) as u8;
+                rgba[i + 3] = 255;
+            }
+        }
+        let out = wave_warp(&rgba, w, h, 2.0, 8.0);
+        let col = |buf: &[u8], x: usize| -> Vec<u8> { (0..h).map(|y| buf[(y * w + x) * 4]).collect() };
+        assert_ne!(col(&out, 2), col(&rgba, 2));
+    }
+
+    #[test]
+    fn radial_blur_is_noop_at_zero_amount() {
+        let original = vec![10u8, 20, 30, 255, 200, 210, 220, 255, 5, 5, 5, 255, 250, 100, 50, 255];
+        assert_eq!(radial_blur(&original, 2, 2, 0.0), original);
+    }
+
+    #[test]
+    fn radial_blur_blends_a_bright_pixel_into_its_neighbors() {
+        // Pixel lumineux à l'écart du centre exact (l'échantillonnage radial
+        // n'a aucun effet pile au centre, où tous les rayons convergent) :
+        // le flou doit l'assombrir en moyennant avec les échantillons plus
+        // proches du centre, restés noirs.
+        let w = 5usize;
+        let h = 5usize;
+        let mut rgba = vec![0u8; w * h * 4];
+        let idx = (w + 1) * 4;
+        rgba[idx..idx + 4].copy_from_slice(&[255, 255, 255, 255]);
+        let out = radial_blur(&rgba, w, h, 1.0);
+        assert!(out[idx] < 255, "le pixel devrait s'assombrir après flou radial");
+    }
+
+    #[test]
+    fn apply_vignette_darkens_corners_more_than_center() {
+        let w = 9usize;
+        let h = 9usize;
+        let mut rgba = vec![200u8; w * h * 4];
+        apply_vignette(&mut rgba, w, h, 0.8);
+        let center = (4 * w + 4) * 4;
+        let corner = 0usize;
+        assert!(rgba[corner] < rgba[center], "les coins doivent être plus sombres que le centre");
+    }
+
+    #[test]
+    fn apply_vignette_is_noop_at_zero_amount() {
+        let original = vec![200u8; 4 * 4 * 4];
+        let mut rgba = original.clone();
+        apply_vignette(&mut rgba, 4, 4, 0.0);
+        assert_eq!(rgba, original);
+    }
+
+    #[test]
+    fn channel_mixer_bw_matches_grayscale_weights_at_default() {
+        let mut px = vec![200u8, 100, 50, 255];
+        channel_mixer_bw(&mut px, 0.299, 0.587, 0.114);
+        let expected = (200.0f32 * 0.299 + 100.0 * 0.587 + 50.0 * 0.114).round() as u8;
+        assert_eq!(px[0], expected);
+        assert_eq!(px[1], expected);
+        assert_eq!(px[2], expected);
+    }
 
     #[test]
     fn grayscale_equalizes_channels() {

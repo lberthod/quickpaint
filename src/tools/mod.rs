@@ -10,6 +10,7 @@ pub mod hit;
 pub mod inpaint;
 pub mod lut;
 pub mod perspective;
+pub mod palette;
 pub mod pen;
 pub mod shape;
 
@@ -28,6 +29,11 @@ pub enum ActiveTool {
     /// Pinceau pixel (roadmap F1) : peint dans la couche raster du calque
     /// actif, avec dureté/feathering — à la différence du pinceau vectoriel.
     PixelBrush,
+    /// Aérographe (Sprint J.1) : dépose en continu tant que le clic est
+    /// maintenu, même sans déplacement (contrairement au pinceau pixel qui ne
+    /// dépose qu'au fil du glissé) — accumulation progressive par petites
+    /// touches à opacité réduite.
+    Airbrush,
     /// Gomme pixel (roadmap F1) : retire de l'alpha dans la couche raster.
     PixelEraser,
     /// Tampon de clonage (roadmap P0 #5) : Alt+clic = source, glisser = peint
@@ -113,6 +119,34 @@ pub enum SelectMode {
     Lasso,
     /// Baguette magique : clic → sélectionne les traits de couleur proche.
     Wand,
+}
+
+/// Mode de combinaison d'un geste de sélection par région avec la sélection
+/// existante (Sprint G.1). Correspond aux modificateurs clavier classiques
+/// façon Photoshop/GIMP/Krita : Maj = Add, Alt = Subtract, Maj+Alt = Intersect.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SelectionCombine {
+    /// Remplace la sélection existante par le résultat du geste.
+    #[default]
+    Replace,
+    /// Ajoute le résultat du geste à la sélection existante (Maj).
+    Add,
+    /// Retire le résultat du geste de la sélection existante (Alt).
+    Subtract,
+    /// Ne garde que l'intersection entre sélection existante et geste (Maj+Alt).
+    Intersect,
+}
+
+impl SelectionCombine {
+    /// Déduit le mode à partir des modificateurs clavier courants.
+    pub fn from_modifiers(shift: bool, alt: bool) -> Self {
+        match (shift, alt) {
+            (true, true) => SelectionCombine::Intersect,
+            (false, true) => SelectionCombine::Subtract,
+            (true, false) => SelectionCombine::Add,
+            (false, false) => SelectionCombine::Replace,
+        }
+    }
 }
 
 impl SelectMode {
