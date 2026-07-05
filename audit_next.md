@@ -103,15 +103,15 @@ premières colonnes selon la lecture)*
 | 59 | Baguette magique (tolérance réglable) | ✅ | `magic_wand()` + curseur de tolérance. |
 | 60 | Sélection par plage de couleurs | ✅ | Mode global de la baguette magique (`flood_global`, non contigu). |
 | 61 | Ajout / soustraction / intersection de sélection | ✅ | Sprint G.1 : `SelectionCombine { Replace, Add, Subtract, Intersect }`, Maj=Add, Alt=Subtract, Maj+Alt=Intersect. |
-| 62 | Contour progressif (feather) | ❌ | `soft_edge()` existe mais seulement pour l'outil Détourage, pas exposé comme opération générique sur une sélection. |
-| 63 | Dilater / contracter la sélection | ❌ | Aucune fonction grow/shrink trouvée. |
+| 62 | Contour progressif (feather) | ✅ | Sprint H : masque de sélection en pixels (`PaintApp::selection_mask`, `tools/selection_mask.rs`) + `feather_selection()` (flou boîte du canal de couverture). |
+| 63 | Dilater / contracter la sélection | ✅ | Sprint H : `dilate_selection()`/`contract_selection()` (filtre morphologique max/min sur un disque), même masque en pixels que le feather. |
 | 64 | Inversion de sélection | ✅ | Sprint G.2 : `invert_selection()` (⌘⇧I + menu Édition). |
 | 65 | Enregistrer / charger une sélection | ✅ | `save_named_selection()`/`load_named_selection()`. |
 | 66 | Recadrage libre et par ratio | ✅ | Ratios libre/1:1/4:3/16:9/A4. |
 | 67 | Redressement d'horizon | ✅ | Curseur d'angle -45°..45° + `straighten_and_crop()`. |
 | 68 | Découpe automatique des bords vides (trim) | ✅ | Sprint G.3 : `trim_bounds()` + « Rogner les bords vides » (menu Image). |
 
-**Score : 10 ✅ / 0 🟡 / 2 ❌**
+**Score : 12 ✅ / 0 🟡 / 0 ❌**
 
 ---
 
@@ -180,19 +180,20 @@ premières colonnes selon la lecture)*
 
 | Statut | Nombre (sur 102 items) | % |
 |---|---|---|
-| ✅ Implémenté | 89 | ~87 % |
+| ✅ Implémenté | 91 | ~89 % |
 | 🟡 Partiel | 10 | ~10 % |
-| ❌ Absent | 3 | ~3 % |
+| ❌ Absent | 1 | ~1 % |
 
-*(Mis à jour après les Sprints G, K, I, J, M et L (complet, y compris L.5/L.6/L.7) — voir
-[sprint_next.md](sprint_next.md) : G a réglé 61/64/68 (sélection) ; K a réglé
+*(Mis à jour après les Sprints G, H, K, I, J, M et L (complet, y compris L.5/L.6/L.7) — voir
+[sprint_next.md](sprint_next.md) : G a réglé 61/64/68 (sélection, opérations d'ensemble) ; H a
+réglé 62/63 (masque de sélection en pixels — feather, dilater/contracter) ; K a réglé
 76/80/83/85/86/90/92/93 (filtres & effets) ; I a réglé 30/33/37/38 et partiellement 36
 (calques) ; J a réglé 44/50/56 (dessin) ; M a réglé 98/99 (couleur/transformations) ; L a
 réglé 3/9/14/15/16/17/18/11 (export, dont l'import SVG vectoriel, le PDF vectoriel et le
 GIF animé — `Document::frames`, panneau « Animation », export via `image::codecs::gif`).
-Restent : K.6/Canny (basse priorité), 28 (verrouillage granulaire, optionnel), 36
-(distribution multi-calque, demande une sélection multi-calque absente de l'UI), 40 (outil
-crayon dédié, priorité basse).)*
+Reste seulement : K.6/Canny (basse priorité). Optionnels non traités par choix : 28
+(verrouillage granulaire), 36 (distribution multi-calque, demande une sélection
+multi-calque absente de l'UI), 40 (outil crayon dédié).)*
 
 ### Ce qui manque complètement (❌), par ordre d'impact utilisateur probable
 
@@ -202,10 +203,9 @@ compris l'import SVG vectoriel, le PDF vectoriel et le GIF statique **et**
 animé)
 
 **Sélection**
-- Contour progressif (feather) en opération générique de sélection
-- Dilater/contracter la sélection
-  (~~Soustraction/intersection~~, ~~inversion~~ et ~~trim des bords vides~~
-  traités par le Sprint G — voir [sprint_next.md](sprint_next.md))
+(tout traité par les Sprints G et H — voir [sprint_next.md](sprint_next.md) :
+opérations d'ensemble, inversion, trim, et désormais feather/dilater/
+contracter via un vrai masque de sélection en pixels)
 
 **Calques**
 (traité par le Sprint I — voir [sprint_next.md](sprint_next.md) ; reste
@@ -226,11 +226,24 @@ seulement Canny/K.6, priorité basse, non bloquant)
 
 ### Points d'attention
 
-1. **Sélection : les opérations booléennes.** ✅ Résolu par le Sprint G
-   (voir [sprint_next.md](sprint_next.md)) : soustraction/intersection
-   (Alt/Maj+Alt), inversion (⌘⇧I) et trim des bords vides sont en place.
-   Restent absents : feather et dilater/contracter (nécessitent un vrai
-   masque de sélection en pixels, chantier séparé — Sprint H).
+1. **Sélection : complète, y compris feather/dilater/contracter.** ✅
+   Résolu par les Sprints G et H (voir [sprint_next.md](sprint_next.md)) :
+   soustraction/intersection (Alt/Maj+Alt), inversion (⌘⇧I) et trim des
+   bords vides (Sprint G) ; contour progressif et dilater/contracter
+   (Sprint H) via un vrai masque de sélection en pixels
+   (`PaintApp::selection_mask`, `tools/selection_mask.rs`), peuplé
+   directement depuis la géométrie du geste de sélection
+   (rectangle/ellipse/lasso — pixel-précis ; baguette magique : approximé
+   par union des boîtes englobantes des éléments retenus, limite
+   documentée). Intégré au Pinceau/Gomme pixel et à l'Aérographe
+   (`RasterLayer::stamp`/`stamp_custom`/`stroke_segment` acceptent
+   désormais un masque optionnel qui multiplie leur couverture) ; aperçu
+   visuel en teinte semi-transparente hors sélection (option la moins
+   coûteuse évoquée dans l'audit initial, pas de vraie animation « fourmis
+   en mouvement »). Le pot de peinture et les autres outils raster
+   (tampon de clonage, densité +/-, éponge…) ne respectent pas encore ce
+   masque — périmètre volontairement limité au point d'intégration le
+   plus net (pinceau pixel), à étendre plus tard si le besoin se confirme.
 
 2. **Filtres & effets : quasi complet.** ✅ Résolu par le Sprint K
    (voir [sprint_next.md](sprint_next.md)) : pixelisation, halftone,

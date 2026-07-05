@@ -269,6 +269,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     batch_export_window(ctx, app);
     export_preview_window(ctx, app);
     animation_panel_window(ctx, app);
+    selection_mask_dialog_window(ctx, app);
     style_presets_window(ctx, app);
     asset_library_window(ctx, app);
     brush_library_window(ctx, app);
@@ -886,6 +887,54 @@ fn brush_library_window(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
+/// Dialogue feather/dilater/contracter (Sprint H) : un seul rayon en pixels
+/// pour les trois actions, appliqué au masque de sélection en pixels
+/// existant (`app.selection_mask`) — voir `tools::selection_mask`.
+fn selection_mask_dialog_window(ctx: &egui::Context, app: &mut PaintApp) {
+    let Some((action, mut radius)) = app.selection_mask_dialog else { return };
+    let mut open = true;
+    let mut apply = false;
+    let mut cancel = false;
+    let title = match action {
+        crate::app::SelectionMaskAction::Feather => t("Contour progressif", "Feather"),
+        crate::app::SelectionMaskAction::Dilate => t("Dilater la sélection", "Dilate selection"),
+        crate::app::SelectionMaskAction::Contract => t("Contracter la sélection", "Contract selection"),
+    };
+    egui::Window::new(title)
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(260.0);
+            ui.horizontal(|ui| {
+                ui.label(t("Rayon (px) :", "Radius (px):"));
+                ui.add(egui::Slider::new(&mut radius, 1.0..=60.0));
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button(t("Appliquer", "Apply")).clicked() {
+                    apply = true;
+                }
+                if ui.button(t("Annuler", "Cancel")).clicked() {
+                    cancel = true;
+                }
+            });
+        });
+    if apply {
+        match action {
+            crate::app::SelectionMaskAction::Feather => app.feather_selection(radius),
+            crate::app::SelectionMaskAction::Dilate => app.dilate_selection(radius.round() as i32),
+            crate::app::SelectionMaskAction::Contract => app.contract_selection(radius.round() as i32),
+        }
+        app.selection_mask_dialog = None;
+    } else if cancel || !open {
+        app.selection_mask_dialog = None;
+    } else {
+        app.selection_mask_dialog = Some((action, radius));
+    }
+}
+
 /// Panneau « Animation » (Sprint L.6) : liste des frames (une par ligne,
 /// délai réglable), sélection/réordonnancement/suppression, et export en GIF
 /// animé. Chaque frame est un instantané complet de la pile de calques (voir
@@ -1447,6 +1496,28 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.invert_selection();
                 ui.close_menu();
             }
+            ui.menu_button(t("Masque de sélection", "Selection mask"), |ui| {
+                let has_mask = app.selection_mask.is_some();
+                ui.add_enabled_ui(has_mask, |ui| {
+                    if ui.button(t("Contour progressif…", "Feather…")).clicked() {
+                        app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Feather, 4.0));
+                        ui.close_menu();
+                    }
+                    if ui.button(t("Dilater…", "Dilate…")).clicked() {
+                        app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Dilate, 4.0));
+                        ui.close_menu();
+                    }
+                    if ui.button(t("Contracter…", "Contract…")).clicked() {
+                        app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Contract, 4.0));
+                        ui.close_menu();
+                    }
+                });
+            })
+            .response
+            .on_hover_text(t(
+                "Nécessite une sélection par rectangle/ellipse/lasso/baguette",
+                "Requires a rectangle/ellipse/lasso/wand selection",
+            ));
             ui.separator();
             if ui
                 .add_enabled(has_sel, egui::Button::new(t("Copier le style (⌥⌘C)", "Copy style (⌥⌘C)")))

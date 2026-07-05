@@ -89,50 +89,52 @@ déjà existante — voir H.2).
 
 ---
 
-## Sprint H — Sélection : masque de pixels (chantier plus lourd)
+## Sprint H — Sélection : masque de pixels — ✅ FAIT (option 2 retenue, confirmée par le porteur de projet)
 
-### H.1 — Cadrage de la décision à prendre
+### H.1 — Décision prise
 
-Un vrai feather/dilater/contracter nécessite un **masque de sélection en
-pixels**, distinct du `HashSet<u64>` actuel. Deux options :
+**Décision du porteur de projet (2026-07-05) : option 2, l'ajouter.**
 
-1. **Ne pas le faire** : documenter la limite (comme HEIC/RAW/WebP lossy),
-   la sélection reste un mécanisme d'édition d'objets, pas un masque photo.
-2. **L'ajouter**, en réutilisant l'infrastructure de masque de calque déjà
-   en place (`RasterLayer`, `Layer::add_mask`/`remove_mask`,
-   [model/document.rs:287](src/model/document.rs:287)) : un masque de
-   sélection est structurellement identique à un masque de calque (tuiles
-   raster en niveaux de gris), seule sa sémantique change (pilote quels
-   pixels reçoivent l'effet d'un outil, au lieu de piloter l'opacité du
-   calque).
+Un vrai feather/dilater/contracter nécessitait un **masque de sélection en
+pixels**, distinct du `HashSet<u64>` d'ID d'éléments. Fait : nouveau champ
+`PaintApp::selection_mask: Option<RasterLayer>` (pas sur `Document` comme
+suggéré initialement — placé au même endroit que `selection` elle-même,
+qui vit déjà sur `PaintApp` et pas `Document` : une sélection est un état
+d'édition éphémère, pas un contenu persisté, cohérence conservée).
 
-**Recommandation :** option 2, mais seulement après un chantier connexe
-(H.2) qui vérifie que les outils qui devraient « respecter » ce masque
-(Pot de peinture, Pinceau/Gomme pixel, calques de réglage appliqués « dans
-la sélection ») ont un point d'intégration clair — sinon on ajoute un
-masque que la moitié des outils ignore, pire qu'une absence documentée.
+### H.2 — Ce qui a été fait
 
-### H.2 — Sous-tâches (si l'option 2 est retenue)
-
-- [ ] `pub selection_mask: Option<RasterLayer>` sur `Document` (pas
-      `Layer` — une sélection est indépendante du calque actif, comme dans
-      Photoshop).
-- [ ] `soft_edge`/`refine_edges` ([tools/bucket.rs](src/tools/bucket.rs))
-      déjà écrits pour produire des masques dégradés — réutilisables tels
-      quels pour implémenter le feather (flou du masque) et dilater/
-      contracter (érosion/dilatation morphologique classique, à ajouter).
-- [ ] Les outils raster (`RasterLayer::stamp`,
-      [model/raster.rs:123](src/model/raster.rs:123)) doivent multiplier
-      leur couverture par `selection_mask` quand il est présent — un seul
-      point d'intégration si `stamp()` prend le masque en paramètre optionnel.
-- [ ] UI : affichage « fourmis en mouvement » simplifié (contour pointillé
-      animé du masque) ou, plus simple à livrer d'abord, juste une teinte
-      semi-transparente sur les zones hors sélection (comme un calque
-      d'assombrissement) — moins coûteux à implémenter qu'une vraie
-      animation de contour.
-- [ ] Tests : feather sur un rectangle net, vérifier un dégradé de
-      couverture sur N pixels de large autour du bord ; dilater/contracter,
-      vérifier le décalage du bord dans le bon sens.
+- [x] `PaintApp::selection_mask: Option<RasterLayer>`, peuplé **directement
+      depuis la géométrie du geste de sélection** (rectangle/ellipse/lasso)
+      plutôt que dérivé des éléments déjà sélectionnés après coup — plus
+      précis, réutilise `hit::point_in_ellipse`/`point_in_polygon` déjà
+      existants. Baguette magique : approximation par union des boîtes
+      englobantes des éléments retenus (documentée comme limite connue,
+      la baguette n'a pas de silhouette de geste unique à rasteriser).
+      Nouveau module [tools/selection_mask.rs](src/tools/selection_mask.rs) :
+      `paint_mask_region` (combine Add/Subtract/Intersect/Replace comme
+      `SelectionCombine`, même sémantique que pour les ID d'éléments),
+      `feather` (flou boîte du canal de couverture), `dilate`/`erode`
+      (filtre morphologique max/min sur un disque).
+- [x] Les outils raster (`RasterLayer::stamp`/`stamp_custom`/
+      `stroke_segment`, [model/raster.rs](src/model/raster.rs)) prennent
+      désormais un `mask: Option<&RasterLayer>` qui multiplie leur
+      couverture — intégré au Pinceau pixel, à la Gomme pixel et à
+      l'Aérographe. **Non intégré** (périmètre volontairement limité) : Pot
+      de peinture, tampon de clonage, calques de réglage « dans la
+      sélection », densité +/-, éponge — à étendre plus tard si le besoin
+      se confirme, chaque outil supplémentaire est un point d'intégration
+      isolé (même paramètre `mask` à brancher).
+- [x] UI : teinte semi-transparente sur les zones hors sélection (l'option
+      « moins coûteuse » recommandée), pas de vraie animation de contour en
+      pointillés (« fourmis en mouvement »). Menu Édition ▸ Masque de
+      sélection ▸ Contour progressif…/Dilater…/Contracter…, un seul
+      dialogue partagé (rayon en pixels, 1 à 60).
+- [x] Tests : feather sur un rectangle net (dégradé confirmé sur le bord),
+      dilater/contracter (décalage du bord dans le bon sens), les 4 modes
+      de combine sur le masque, et un test d'intégration bout en bout
+      (peindre au pinceau pixel à l'intérieur vs. à l'extérieur d'une
+      sélection).
 
 ---
 
@@ -550,16 +552,16 @@ seulement le statique.** Les deux sont faits.
 
 ## Résumé et ordre suggéré
 
-| Sprint | Points couverts | Effort relatif | Décision requise avant de coder |
+| Sprint | Points couverts | Effort relatif | Statut |
 |---|---|---|---|
-| G | 61, 64, 68 | Faible | Non |
-| H | 62, 63 | Élevé | Oui (H.1 : faire ou documenter la limite) |
-| I | 28, 30, 33, 36, 37, 38 | Moyen (6 sous-items indépendants) | Non (sauf I.6, optionnel) |
-| J | 40, 44, 50, 56 | Moyen | Non |
-| K | 76, 83, 85, 86, 87, 90, 92, 93 | Moyen à élevé (8 sous-items indépendants) | Non (sauf K.6, optionnel) |
-| L | 3, 9, 11, 14, 15, 16, 17, 18 | Variable | Oui pour L.5 (SVG), L.6 (GIF animé), L.7 (PDF vectoriel) |
-| M | 98, 99 | Faible à moyen | Non |
-| N | 100 | Élevé, architecture | Oui, impérativement |
+| G | 61, 64, 68 | Faible | ✅ Fait |
+| H | 62, 63 | Élevé | ✅ Fait (décision : option 2, ajouter le masque) |
+| I | 28, 30, 33, 36, 37, 38 | Moyen (6 sous-items indépendants) | ✅ Fait (sauf I.6, optionnel non traité ; 36 partiel) |
+| J | 40, 44, 50, 56 | Moyen | ✅ Fait (sauf 40, priorité basse non traité) |
+| K | 76, 83, 85, 86, 87, 90, 92, 93 | Moyen à élevé (8 sous-items indépendants) | ✅ Fait (sauf K.6/87, optionnel non traité) |
+| L | 3, 9, 11, 14, 15, 16, 17, 18 | Variable | ✅ Fait intégralement, y compris L.5 (SVG), L.6 (GIF animé), L.7 (PDF vectoriel) |
+| M | 98, 99 | Faible à moyen | ✅ Fait |
+| N | 100 | Élevé, architecture | Non traité — décision majeure à prendre |
 
 **Suggestion de priorisation** :
 1. **G** d'abord (aucune dépendance, incohérence UX visible immédiatement

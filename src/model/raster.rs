@@ -56,6 +56,16 @@ pub struct RasterLayer {
     pub tiles: HashMap<TileKey, Tile>,
 }
 
+/// Multiplie une couverture d'outil par celle du masque de sélection en
+/// pixels (Sprint H) au point `(x, y)`, s'il y en a un. `None` = couverture
+/// inchangée (pas de sélection active, comportement historique).
+fn apply_mask_coverage(cov: f32, mask: Option<&RasterLayer>, x: i32, y: i32) -> f32 {
+    match mask {
+        Some(m) => cov * (m.get_pixel(x, y)[3] as f32 / 255.0),
+        None => cov,
+    }
+}
+
 impl RasterLayer {
     pub fn is_empty(&self) -> bool {
         self.tiles.is_empty()
@@ -119,8 +129,11 @@ impl RasterLayer {
 
     /// Dépose un disque doux (feathering) : plein jusqu'à `hardness * radius`,
     /// dégradé linéaire de couverture ensuite. `erase = true` retire de
-    /// l'alpha existant au lieu d'en déposer (gomme pixel).
-    pub fn stamp(&mut self, cx: f32, cy: f32, radius: f32, hardness: f32, rgba: [u8; 4], erase: bool) {
+    /// l'alpha existant au lieu d'en déposer (gomme pixel). `mask` (Sprint H,
+    /// masque de sélection en pixels) multiplie la couverture quand présent
+    /// — un pixel hors sélection ne reçoit rien, même sous le pinceau.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stamp(&mut self, cx: f32, cy: f32, radius: f32, hardness: f32, rgba: [u8; 4], erase: bool, mask: Option<&RasterLayer>) {
         if radius <= 0.0 {
             return;
         }
@@ -136,6 +149,10 @@ impl RasterLayer {
                     continue;
                 }
                 let cov = if radius <= edge || d <= edge { 1.0 } else { 1.0 - (d - edge) / (radius - edge) };
+                let cov = apply_mask_coverage(cov, mask, x, y);
+                if cov <= 0.0 {
+                    continue;
+                }
                 if erase {
                     let dst = self.get_pixel(x, y);
                     if dst[3] == 0 {
@@ -155,8 +172,18 @@ impl RasterLayer {
     /// en niveaux de gris — échantillonne `stamp` (mis à l'échelle pour tenir
     /// dans un carré de côté `size`) au lieu de la formule de couverture
     /// circulaire de `stamp()`. `erase = true` retire de l'alpha existant au
-    /// lieu d'en déposer, comme `stamp()`.
-    pub fn stamp_custom(&mut self, cx: f32, cy: f32, size: f32, rgba: [u8; 4], stamp: &crate::tools::brush::BrushStamp, erase: bool) {
+    /// lieu d'en déposer, comme `stamp()`. `mask` : voir `stamp()`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stamp_custom(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        rgba: [u8; 4],
+        stamp: &crate::tools::brush::BrushStamp,
+        erase: bool,
+        mask: Option<&RasterLayer>,
+    ) {
         if size <= 0.0 || stamp.w == 0 || stamp.h == 0 {
             return;
         }
@@ -170,6 +197,7 @@ impl RasterLayer {
                     continue;
                 }
                 let cov = stamp.sample(u, v);
+                let cov = apply_mask_coverage(cov, mask, x, y);
                 if cov <= 0.0 {
                     continue;
                 }
@@ -189,6 +217,8 @@ impl RasterLayer {
     }
 
     /// Trace un tampon échantillonné le long d'un segment (trait continu).
+    /// `mask` : voir `stamp()`.
+    #[allow(clippy::too_many_arguments)]
     pub fn stroke_segment(
         &mut self,
         from: (f32, f32),
@@ -197,6 +227,7 @@ impl RasterLayer {
         hardness: f32,
         rgba: [u8; 4],
         erase: bool,
+        mask: Option<&RasterLayer>,
     ) {
         let (dx, dy) = (to.0 - from.0, to.1 - from.1);
         let dist = (dx * dx + dy * dy).sqrt();
@@ -204,7 +235,7 @@ impl RasterLayer {
         let n = (dist / step).ceil().max(1.0) as i32;
         for i in 0..=n {
             let t = i as f32 / n as f32;
-            self.stamp(from.0 + dx * t, from.1 + dy * t, radius, hardness, rgba, erase);
+            self.stamp(from.0 + dx * t, from.1 + dy * t, radius, hardness, rgba, erase, mask);
         }
     }
 
@@ -772,7 +803,7 @@ mod tests {
     #[test]
     fn stamp_opaque_center_full_coverage() {
         let mut r = RasterLayer::default();
-        r.stamp(50.0, 50.0, 10.0, 1.0, [10, 20, 30, 255], false);
+        r.stamp(50.0, 50.0, 10.0, 1.0, [10, 20, 30, 255], false, None);
         assert_eq!(r.get_pixel(50, 50), [10, 20, 30, 255]);
         // Hors du disque : intact.
         assert_eq!(r.get_pixel(80, 80), [0, 0, 0, 0]);
@@ -782,7 +813,7 @@ mod tests {
     fn stamp_erase_reduces_alpha_only() {
         let mut r = RasterLayer::default();
         r.set_pixel(50, 50, [200, 100, 50, 255]);
-        r.stamp(50.0, 50.0, 5.0, 1.0, [0, 0, 0, 255], true);
+        r.stamp(50.0, 50.0, 5.0, 1.0, [0, 0, 0, 255], true, None);
         let p = r.get_pixel(50, 50);
         assert_eq!(&p[0..3], &[200, 100, 50]); // couleur inchangée
         assert!(p[3] < 10); // alpha quasi nulle
@@ -796,7 +827,7 @@ mod tests {
         let stamp = crate::tools::brush::BrushStamp::from_rgba(2, 2, &rgba);
         let mut r = RasterLayer::default();
         // Carré 10x10 centré en (50,50) → occupe (45,45)..(55,55).
-        r.stamp_custom(50.0, 50.0, 10.0, [10, 20, 30, 255], &stamp, false);
+        r.stamp_custom(50.0, 50.0, 10.0, [10, 20, 30, 255], &stamp, false, None);
         assert_eq!(r.get_pixel(46, 46), [0, 0, 0, 0]); // quadrant gauche : noir, pas peint
         assert_eq!(r.get_pixel(54, 46), [10, 20, 30, 255]); // quadrant droit : blanc, peint plein
     }
@@ -805,7 +836,7 @@ mod tests {
     fn stamp_custom_is_a_noop_for_a_zero_size_stamp() {
         let stamp = crate::tools::brush::BrushStamp::from_rgba(1, 1, &[255, 255, 255, 255]);
         let mut r = RasterLayer::default();
-        r.stamp_custom(50.0, 50.0, 0.0, [10, 20, 30, 255], &stamp, false);
+        r.stamp_custom(50.0, 50.0, 0.0, [10, 20, 30, 255], &stamp, false, None);
         assert!(r.is_empty());
     }
 
@@ -813,7 +844,7 @@ mod tests {
     fn clone_stamp_copies_from_offset_source() {
         let mut r = RasterLayer::default();
         // Source : disque plein vert à (10,10).
-        r.stamp(10.0, 10.0, 6.0, 1.0, [0, 200, 0, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [0, 200, 0, 255], false, None);
         // Peint à (50,50) avec un décalage de +40 en x : source = (50-40,50)=(10,50)?
         // Ici offset = source - dest fixé côté appelant ; le tampon échantillonne à
         // (x+offset.0, y+offset.1). Avec offset=(-40,-40), (50,50) lit (10,10).
@@ -824,7 +855,7 @@ mod tests {
     #[test]
     fn clone_stamp_partial_opacity_reduces_alpha() {
         let mut r = RasterLayer::default();
-        r.stamp(10.0, 10.0, 6.0, 1.0, [100, 100, 100, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [100, 100, 100, 255], false, None);
         r.clone_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 0.5);
         let p = r.get_pixel(50, 50);
         assert!(p[3] < 255 && p[3] > 0);
@@ -836,7 +867,7 @@ mod tests {
         // Source uniforme rouge vif, destination environnante bleue : le
         // correcteur doit se rapprocher de la teinte de destination — à la
         // différence du clonage pur qui recopierait le rouge tel quel.
-        r.stamp(10.0, 10.0, 6.0, 1.0, [255, 0, 0, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [255, 0, 0, 255], false, None);
         for y in 44..56 {
             for x in 44..56 {
                 r.set_pixel(x, y, [0, 0, 255, 255]);
@@ -852,8 +883,8 @@ mod tests {
     #[test]
     fn heal_stamp_is_noop_when_source_matches_destination() {
         let mut r = RasterLayer::default();
-        r.stamp(10.0, 10.0, 6.0, 1.0, [120, 80, 40, 255], false);
-        r.stamp(50.0, 50.0, 6.0, 1.0, [120, 80, 40, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [120, 80, 40, 255], false, None);
+        r.stamp(50.0, 50.0, 6.0, 1.0, [120, 80, 40, 255], false, None);
         r.heal_stamp(50.0, 50.0, 4.0, 1.0, (-40.0, -40.0), 1.0);
         assert_eq!(r.get_pixel(50, 50), [120, 80, 40, 255]);
     }
@@ -952,7 +983,7 @@ mod tests {
     #[test]
     fn lighten_moves_channels_toward_white() {
         let mut r = RasterLayer::default();
-        r.stamp(10.0, 10.0, 6.0, 1.0, [100, 100, 100, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [100, 100, 100, 255], false, None);
         r.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Lighten);
         let p = r.get_pixel(10, 10);
         assert!(p[0] > 100, "expected lighter channel, got {p:?}");
@@ -961,7 +992,7 @@ mod tests {
     #[test]
     fn darken_moves_channels_toward_black() {
         let mut r = RasterLayer::default();
-        r.stamp(10.0, 10.0, 6.0, 1.0, [200, 200, 200, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [200, 200, 200, 255], false, None);
         r.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Darken);
         let p = r.get_pixel(10, 10);
         assert!(p[0] < 200, "expected darker channel, got {p:?}");
@@ -970,7 +1001,7 @@ mod tests {
     #[test]
     fn saturate_and_desaturate_move_saturation_opposite_ways() {
         let mut base = RasterLayer::default();
-        base.stamp(10.0, 10.0, 6.0, 1.0, [180, 120, 120, 255], false);
+        base.stamp(10.0, 10.0, 6.0, 1.0, [180, 120, 120, 255], false, None);
 
         let mut sat = base.clone();
         sat.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Saturate);
@@ -994,7 +1025,7 @@ mod tests {
     #[test]
     fn saturate_does_not_tint_a_gray_pixel() {
         let mut r = RasterLayer::default();
-        r.stamp(10.0, 10.0, 6.0, 1.0, [128, 128, 128, 255], false);
+        r.stamp(10.0, 10.0, 6.0, 1.0, [128, 128, 128, 255], false, None);
         r.effect_segment((10.0, 10.0), (10.0, 10.0), 6.0, 1.0, 1.0, PixelEffect::Saturate);
         let p = r.get_pixel(10, 10);
         assert_eq!(&p[0..3], &[128, 128, 128], "gray pixel should stay gray, got {p:?}");
@@ -1031,7 +1062,7 @@ mod tests {
     #[test]
     fn smudge_pulls_source_color_toward_destination() {
         let mut r = RasterLayer::default();
-        r.stamp(5.0, 50.0, 6.0, 1.0, [255, 0, 0, 255], false);
+        r.stamp(5.0, 50.0, 6.0, 1.0, [255, 0, 0, 255], false, None);
         for y in 44..56 {
             for x in 44..56 {
                 r.set_pixel(x, y, [0, 0, 255, 255]);

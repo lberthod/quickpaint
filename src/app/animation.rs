@@ -227,7 +227,7 @@ mod tests {
         app.switch_animation_frame(0);
         // Peint du raster sur la frame 0 (désormais non active après le
         // retour sur la frame 1 ci-dessous).
-        app.doc.layers[0].raster.stamp(5.0, 5.0, 4.0, 1.0, [10, 20, 30, 255], false);
+        app.doc.layers[0].raster.stamp(5.0, 5.0, 4.0, 1.0, [10, 20, 30, 255], false, None);
         app.switch_animation_frame(1);
         assert_eq!(app.doc.active_frame, 1);
         assert!(!app.doc.frames[0].layers[0].raster.is_empty(), "le raster peint doit être sauvegardé dans la frame 0 lors du changement de frame");

@@ -32,6 +32,23 @@ pub fn bounds_of<'a>(strokes: impl Iterator<Item = &'a Stroke>) -> Option<((f32,
     any.then_some((min, max))
 }
 
+/// Boîte englobante (min, max) d'une liste de points, en coords document
+/// (Sprint H — masque de sélection du lasso). `None` si vide.
+pub fn bounds_of_points(points: &[(f32, f32)]) -> Option<((f32, f32), (f32, f32))> {
+    if points.is_empty() {
+        return None;
+    }
+    let mut min = (f32::INFINITY, f32::INFINITY);
+    let mut max = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+    for &(x, y) in points {
+        min.0 = min.0.min(x);
+        min.1 = min.1.min(y);
+        max.0 = max.0.max(x);
+        max.1 = max.1.max(y);
+    }
+    Some((min, max))
+}
+
 /// `true` si les deux boîtes (min, max) se recoupent. Pour le marquee.
 pub fn bbox_intersects(a: ((f32, f32), (f32, f32)), b: ((f32, f32), (f32, f32))) -> bool {
     let ((amn, amx), (bmn, bmx)) = (a, b);

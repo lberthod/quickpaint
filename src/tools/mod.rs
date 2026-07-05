@@ -12,6 +12,7 @@ pub mod lut;
 pub mod perspective;
 pub mod palette;
 pub mod pen;
+pub mod selection_mask;
 pub mod shape;
 
 pub use brush::Brush;

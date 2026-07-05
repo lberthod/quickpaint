@@ -200,6 +200,16 @@ pub enum TemplateContent {
     FacebookBanner,
 }
 
+/// Action sur le masque de sélection en pixels en attente de validation
+/// (Sprint H) — un seul dialogue partagé, le paramètre (rayon en pixels)
+/// change de sens selon l'action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionMaskAction {
+    Feather,
+    Dilate,
+    Contract,
+}
+
 pub struct PaintApp {
     pub doc: Document,
     pub history: History,
@@ -308,6 +318,20 @@ pub struct PaintApp {
     erase_path: Vec<(f32, f32)>,
     // Sélection (outil flèche) : ids d'éléments du calque actif + déplacement.
     pub selection: HashSet<u64>,
+    /// Masque de sélection en pixels (Sprint H), en plus des ID d'éléments
+    /// ci-dessus — nécessaire pour contour progressif (feather) et dilater/
+    /// contracter, des opérations où un pixel peut être « à moitié
+    /// sélectionné ». Peuplé directement depuis la géométrie du geste de
+    /// sélection (rectangle/ellipse/lasso), voir `tools::selection_mask`.
+    /// `None` tant qu'aucune sélection par région n'a été faite.
+    pub selection_mask: Option<crate::model::RasterLayer>,
+    /// Dialogue de réglage feather/dilater/contracter en attente (Sprint H),
+    /// `None` si fermé — (action choisie, rayon en pixels).
+    pub selection_mask_dialog: Option<(SelectionMaskAction, f32)>,
+    /// Texture d'aperçu du masque de sélection (Sprint H), mise en cache par
+    /// hash de contenu (`RasterLayer::content_hash`) — recalculée seulement
+    /// quand le masque change, pas à chaque frame.
+    selection_mask_texture: Option<(u64, egui::TextureHandle)>,
     move_origin: Option<(f32, f32)>,
     move_delta: (f32, f32),
     /// Guides actifs pendant le déplacement en cours (roadmap P1 #8) : lignes
@@ -545,6 +569,9 @@ impl Default for PaintApp {
             grid_size: 25.0,
             show_rulers: false,
             selection: HashSet::new(),
+            selection_mask: None,
+            selection_mask_dialog: None,
+            selection_mask_texture: None,
             move_origin: None,
             move_delta: (0.0, 0.0),
             active_guides: Vec::new(),
@@ -1083,6 +1110,17 @@ impl PaintApp {
         self.report_selection();
     }
 
+    /// Peuple/combine le masque de sélection en pixels (Sprint H) depuis la
+    /// géométrie d'un geste de sélection (rectangle/ellipse/lasso) — voir
+    /// `tools::selection_mask`. `bounds` borne la zone parcourue,
+    /// `coverage_at` teste chaque pixel (coords document, centre du pixel).
+    fn paint_selection_mask(&mut self, combine: SelectionCombine, bounds: ((f32, f32), (f32, f32)), coverage_at: impl Fn(f32, f32) -> f32) {
+        let (w, h) = self.doc.size;
+        let mut mask = self.selection_mask.take().unwrap_or_default();
+        crate::tools::selection_mask::paint_mask_region(&mut mask, combine, w, h, bounds, coverage_at);
+        self.selection_mask = Some(mask);
+    }
+
     /// Sélectionne les éléments dont la boîte recoupe le rectangle (coords doc).
     /// `combine` pilote comment le résultat se combine à la sélection
     /// existante (Sprint G.1).
@@ -1095,6 +1133,7 @@ impl PaintApp {
             .map(|(id, _, _)| id)
             .collect();
         self.apply_selection_combine(combine, &hit_ids);
+        self.paint_selection_mask(combine, rect, |_, _| 1.0);
     }
 
     /// Sélectionne les éléments dont le centre tombe dans l'ellipse inscrite
@@ -1109,6 +1148,7 @@ impl PaintApp {
             .map(|(id, _, _)| id)
             .collect();
         self.apply_selection_combine(combine, &hit_ids);
+        self.paint_selection_mask(combine, rect, |x, y| if hit::point_in_ellipse(rect, (x, y)) { 1.0 } else { 0.0 });
     }
 
     /// Sélectionne les éléments dont le centre tombe dans le tracé du lasso.
@@ -1120,6 +1160,9 @@ impl PaintApp {
             .map(|(id, _, _)| id)
             .collect();
         self.apply_selection_combine(combine, &hit_ids);
+        if let Some(bounds) = hit::bounds_of_points(poly) {
+            self.paint_selection_mask(combine, bounds, |x, y| if hit::point_in_polygon(poly, (x, y)) { 1.0 } else { 0.0 });
+        }
     }
 
     /// Baguette magique : sélectionne les traits et textes du calque actif dont
@@ -1151,6 +1194,24 @@ impl PaintApp {
             self.wand_region_ids(clicked, close).into_iter().collect()
         };
         self.apply_selection_combine(combine, &hit_ids);
+        // Masque de sélection (Sprint H) : approximation par union des
+        // boîtes englobantes des éléments retenus — la baguette n'a pas de
+        // silhouette de geste unique comme rectangle/ellipse/lasso à
+        // rasteriser directement (documenté comme limite connue).
+        let geoms: Vec<((f32, f32), (f32, f32))> =
+            self.active_elements_geom().into_iter().filter(|(id, _, _)| hit_ids.contains(id)).map(|(_, bb, _)| bb).collect();
+        if let Some((mn, mx)) = geoms.iter().fold(None, |acc: Option<((f32, f32), (f32, f32))>, &(bmn, bmx)| match acc {
+            Some((amn, amx)) => Some(((amn.0.min(bmn.0), amn.1.min(bmn.1)), (amx.0.max(bmx.0), amx.1.max(bmx.1)))),
+            None => Some((bmn, bmx)),
+        }) {
+            self.paint_selection_mask(combine, (mn, mx), move |x, y| {
+                if geoms.iter().any(|&(bmn, bmx)| x >= bmn.0 && x <= bmx.0 && y >= bmn.1 && y <= bmx.1) {
+                    1.0
+                } else {
+                    0.0
+                }
+            });
+        }
     }
 
     /// Région connexe pour la baguette en mode « Contigu » : élargit depuis
@@ -1214,6 +1275,58 @@ impl PaintApp {
             self.active_elements_geom().into_iter().map(|(id, _, _)| id).collect();
         self.selection = all_ids.difference(&self.selection).copied().collect();
         self.report_selection();
+    }
+
+    // --- Masque de sélection en pixels (Sprint H) ----------------------------
+
+    /// Contour progressif (feather) : adoucit le bord du masque de sélection
+    /// sur environ `radius` pixels de large (flou du canal de couverture).
+    /// Sans effet s'il n'y a pas de sélection par région active.
+    pub fn feather_selection(&mut self, radius: f32) {
+        let Some(mask) = &self.selection_mask else {
+            self.info(t(
+                "Aucune sélection par région (rectangle/ellipse/lasso) à adoucir.",
+                "No region selection (rectangle/ellipse/lasso) to feather.",
+            ));
+            return;
+        };
+        let (w, h) = self.doc.size;
+        let dense = crate::tools::selection_mask::mask_to_dense(mask, w, h);
+        let feathered = crate::tools::selection_mask::feather(&dense, w as usize, h as usize, radius);
+        self.selection_mask = Some(crate::tools::selection_mask::dense_to_mask(&feathered, w, h));
+        self.info(t("Contour de la sélection adouci.", "Selection edge feathered."));
+    }
+
+    /// Dilate (grossit) la sélection en pixels de `amount` pixels.
+    pub fn dilate_selection(&mut self, amount: i32) {
+        let Some(mask) = &self.selection_mask else {
+            self.info(t(
+                "Aucune sélection par région (rectangle/ellipse/lasso) à dilater.",
+                "No region selection (rectangle/ellipse/lasso) to dilate.",
+            ));
+            return;
+        };
+        let (w, h) = self.doc.size;
+        let dense = crate::tools::selection_mask::mask_to_dense(mask, w, h);
+        let grown = crate::tools::selection_mask::dilate(&dense, w as usize, h as usize, amount);
+        self.selection_mask = Some(crate::tools::selection_mask::dense_to_mask(&grown, w, h));
+        self.info(t("Sélection dilatée.", "Selection dilated."));
+    }
+
+    /// Contracte (rétrécit) la sélection en pixels de `amount` pixels.
+    pub fn contract_selection(&mut self, amount: i32) {
+        let Some(mask) = &self.selection_mask else {
+            self.info(t(
+                "Aucune sélection par région (rectangle/ellipse/lasso) à contracter.",
+                "No region selection (rectangle/ellipse/lasso) to contract.",
+            ));
+            return;
+        };
+        let (w, h) = self.doc.size;
+        let dense = crate::tools::selection_mask::mask_to_dense(mask, w, h);
+        let shrunk = crate::tools::selection_mask::erode(&dense, w as usize, h as usize, amount);
+        self.selection_mask = Some(crate::tools::selection_mask::dense_to_mask(&shrunk, w, h));
+        self.info(t("Sélection contractée.", "Selection contracted."));
     }
 
     // --- Sélections nommées (Sprint 1.2) ------------------------------------
@@ -3287,6 +3400,7 @@ impl PaintApp {
         self.image_textures.clear();
         self.erase_pending.clear();
         self.selection.clear();
+        self.selection_mask = None;
         self.editing_text = None;
         self.reset_view();
         // Inclut traits, images ET textes : sinon `next_id` peut retomber sous
@@ -3369,6 +3483,31 @@ impl PaintApp {
         let image = self.compositor.layer_thumbnail(layer_id, 32)?;
         let tex = ctx.load_texture(format!("layer_thumb_{layer_id}"), image, egui::TextureOptions::LINEAR);
         self.layer_thumbnails.insert(layer_id, (hash, tex.clone()));
+        Some(tex)
+    }
+
+    /// Texture d'aperçu du masque de sélection en pixels (Sprint H) : teinte
+    /// semi-transparente sur les zones **hors** sélection (option la moins
+    /// coûteuse évoquée dans l'audit, plutôt qu'une vraie animation de
+    /// contour en pointillés). Mise en cache par hash de contenu, recalculée
+    /// seulement quand le masque change. `None` si pas de sélection par
+    /// région active.
+    fn selection_overlay_texture(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        let mask = self.selection_mask.as_ref()?;
+        let hash = mask.content_hash();
+        if let Some((h, tex)) = &self.selection_mask_texture {
+            if *h == hash {
+                return Some(tex.clone());
+            }
+        }
+        let (w, h) = self.doc.size;
+        let dense = crate::tools::selection_mask::mask_to_dense(mask, w, h);
+        // Alpha max borné (120/255) : la teinte reste lisible sans masquer
+        // complètement le contenu hors sélection.
+        let pixels: Vec<Color32> = dense.iter().map(|&a| Color32::from_black_alpha((120 * (255 - a as u32) / 255) as u8)).collect();
+        let image = egui::ColorImage { size: [w as usize, h as usize], pixels };
+        let tex = ctx.load_texture("selection_mask_overlay", image, egui::TextureOptions::LINEAR);
+        self.selection_mask_texture = Some((hash, tex.clone()));
         Some(tex)
     }
 
@@ -4957,11 +5096,14 @@ impl PaintApp {
         // Tampon personnalisé (Sprint J.2) : uniquement pour le pinceau (pas
         // la gomme), échantillonné à la place de la formule circulaire.
         let stamp = (!erase).then(|| self.brush.custom_stamp.clone()).flatten();
+        // Masque de sélection en pixels (Sprint H) : restreint la peinture à
+        // la zone sélectionnée quand il y en a une.
+        let mask = self.selection_mask.as_ref();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
             let raster = Self::active_raster_mut(layer, self.editing_mask);
             match &stamp {
-                Some(s) => raster.stamp_custom(d.0, d.1, radius * 2.0, color, s, erase),
-                None => raster.stamp(d.0, d.1, radius, hardness, color, erase),
+                Some(s) => raster.stamp_custom(d.0, d.1, radius * 2.0, color, s, erase, mask),
+                None => raster.stamp(d.0, d.1, radius, hardness, color, erase, mask),
             }
         }
         self.history.touch();
@@ -4981,6 +5123,7 @@ impl PaintApp {
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
         let stamp = (!erase).then(|| self.brush.custom_stamp.clone()).flatten();
+        let mask = self.selection_mask.as_ref();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
             let raster = Self::active_raster_mut(layer, self.editing_mask);
             match &stamp {
@@ -4991,10 +5134,10 @@ impl PaintApp {
                     for i in 0..=steps {
                         let t = i as f32 / steps as f32;
                         let p = (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
-                        raster.stamp_custom(p.0, p.1, radius * 2.0, color, s, erase);
+                        raster.stamp_custom(p.0, p.1, radius * 2.0, color, s, erase, mask);
                     }
                 }
-                None => raster.stroke_segment(from, to, radius, hardness, color, erase),
+                None => raster.stroke_segment(from, to, radius, hardness, color, erase, mask),
             }
         }
         self.history.touch();
@@ -5043,8 +5186,9 @@ impl PaintApp {
         color[3] = ((color[3] as f32) * 0.25).round().clamp(0.0, 255.0) as u8;
         let hardness = self.pixel_hardness;
         let layer_id = self.doc.active_id();
+        let mask = self.selection_mask.as_ref();
         if let Some(layer) = self.doc.layers.iter_mut().find(|l| l.id == layer_id) {
-            Self::active_raster_mut(layer, self.editing_mask).stamp(d.0, d.1, radius, hardness, color, false);
+            Self::active_raster_mut(layer, self.editing_mask).stamp(d.0, d.1, radius, hardness, color, false, mask);
         }
         self.history.touch();
     }
@@ -5673,6 +5817,13 @@ impl eframe::App for PaintApp {
 
             // Bord du document (sur le plan de travail, non rogné).
             painter.rect_stroke(doc_rect, 0.0, egui::Stroke::new(1.0, Color32::from_gray(120)));
+            // Masque de sélection en pixels (Sprint H) : teinte semi-
+            // transparente hors sélection, sous les poignées/pointillés de
+            // la sélection d'objets classique.
+            if let Some(tex) = self.selection_overlay_texture(ctx) {
+                let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                content.image(tex.id(), doc_rect, uv, Color32::WHITE);
+            }
             self.paint_selection(&painter, &view, moving);
             self.paint_pen(&content, &view, &response);
             self.paint_pen_edit(&content, &view);
@@ -6240,6 +6391,58 @@ mod tests {
         app.select_mode = SelectMode::Ellipse;
         app.select_in_ellipse((0.0, 0.0), (20.0, 10.0), SelectionCombine::Replace);
         assert_eq!(app.selection, [1].into_iter().collect());
+    }
+
+    #[test]
+    fn select_in_rect_populates_a_pixel_selection_mask() {
+        let mut app = app_with_layers(1);
+        app.select_in_rect((10.0, 10.0), (30.0, 30.0), SelectionCombine::Replace);
+        let mask = app.selection_mask.as_ref().expect("un masque devrait exister après select_in_rect");
+        assert_eq!(mask.get_pixel(20, 20)[3], 255, "à l'intérieur du rectangle");
+        assert_eq!(mask.get_pixel(5, 5)[3], 0, "à l'extérieur du rectangle");
+    }
+
+    #[test]
+    fn pixel_brush_respects_the_selection_mask() {
+        let mut app = app_with_layers(1);
+        app.brush.color = [255, 0, 0, 255];
+        app.brush.width = 10.0;
+        // Sélectionne seulement le quart supérieur-gauche du document.
+        app.select_in_rect((0.0, 0.0), (50.0, 50.0), SelectionCombine::Replace);
+        // Un point à l'intérieur de la sélection doit être peint.
+        app.paint_raster_point((20.0, 20.0), false);
+        assert!(app.doc.layers[0].raster.get_pixel(20, 20)[3] > 0, "dans la sélection, le pinceau doit peindre");
+        // Un point hors sélection ne doit rien peindre.
+        app.paint_raster_point((80.0, 80.0), false);
+        assert_eq!(app.doc.layers[0].raster.get_pixel(80, 80)[3], 0, "hors sélection, le pinceau ne doit rien peindre");
+    }
+
+    #[test]
+    fn feather_selection_softens_the_mask_edge() {
+        let mut app = app_with_layers(1);
+        app.select_in_rect((10.0, 10.0), (30.0, 30.0), SelectionCombine::Replace);
+        app.feather_selection(3.0);
+        let mask = app.selection_mask.as_ref().unwrap();
+        let edge = mask.get_pixel(10, 20)[3];
+        assert!(edge > 0 && edge < 255, "le bord devrait être un dégradé après feather, got {edge}");
+    }
+
+    #[test]
+    fn dilate_selection_grows_the_mask() {
+        let mut app = app_with_layers(1);
+        app.select_in_rect((20.0, 20.0), (30.0, 30.0), SelectionCombine::Replace);
+        assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(35, 25)[3], 0);
+        app.dilate_selection(6);
+        assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(35, 25)[3], 255, "dilater devrait grossir la sélection au-delà de son bord d'origine");
+    }
+
+    #[test]
+    fn contract_selection_shrinks_the_mask() {
+        let mut app = app_with_layers(1);
+        app.select_in_rect((20.0, 20.0), (40.0, 40.0), SelectionCombine::Replace);
+        assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(21, 30)[3], 255);
+        app.contract_selection(3);
+        assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(21, 30)[3], 0, "contracter devrait ronger le bord de la sélection");
     }
 
     #[test]
