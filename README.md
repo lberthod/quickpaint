@@ -79,16 +79,15 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
 - **Languages**: **FR/EN** UI, detected from the system locale at launch
   (switchable anytime from the menu bar, preference persisted).
 
-Not supported by design (see [FEATURE_SPRINTS.md](FEATURE_SPRINTS.md) and
-[audit_sprint_xx.md](audit_sprint_xx.md) for the reasoning): HEIC and camera
-RAW import (the only available Rust libraries are AGPL/LGPL-licensed,
-incompatible with a simple standalone distribution), lossy WebP export with
-an adjustable quality slider (would require the `libwebp` system dependency;
-the `image` crate's encoder is lossless-only — a deliberate trade-off, not an
-oversight), and ML-based background removal/super-resolution (replaced with
-heuristic equivalents — color-proximity cutout edges, optional edge
-refinement for fine detail, and Lanczos upscaling — to avoid bundling a
-neural network model).
+Not supported by design (see [audit_next.md](audit_next.md) for the
+reasoning): HEIC and camera RAW import (the only available Rust libraries are
+AGPL/LGPL-licensed, incompatible with a simple standalone distribution),
+lossy WebP export with an adjustable quality slider (would require the
+`libwebp` system dependency; the `image` crate's encoder is lossless-only —
+a deliberate trade-off, not an oversight), and ML-based background
+removal/super-resolution (replaced with heuristic equivalents —
+color-proximity cutout edges, optional edge refinement for fine detail, and
+Lanczos upscaling — to avoid bundling a neural network model).
 
 ## Non-goals (by design)
 
@@ -116,18 +115,18 @@ window needed — the model, tools and history layers are UI-independent).
 - [ARCHITECTURE.md](ARCHITECTURE.md) — layers, data model, input pipeline,
   rendering, undo/redo design.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
-- [audit_newxxx.md](audit_newxxx.md) — functional audit against a product
+- [audit_next.md](audit_next.md) — latest functional audit against a product
   feature checklist (what's implemented, partial, or absent, with code
   references).
-- [audit_sprint_xx.md](audit_sprint_xx.md) — sprint plan derived from that
-  audit, with the actual outcome of each sprint.
 - [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md) — Mac App Store
   sandbox validation notes.
 - In-app: **About ▸ Tool documentation** — a reference window covering every
   tool and the project's design philosophy, in French.
 
-Older planning documents (feature roadmap, sprint-by-sprint log, the UI/UX
-audit) were retired once acted upon — see the git log for that history.
+Older planning/audit documents (feature roadmap, sprint-by-sprint logs, the
+UI/UX audit, prior functional audits) are retired once acted upon — see the
+git log for that history. Only the latest audit is kept at the repo root, to
+avoid accumulating stale planning documents over time.
 
 ## License
 

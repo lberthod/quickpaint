@@ -1040,15 +1040,11 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
 
 /// Étiquette de menu « icône Phosphor + texte » — repère visuel rapide en
 /// plus du texte, sans dépendre des emojis du système.
-fn mtitle(glyph: &str, label: &str) -> String {
-    format!("{glyph} {label}")
-}
-
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     use egui_phosphor::regular as ic;
     egui::menu::bar(ui, |ui| {
         ui.menu_button(t("Fichier", "File"), |ui| {
-            if ui.button(mtitle(ic::FILE_PLUS, t("Nouveau (⌘N)", "New (⌘N)"))).clicked() {
+            if ui.button(t("Nouveau (⌘N)", "New (⌘N)")).clicked() {
                 app.new_document();
                 ui.close_menu();
             }
@@ -1056,7 +1052,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.show_template_gallery = true;
                 ui.close_menu();
             }
-            if ui.button(mtitle(ic::FOLDER_OPEN, t("Ouvrir… (⌘O)", "Open… (⌘O)"))).clicked() {
+            if ui.button(t("Ouvrir… (⌘O)", "Open… (⌘O)")).clicked() {
                 app.open_project();
                 ui.close_menu();
             }
@@ -1079,7 +1075,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     }
                 });
             });
-            if ui.button(mtitle(ic::FLOPPY_DISK, t("Enregistrer le projet (⌘S)", "Save project (⌘S)"))).clicked() {
+            if ui.button(t("Enregistrer le projet (⌘S)", "Save project (⌘S)")).clicked() {
                 app.save_project();
                 ui.close_menu();
             }
@@ -1099,12 +1095,12 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.import_psd();
                 ui.close_menu();
             }
-            if ui.button(mtitle(ic::CLIPBOARD, t("Coller une image (⌘V)", "Paste image (⌘V)"))).clicked() {
+            if ui.button(t("Coller une image (⌘V)", "Paste image (⌘V)")).clicked() {
                 app.paste_image();
                 ui.close_menu();
             }
             ui.separator();
-            if ui.button(mtitle(ic::EXPORT, t("Exporter en PNG (⌘E)", "Export as PNG (⌘E)"))).clicked() {
+            if ui.button(t("Exporter en PNG (⌘E)", "Export as PNG (⌘E)")).clicked() {
                 app.request_export(ctx, ExportFormat::Png);
                 ui.close_menu();
             }
@@ -1276,7 +1272,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             // laisser dispersés (décision documentée dans UX_SPRINTS.md,
             // item UX-5.3 : fusion dans Édition retenue plutôt qu'un
             // troisième menu « Objet »).
-            ui.menu_button(mtitle(ic::FRAME_CORNERS, t("Aligner", "Align")), |ui| {
+            ui.menu_button(t("Aligner", "Align"), |ui| {
                 let items: &[(&str, AlignMode)] = &[
                     (t("Bords gauches", "Left edges"), AlignMode::Left),
                     (t("centres (H)", "centers (H)"), AlignMode::CenterH),

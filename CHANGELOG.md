@@ -4,8 +4,8 @@ Versions alignées sur les sprints. Détail complet : le journal git.
 
 ## 0.15.0 — juillet 2026 (audit fonctionnel de suivi — Sprints A à F)
 
-Détail complet, priorisation et raisonnement : [audit_newxxx.md](audit_newxxx.md)
-(audit) et [audit_sprint_xx.md](audit_sprint_xx.md) (plan de sprints).
+Audit et plan de sprints (`audit_newxxx.md`/`audit_sprint_xx.md`) retirés une
+fois acté — voir [audit_next.md](audit_next.md) pour l'audit suivant.
 211 tests au total (+15), 0 warning clippy.
 
 - **Sprint D — Retouche photo** : calques de réglage **Exposition** (gain en
@@ -42,9 +42,9 @@ Détail complet, priorisation et raisonnement : [audit_newxxx.md](audit_newxxx.m
 
 ## 0.14.0 — juillet 2026 (Sprints 1 à 9 — audit fonctionnel complet)
 
-Détail complet, priorisation et raisonnement : [FEATURE_SPRINTS.md](FEATURE_SPRINTS.md).
-Neuf sprints d'affilée à partir d'un audit fonctionnel produit/concurrence ;
-196 tests au total (+81), 0 warning clippy.
+Plan de sprints (`FEATURE_SPRINTS.md`) retiré une fois acté — voir le journal
+git pour l'historique complet. Neuf sprints d'affilée à partir d'un audit
+fonctionnel produit/concurrence ; 196 tests au total (+81), 0 warning clippy.
 
 - **Sprint 1 — Fiabilité** : récupération automatique après crash (autosave
   périodique + détection au démarrage) ; sélections nommées (enregistrer/
@@ -103,7 +103,8 @@ Neuf sprints d'affilée à partir d'un audit fonctionnel produit/concurrence ;
 
 ## 0.13.0 — juillet 2026 (UX-1 à UX-5 — optimisation UI/UX & fonctionnalité)
 
-Détail complet, constats et critères d'acceptation : [UX_SPRINTS.md](UX_SPRINTS.md).
+Détail complet, constats et critères d'acceptation : `UX_SPRINTS.md` (retiré
+une fois acté — voir le journal git pour l'historique complet).
 
 - **Bugs visibles corrigés** : chevauchement de texte dans le footer,
   messages de statut désormais colorés par sévérité (rouge = échec, vert =
