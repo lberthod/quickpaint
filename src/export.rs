@@ -200,6 +200,41 @@ pub fn save_dialog_bytes(format: ExportFormat, bytes: &[u8]) -> std::io::Result<
     Ok(path)
 }
 
+/// Ouvre un sélecteur « Enregistrer » et écrit un GIF **animé** (Sprint L.6) :
+/// `frames` doit déjà porter son délai par frame (`image::Delay`) — voir
+/// `PaintApp::export_animated_gif`, qui rend chaque frame séparément via le
+/// compositeur avant d'appeler cette fonction. Boucle infinie par défaut
+/// (`Repeat::Infinite`), comme la quasi-totalité des GIF animés du web.
+pub fn save_animated_gif(frames: Vec<image::Frame>) -> std::io::Result<PathBuf> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("GIF animé", &["gif"])
+        .set_file_name(format!("QuickPaint-{stamp}-anime.gif"))
+        .save_file()
+    else {
+        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
+    };
+    let file = std::fs::File::create(&path)?;
+    encode_animated_gif(file, frames)?;
+    Ok(path)
+}
+
+/// Encodage GIF animé proprement dit (Sprint L.6), séparé de la sélection de
+/// fichier pour rester testable sans dialogue natif. `frames` doit porter au
+/// moins 2 éléments (sinon ce n'est pas une animation) et déjà son délai par
+/// frame (`image::Delay`). Boucle infinie par défaut (`Repeat::Infinite`),
+/// comme la quasi-totalité des GIF animés du web.
+fn encode_animated_gif<W: std::io::Write>(w: W, frames: Vec<image::Frame>) -> std::io::Result<()> {
+    if frames.len() < 2 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, t("au moins 2 frames requises", "at least 2 frames required")));
+    }
+    let mut encoder = image::codecs::gif::GifEncoder::new(w);
+    let to_io = |e: image::ImageError| std::io::Error::other(e.to_string());
+    encoder.set_repeat(image::codecs::gif::Repeat::Infinite).map_err(to_io)?;
+    encoder.encode_frames(frames).map_err(to_io)?;
+    Ok(())
+}
+
 /// Construit un PDF mono-page embarquant l'image en JPEG (filtre DCTDecode).
 /// Format minimal mais valide ; évite une dépendance PDF lourde et changeante.
 fn build_pdf_bytes(w: u32, h: u32, buf: &image::RgbaImage, jpeg_quality: u8) -> std::io::Result<Vec<u8>> {
@@ -337,6 +372,31 @@ mod tests {
         let from_bytes = encode_to_bytes(img.width(), img.height(), img.as_raw(), ExportFormat::Png, 90).expect("encode bytes");
         assert_eq!(from_file, from_bytes);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn encode_animated_gif_round_trips_frame_count_and_delays() {
+        let mut buf = Vec::new();
+        let frames = vec![
+            image::Frame::from_parts(sample(), 0, 0, image::Delay::from_numer_denom_ms(100, 1)),
+            image::Frame::from_parts(sample(), 0, 0, image::Delay::from_numer_denom_ms(250, 1)),
+        ];
+        encode_animated_gif(&mut buf, frames).expect("encode");
+        let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(&buf)).expect("decode");
+        use image::AnimationDecoder;
+        let decoded: Vec<_> = decoder.into_frames().collect_frames().expect("collect frames");
+        assert_eq!(decoded.len(), 2);
+        let (num, den) = decoded[0].delay().numer_denom_ms();
+        assert!((num as f32 / den as f32 - 100.0).abs() < 15.0, "délai frame 0 ≈ 100ms, got {num}/{den}");
+        let (num, den) = decoded[1].delay().numer_denom_ms();
+        assert!((num as f32 / den as f32 - 250.0).abs() < 15.0, "délai frame 1 ≈ 250ms, got {num}/{den}");
+    }
+
+    #[test]
+    fn encode_animated_gif_rejects_fewer_than_two_frames() {
+        let mut buf = Vec::new();
+        let frames = vec![image::Frame::new(sample())];
+        assert!(encode_animated_gif(&mut buf, frames).is_err());
     }
 
     #[test]

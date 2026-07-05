@@ -268,6 +268,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     shortcuts_prefs_window(ctx, app);
     batch_export_window(ctx, app);
     export_preview_window(ctx, app);
+    animation_panel_window(ctx, app);
     style_presets_window(ctx, app);
     asset_library_window(ctx, app);
     brush_library_window(ctx, app);
@@ -885,6 +886,101 @@ fn brush_library_window(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
+/// Panneau « Animation » (Sprint L.6) : liste des frames (une par ligne,
+/// délai réglable), sélection/réordonnancement/suppression, et export en GIF
+/// animé. Chaque frame est un instantané complet de la pile de calques (voir
+/// `app/animation.rs`) — pas de scrubber/onion skinning dans cette première
+/// version, une liste suffit pour l'usage visé (petites boucles simples).
+fn animation_panel_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_animation_panel {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("Animation", "Animation"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(360.0);
+            if app.doc.frames.is_empty() {
+                ui.label(t(
+                    "Document statique — ajoute une frame pour démarrer une animation.",
+                    "Static document — add a frame to start an animation.",
+                ));
+            } else {
+                ui.label(format!(
+                    "{} {} frame(s)",
+                    t("Animation :", "Animation:"),
+                    app.doc.frames.len()
+                ));
+            }
+            ui.separator();
+            if ui
+                .button(t("＋ Ajouter une frame", "＋ Add frame"))
+                .on_hover_text(t(
+                    "Duplique la frame active comme point de départ de la nouvelle frame",
+                    "Duplicates the active frame as a starting point for the new one",
+                ))
+                .clicked()
+            {
+                app.add_animation_frame();
+            }
+            ui.separator();
+            let n = app.doc.frames.len();
+            let mut select = None;
+            let mut delete = None;
+            let mut move_delta: Option<(usize, i32)> = None;
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                for i in 0..n {
+                    let is_active = i == app.doc.active_frame;
+                    ui.horizontal(|ui| {
+                        let label = format!("{} {}", t("Frame", "Frame"), i + 1);
+                        if ui.selectable_label(is_active, label).clicked() {
+                            select = Some(i);
+                        }
+                        let mut delay = app.doc.frames[i].delay_ms;
+                        if ui.add(egui::DragValue::new(&mut delay).range(20..=5000).suffix(" ms")).changed() {
+                            app.set_frame_delay(i, delay);
+                        }
+                        if ui.add_enabled(i > 0, egui::Button::new("▲")).clicked() {
+                            move_delta = Some((i, -1));
+                        }
+                        if ui.add_enabled(i + 1 < n, egui::Button::new("▼")).clicked() {
+                            move_delta = Some((i, 1));
+                        }
+                        if ui.add_enabled(n > 1, egui::Button::new("🗑")).clicked() {
+                            delete = Some(i);
+                        }
+                    });
+                }
+            });
+            if let Some(i) = select {
+                app.switch_animation_frame(i);
+            }
+            if let Some((i, d)) = move_delta {
+                app.move_animation_frame(i, d);
+            }
+            if let Some(i) = delete {
+                app.remove_animation_frame(i);
+            }
+            ui.separator();
+            if ui
+                .add_enabled(app.doc.is_animated(), egui::Button::new(t("Exporter en GIF animé…", "Export as animated GIF…")))
+                .clicked()
+            {
+                app.export_animated_gif(ctx);
+            }
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_animation_panel = false;
+            }
+        });
+    if !open {
+        app.show_animation_panel = false;
+    }
+}
+
 /// Panneau « Exporter en plusieurs tailles » (Sprint 7.3) : coche des
 /// multiples du document + une largeur personnalisée, un seul dossier choisi
 /// pour tous les fichiers écrits.
@@ -1295,6 +1391,18 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
             if ui.button(t("Exporter en plusieurs tailles…", "Export multiple sizes…")).clicked() {
                 app.show_batch_export = true;
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui
+                .button(t("Animation (frames)…", "Animation (frames)…"))
+                .on_hover_text(t(
+                    "Ajoute des frames et exporte en GIF animé",
+                    "Add frames and export as an animated GIF",
+                ))
+                .clicked()
+            {
+                app.show_animation_panel = true;
                 ui.close_menu();
             }
         });

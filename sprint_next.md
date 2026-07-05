@@ -428,13 +428,10 @@ prévu à part, voir ci-dessous.
       → vérifier que les `Stroke`/`TextItem` produits ont les bonnes
       coordonnées/couleurs.
 
-### L.6 — Export GIF, statique et animé (point 9) — 🟡 PARTIEL (statique fait, animé décidé mais non traité)
+### L.6 — Export GIF, statique et animé (point 9) — ✅ FAIT (statique et animé)
 
 **Décision du porteur de projet (2026-07-05) : traiter l'animé, pas
-seulement le statique.** Le statique est fait cette session (premier
-incrément recommandé ci-dessous) ; l'animé reste non traité — ampleur
-nettement supérieure aux autres points de ce sprint, prévu comme chantier
-à part.
+seulement le statique.** Les deux sont faits.
 
 - [x] GIF statique : `ExportFormat::Gif` ajouté (`export.rs`), encodé via
       `image::ImageFormat::Gif`. A révélé et corrigé au passage une
@@ -444,24 +441,36 @@ nettement supérieure aux autres points de ce sprint, prévu comme chantier
       marqué ✅ dans l'audit, ne décodait en réalité aucun fichier GIF.
       Corrigé (feature ajoutée) et couvert par un test de régression
       (`project::tests::import_image_from_path_decodes_gif`).
-- [ ] GIF **animé** : nécessite d'abord une notion de « frames »/timeline,
-      absente du modèle actuel (`Document` est une image fixe, pas une
-      séquence) — **ce n'est pas un point d'export mais une fonctionnalité
-      de fond à concevoir avant tout code d'export animé** :
-  - Modèle : qu'est-ce qu'une frame ? Un clone complet de `Document.layers`
-    par frame (simple, mais mémoire/fichier projet plus lourd) vs. une
-    timeline de keyframes par calque/élément (plus riche, bien plus gros
-    chantier de modèle + UI + rendu).
-  - UI : scrubber/timeline, ajout/suppression/réordonnancement de frames,
-    onion skinning éventuel — une session de conception à part entière,
-    pas une sous-tâche d'export.
-  - Une fois le modèle en place : export = encoder chaque frame rendue
-    (déjà le chemin `render_to_rgba` existant) via `image::codecs::gif`,
-    délais par frame configurables.
-- [ ] **Recommandation** : traiter en deux temps même si l'animé est la
-      cible finale — livrer GIF statique d'abord (rapide, autonome), puis
-      ouvrir une session dédiée « timeline/animation » avant de coder
-      l'export animé lui-même.
+- [x] GIF **animé** : modèle retenu = un clone complet de la pile de
+      calques par frame (`model::AnimationFrame { layers: Vec<Layer>,
+      delay_ms: u32 }`, champ `Document::frames: Vec<AnimationFrame>` +
+      `Document::active_frame: usize`) — le plus simple des deux options
+      évoquées, cohérent avec le reste de l'app (pas de nouveau système
+      d'undo : chaque opération de frame passe par `push_doc_snapshot` /
+      `Command::SetDoc`, donc annulable comme un redimensionnement de
+      document). `frames` vide = document statique, comportement
+      historique inchangé (aucun effet sur les documents existants).
+  - Nouveau sous-module `app/animation.rs` : `add_animation_frame`
+    (duplique la frame active), `switch_animation_frame` (sauvegarde la
+    frame quittée avant de charger la nouvelle), `remove_animation_frame`
+    (refuse de vider la dernière frame), `move_animation_frame` (voisin
+    immédiat, pas de glisser-déposer dans cette version), `set_frame_delay`.
+  - UI : panneau « Animation » (`ui/toolbar.rs`, `animation_panel_window`)
+    — liste des frames avec délai réglable, boutons monter/descendre/
+    supprimer, pas de scrubber/onion skinning (suffisant pour l'usage visé,
+    petites boucles simples).
+  - Export : `PaintApp::export_animated_gif` rend chaque frame séparément
+    via le compositeur existant (`render_to_rgba` sur un `Document`
+    temporaire par frame), encode avec `image::codecs::gif::GifEncoder`
+    (`export::save_animated_gif`/`encode_animated_gif`, boucle infinie par
+    défaut). Testé par un vrai aller-retour encodage → décodage vérifiant
+    le nombre de frames et les délais.
+  - Correctifs trouvés en cours de route : `encode_all_images`/
+    `apply_loaded` ne parcouraient que la frame active, pas `doc.frames` —
+    sans correction, sauvegarder/rouvrir un projet animé aurait
+    silencieusement vidé le raster/masque des frames non actives. Corrigé,
+    couvert par un test de régression dédié
+    (`saving_and_reloading_a_project_keeps_raster_content_on_inactive_frames`).
 
 ### L.7 — Export PDF vectoriel (point 11) ✅ FAIT (décision : oui, l'ajouter — confirmé par le porteur de projet)
 

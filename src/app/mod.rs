@@ -4,6 +4,11 @@
 //! outils et rendu. La boucle `update` suit la séquence de la section 6 :
 //! lire les évènements → mettre à jour le trait → UI → rendre.
 
+// Animation (Sprint L.6) : frames = instantanés complets de la pile de
+// calques, gérées via l'undo général (`push_doc_snapshot`, `Command::SetDoc`)
+// plutôt qu'un système de commandes dédié — même sous-module autonome que
+// `pen_edit`/`transform`, ne partage que `Document`/`AnimationFrame`.
+mod animation;
 // Édition de nœuds Bézier après coup (roadmap P2 #12) — extrait en sous-module
 // (ANALYSE.md §12.5) : sous-système autonome (état + geste + rendu) qui ne
 // partage que `Document`/`Stroke` avec le reste de `app`.
@@ -392,6 +397,8 @@ pub struct PaintApp {
     pub export_profiles: Vec<crate::export::ExportProfile>,
     /// Saisie du nom pour « Enregistrer un profil d'export » (Sprint L.8).
     pub export_profile_name: String,
+    /// Panneau « Animation » (Sprint L.6, frames) ouvert ?
+    pub show_animation_panel: bool,
     // Pot de peinture : point cliqué (écran) en attente de la capture.
     bucket_click: Option<Pos2>,
     // Détourage en un clic (Sprint 9.1) : point cliqué (écran) + modificateur
@@ -573,6 +580,7 @@ impl Default for PaintApp {
             export_dialog: None,
             export_profiles: crate::i18n::load_export_profiles(),
             export_profile_name: String::new(),
+            show_animation_panel: false,
             bucket_click: None,
             cutout_click: None,
             cutout_tolerance: 32,
@@ -3183,9 +3191,13 @@ impl PaintApp {
     // --- Projet : sauvegarde / ouverture (idée 6) ---------------------------
 
     /// Encode (paresseusement) le PNG de toutes les images et du raster peint
-    /// avant un export nécessitant les données encodées (projet, SVG).
+    /// avant un export nécessitant les données encodées (projet, SVG) — pour
+    /// la frame active ET les autres frames d'animation (Sprint L.6), sans
+    /// quoi sauvegarder un projet animé perdrait silencieusement le
+    /// raster/masque/pixels d'image des frames non actives.
     fn encode_all_images(&mut self) {
-        for layer in &mut self.doc.layers {
+        let all_layers = self.doc.layers.iter_mut().chain(self.doc.frames.iter_mut().flat_map(|f| f.layers.iter_mut()));
+        for layer in all_layers {
             for im in &mut layer.images {
                 im.ensure_encoded();
             }
@@ -3253,8 +3265,12 @@ impl PaintApp {
 
     fn apply_loaded(&mut self, mut doc: Document) {
         doc.normalize_ids(); // répare les anciens projets (id manquants)
-        // Reconstruit les pixels des images depuis leur PNG base64.
-        for layer in &mut doc.layers {
+        // Reconstruit les pixels des images depuis leur PNG base64 — pour la
+        // frame active (`layers`) ET les autres frames d'animation (Sprint
+        // L.6), sans quoi rouvrir un projet animé laisserait les frames non
+        // actives sans raster/masque/pixels d'image décodés.
+        let all_layers = doc.layers.iter_mut().chain(doc.frames.iter_mut().flat_map(|f| f.layers.iter_mut()));
+        for layer in all_layers {
             for im in &mut layer.images {
                 im.decode();
             }

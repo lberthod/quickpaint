@@ -22,7 +22,7 @@ d'estimation à partir des seuls noms de fonctionnalités.
 | 6 | Export JPEG avec réglage de qualité | ✅ | Curseur 1–100 (`app/mod.rs`, `export.rs:118`). |
 | 7 | Export WebP (avec/sans perte) | 🟡 | Export WebP existe mais **toujours sans perte** (crate `image`) — le WebP *lossy* demanderait `libwebp`, écarté par décision produit (voir `audit_sprint_xx.md`, retiré). |
 | 8 | Export TIFF et BMP | ✅ | Via la crate `image` (features Cargo.toml). |
-| 9 | Export GIF (statique et animé) | 🟡 | Sprint L.6 (partiel) : export GIF **statique** ajouté (`ExportFormat::Gif`, feature `gif` de la crate `image` activée — corrige au passage un bug latent : l'import GIF annoncé ✅ ne décodait en réalité rien, la feature n'était pas compilée). **Animé non traité** : demande d'abord une notion de frames/timeline absente du modèle de document actuel — chantier à part, voir `sprint_next.md` L.6. |
+| 9 | Export GIF (statique et animé) | ✅ | Sprint L.6 : export GIF **statique** (`ExportFormat::Gif`, feature `gif` de la crate `image` activée — corrige au passage un bug latent : l'import GIF annoncé ✅ ne décodait en réalité rien, la feature n'était pas compilée) et **animé** — `Document::frames: Vec<AnimationFrame>` (instantané complet de la pile de calques par frame), panneau « Animation » (ajout/suppression/réordonnancement/délai par frame), export GIF animé via `image::codecs::gif`. Chaque opération de frame passe par l'undo général (`Command::SetDoc`), donc annulable. |
 | 10 | Export SVG des éléments vectoriels | ✅ | `svg.rs` — traits, images (base64), textes, opacité de calque. |
 | 11 | Export PDF (rasterisé ou vectoriel) | ✅ | Sprint L.7 : `pdf_vector.rs`, nouveau module — traits/formes en opérateurs de dessin PDF réels, texte en police standard (Helvetica/Bold, WinAnsiEncoding), images en XObject JPEG. Le PDF rasterisé (`export.rs`) reste disponible séparément (plus rapide, taille de fichier prévisible). |
 | 12 | Export par lots (plusieurs fichiers) | ✅ | `save_batch()` (`export.rs:46`). |
@@ -35,7 +35,7 @@ d'estimation à partir des seuls noms de fonctionnalités.
 | 19 | Import depuis le presse-papiers | ✅ | `paste_image()` via `arboard` (`app/mod.rs`). |
 | 20 | Sauvegarde automatique + récupération après crash | ✅ | `project.rs` — autosave périodique vers `recovery.json`, restauration proposée au démarrage. |
 
-**Score : 16 ✅ / 4 🟡 / 0 ❌** *(sur 20 — un item peut compter dans les deux
+**Score : 17 ✅ / 3 🟡 / 0 ❌** *(sur 20 — un item peut compter dans les deux
 premières colonnes selon la lecture)*
 
 ---
@@ -180,32 +180,26 @@ premières colonnes selon la lecture)*
 
 | Statut | Nombre (sur 102 items) | % |
 |---|---|---|
-| ✅ Implémenté | 88 | ~86 % |
-| 🟡 Partiel | 11 | ~11 % |
+| ✅ Implémenté | 89 | ~87 % |
+| 🟡 Partiel | 10 | ~10 % |
 | ❌ Absent | 3 | ~3 % |
 
-*(Mis à jour après les Sprints G, K, I, J, M et L (dont L.5, L.6 partiel et L.7) — voir
+*(Mis à jour après les Sprints G, K, I, J, M et L (complet, y compris L.5/L.6/L.7) — voir
 [sprint_next.md](sprint_next.md) : G a réglé 61/64/68 (sélection) ; K a réglé
 76/80/83/85/86/90/92/93 (filtres & effets) ; I a réglé 30/33/37/38 et partiellement 36
 (calques) ; J a réglé 44/50/56 (dessin) ; M a réglé 98/99 (couleur/transformations) ; L a
-réglé 3/14/15/16/17/18/11 (export, dont l'import SVG vectoriel et le PDF vectoriel) et
-partiellement 9 (GIF **statique**, l'animé reste à faire — voir ci-dessous). Restent :
-K.6/Canny (basse priorité), 28 (verrouillage granulaire, optionnel), 36 (distribution
-multi-calque, demande une sélection multi-calque absente de l'UI), 40 (outil crayon dédié,
-priorité basse), et le GIF **animé** (point 9) — décidé avec le porteur de projet (le traiter),
-non commencé cette session vu l'ampleur (nécessite d'abord une notion de frames/timeline
-absente du modèle actuel), à reprendre dans une session dédiée.)*
+réglé 3/9/14/15/16/17/18/11 (export, dont l'import SVG vectoriel, le PDF vectoriel et le
+GIF animé — `Document::frames`, panneau « Animation », export via `image::codecs::gif`).
+Restent : K.6/Canny (basse priorité), 28 (verrouillage granulaire, optionnel), 36
+(distribution multi-calque, demande une sélection multi-calque absente de l'UI), 40 (outil
+crayon dédié, priorité basse).)*
 
 ### Ce qui manque complètement (❌), par ordre d'impact utilisateur probable
 
 **Format & export**
-- Export GIF **animé** (voir L.6, sprint_next.md) — décidé (le traiter),
-  non commencé cette session : nécessite d'abord une notion de
-  frames/timeline absente du modèle actuel, chantier bien plus large que
-  l'export lui-même (le GIF statique, lui, est fait — voir point 9)
-  (~~Import SVG~~, ~~export d'une zone sélectionnée~~, ~~aperçu/poids
-  estimé~~, ~~suppression de métadonnées~~, ~~glisser-déposer~~ et ~~PDF
-  vectoriel~~ traités par le Sprint L — voir [sprint_next.md](sprint_next.md))
+(tout traité par le Sprint L — voir [sprint_next.md](sprint_next.md), y
+compris l'import SVG vectoriel, le PDF vectoriel et le GIF statique **et**
+animé)
 
 **Sélection**
 - Contour progressif (feather) en opération générique de sélection
@@ -276,23 +270,31 @@ seulement Canny/K.6, priorité basse, non bloquant)
    pour Scale/Rotate) — limite technique documentée dans le code, pas un
    oubli.
 
-7. **Export : quasi complet, y compris les points qui demandaient une
-   décision.** ✅ Résolu par le Sprint L (voir [sprint_next.md](sprint_next.md)) :
-   export d'une zone sélectionnée, aperçu + poids estimé, profils d'export
-   nommés, glisser-déposer de fichiers, import SVG vectoriel éditable
-   (`svg_import.rs`, via `usvg`), export PDF vectoriel (`pdf_vector.rs`) et
-   export GIF statique ; suppression de métadonnées vérifiée comme déjà
-   satisfaite par construction. En ajoutant le GIF statique, régression
+7. **Export : complet, y compris les points qui demandaient une décision.**
+   ✅ Résolu par le Sprint L (voir [sprint_next.md](sprint_next.md)) : export
+   d'une zone sélectionnée, aperçu + poids estimé, profils d'export nommés,
+   glisser-déposer de fichiers, import SVG vectoriel éditable
+   (`svg_import.rs`, via `usvg`), export PDF vectoriel (`pdf_vector.rs`),
+   export GIF statique **et animé** ; suppression de métadonnées vérifiée
+   comme déjà satisfaite par construction. En ajoutant le GIF, régression
    latente trouvée et corrigée au passage : la feature `gif` de la crate
    `image` n'était pas activée dans `Cargo.toml`, donc l'import GIF déjà
    annoncé ✅ dans un audit précédent ne décodait en réalité rien — corrigé
-   et couvert par un test de régression. Seul l'export GIF **animé** reste —
-   décidé (le porteur de projet veut l'animé, pas seulement le statique)
-   mais non traité cette session : contrairement aux autres points, il
-   suppose d'abord une notion de frames/timeline absente du modèle de
-   document actuel, un chantier de fond distinct de l'export lui-même (voir
-   sprint_next.md L.6 pour le détail de ce qu'il faudrait concevoir avant
-   de coder l'export).
+   et couvert par un test de régression.
+
+   Le GIF **animé** a introduit le seul vrai changement de modèle de données
+   de cette session : `Document::frames: Vec<AnimationFrame>`, où chaque
+   frame est un instantané complet de la pile de calques (pas une timeline
+   de keyframes par calque — choix volontairement le plus simple des deux
+   options évoquées dans l'audit précédent). Vide par défaut, donc aucun
+   effet sur les documents existants. Chaque opération de frame (ajouter/
+   supprimer/réordonner/changer de frame) passe par l'undo général
+   (`Command::SetDoc`), pas un système dédié. Point d'attention corrigé au
+   passage : l'encodage/décodage du raster peint et des masques
+   (`encode_all_images`/`apply_loaded`) ne parcourait que la frame active —
+   sans le correctif, sauvegarder puis rouvrir un projet animé aurait
+   silencieusement vidé le contenu peint des frames non actives ; couvert
+   par un test de régression dédié.
 
 8. **Import SVG : limites assumées de la conversion vectorielle.** Police
    système générique plutôt que la police exacte du SVG (pas d'embarquement

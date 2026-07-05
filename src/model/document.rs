@@ -357,6 +357,30 @@ pub struct NamedSelection {
     pub ids: Vec<u64>,
 }
 
+/// Une frame d'animation (Sprint L.6) : un instantané complet de la pile de
+/// calques, pas un delta ni une référence — plus simple à raisonner, à
+/// sérialiser et à annuler/rétablir qu'un système de keyframes par calque,
+/// au prix d'un fichier projet plus lourd si beaucoup de frames se
+/// ressemblent (compromis assumé, voir sprint_next.md L.6).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AnimationFrame {
+    pub layers: Vec<Layer>,
+    /// Délai d'affichage de cette frame, en millisecondes (converti en
+    /// centièmes de seconde à l'export GIF, l'unité native du format).
+    #[serde(default = "default_frame_delay_ms")]
+    pub delay_ms: u32,
+}
+
+fn default_frame_delay_ms() -> u32 {
+    100
+}
+
+impl AnimationFrame {
+    pub fn new(layers: Vec<Layer>) -> Self {
+        Self { layers, delay_ms: default_frame_delay_ms() }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub layers: Vec<Layer>,
@@ -374,6 +398,17 @@ pub struct Document {
     /// Sélections nommées enregistrées par l'utilisateur (Sprint 1.2).
     #[serde(default)]
     pub named_selections: Vec<NamedSelection>,
+    /// Frames d'animation (Sprint L.6). Vide = document statique, le
+    /// comportement historique inchangé — `layers` est alors la seule
+    /// image. Non vide : `layers` reflète le contenu de la frame active
+    /// (`active_frame`), les *autres* frames vivent ici ; la frame active
+    /// elle-même n'a pas de copie à jour dans `frames` tant qu'on n'a pas
+    /// changé de frame ou exporté (voir `PaintApp::sync_active_frame`).
+    #[serde(default)]
+    pub frames: Vec<AnimationFrame>,
+    /// Index de la frame actuellement éditée dans `frames`.
+    #[serde(default)]
+    pub active_frame: usize,
 }
 
 impl Document {
@@ -386,7 +421,14 @@ impl Document {
             next_z: 1.0,
             format_version: CURRENT_FORMAT_VERSION,
             named_selections: Vec::new(),
+            frames: Vec::new(),
+            active_frame: 0,
         }
+    }
+
+    /// `true` si le document a plus d'une frame d'animation.
+    pub fn is_animated(&self) -> bool {
+        self.frames.len() > 1
     }
 
     /// Id du calque actif.
