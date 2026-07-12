@@ -164,15 +164,21 @@ lisant les blocs — l'ordre peut changer) :
       volontairement : `canvas_context_menu`/`handle_canvas` (restés dans
       `app/mod.rs`, ce sont le dispatch d'entrée qui mute l'état — domaine
       différent, plus risqué à isoler). ~320 lignes déplacées.
+- [x] **T3.9 — `app/bucket_cutout.rs`** ✅ FAIT (au-delà du plan initial) :
+      `do_bucket_fill`/`do_cutout` — inondent la composition **affichée**
+      (capture d'écran différée, `handle_screenshot`, resté dans
+      `app/mod.rs`) depuis le point cliqué, seul moyen de raisonner sur les
+      pixels réellement vus (fusion de calques comprise) sous le clic.
+      ~220 lignes déplacées.
 - [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes (actuellement
-      ~5 090 lignes après T3.1-T3.8 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
-      `shortcuts.rs`/`raster_paint.rs`/`export_ops.rs`/`canvas_overlay.rs`
-      extraits, plus `animation.rs`/`pen_edit.rs`/`transform.rs` déjà
-      extraits avant ce sprint — candidat suivant pour continuer à repasser
-      sous la barre : `handle_canvas` (dispatch d'entrée canevas, ~340
-      lignes) et le bloc pot de peinture/détourage (`do_bucket_fill`/
-      `do_cutout`, ~220 lignes)), `cargo test` vert à chaque commit, aucun
-      diff de comportement.
+      ~4 870 lignes après T3.1-T3.9 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
+      `shortcuts.rs`/`raster_paint.rs`/`export_ops.rs`/`canvas_overlay.rs`/
+      `bucket_cutout.rs` extraits, plus `animation.rs`/`pen_edit.rs`/
+      `transform.rs` déjà extraits avant ce sprint — candidat suivant pour
+      continuer à repasser sous la barre : `handle_canvas` (dispatch d'entrée
+      canevas, ~340 lignes, plus risqué à isoler car il route vers des
+      méthodes réparties dans presque tous les sous-modules désormais)),
+      `cargo test` vert à chaque commit, aucun diff de comportement.
 
 ---
 
