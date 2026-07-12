@@ -1796,7 +1796,7 @@ mod tests {
     #[test]
     fn canny_is_all_white_on_a_perfectly_flat_image() {
         let (w, h) = (8usize, 8usize);
-        let rgba = vec![200u8, 200, 200, 255].repeat(w * h);
+        let rgba = [200u8, 200, 200, 255].repeat(w * h);
         let out = canny_filter(&rgba, w, h);
         assert!(out.chunks_exact(4).all(|px| px[0] == 255), "aucun contour sur une image plate");
     }
