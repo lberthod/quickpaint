@@ -200,13 +200,47 @@ Plus on attend, plus c'est cher — mais c'est le sprint le plus risqué,
 donc **à faire en dernier, sur une branche, et après T3** (moins de code à
 migrer dans un `app/mod.rs` réduit... et surtout pas les deux en même temps).
 
-- [ ] **T4.0 — Inventaire préalable** : lister les breaking changes des
-      changelogs egui/eframe entre 0.29 et la cible, et vérifier la
-      disponibilité des compagnons : `egui-phosphor` compatible,
-      comportement `accesskit`, et surtout le hack `muda`/`winit`
-      (`with_default_menu`, [native_menu.rs](src/native_menu.rs)) qui
-      dépend de la version de winit interne à eframe — c'est le point le
-      plus susceptible de casser silencieusement (menu ⌘ écrasé).
+- [x] **T4.0 — Inventaire préalable** ✅ FAIT : cible identifiée = **0.29 →
+      0.35** (dernière stable, `cargo search`), soit 6 versions mineures
+      d'écart. `egui-phosphor` : 0.7 → 0.12 (compatible, suit les releases
+      egui). `muda` : 0.19 → 0.19.3 (patch seulement, pas de breaking
+      change côté menu natif). `accesskit` : bump à 0.21 (egui 0.33) — à
+      revérifier que `muda`/`winit` épinglé restent compatibles à ce
+      palier. `winit` : eframe embarque en interne 0.30.x tout du long
+      (0.29→0.32 au moins) ; le hack d'épinglage
+      ([Cargo.toml](Cargo.toml), `with_default_menu`) reste donc valide
+      jusqu'à nouvel ordre, mais **à reconfirmer à chaque palier bumpé**
+      plutôt qu'une fois pour tout le saut.
+      Breaking changes majeurs relevés (changelog officiel emilk/egui) :
+      - **0.35** : `App::update` → `App::logic`/`App::ui` (signature
+        `&mut Ui` au lieu de `&Context`) — touche directement
+        [app/mod.rs:3274](src/app/mod.rs:3274) `fn update`, le point d'entrée
+        de toute la boucle de frame. `Context::run` → `Context::run_ui`.
+        Rendu de texte : `ab_glyph` → `skrifa`+`vello_cpu` (risque de
+        régression visuelle fine sur les polices/Phosphor, à valider à l'œil).
+      - **0.34** : `Ui` déref vers `Context` (cosmétique, pas bloquant).
+      - **0.33** : nouveau système de `Plugin` (remplace `on_begin_pass`/
+        `on_end_pass` — grep du dépôt ne montre aucun usage actuel, sans
+        impact a priori). `accesskit` 0.21.
+      - **0.32** : réécriture `Popup`/menu — **les menus se ferment au clic
+        par défaut**, changement de comportement (pas juste API) qui touche
+        directement les `egui::menu_button` de
+        [ui/toolbar.rs](src/ui/toolbar.rs) (menus Fichier/Calque/Sélection/
+        Vue/Aide) — à tester manuellement un par un, en particulier tout
+        sous-menu avec un widget interactif (curseur, case à cocher) qui ne
+        doit pas se fermer sur ce genre de clic.
+      - **0.31** : `Rounding` renommé `CornerRadius` (`f32`→`i8`/`u8`) et
+        `StrokeKind` désormais requis sur `Painter::rect` — grep du dépôt :
+        **aucun usage direct de `egui::Rounding`/`.rounding(`/
+        `Painter::rect(`** trouvé dans `src/`, donc a priori sans impact
+        (l'app passe par les widgets haut niveau, pas l'API bas niveau).
+      - **0.30/0.29** : `id_source`→`id_salt`, `Ui::new(UiBuilder)` — à
+        vérifier au fil de la compilation, pas de grep ciblé fait.
+      Conclusion : la boucle `update()` et les menus `toolbar.rs` sont les
+      deux points chauds réels ; le reste (Rounding, Plugin) semble sans
+      impact sur ce dépôt d'après le grep. Le risque documenté sur le hack
+      winit/menu natif reste le point le plus incertain — non vérifiable
+      sans compiler réellement contre chaque palier.
 - [ ] **T4.1 — Bump sur branche `egui-upgrade`** : monter eframe/egui/
       egui-phosphor/winit d'un bloc, corriger les erreurs de compilation
       module par module (`ui/` d'abord, plus gros consommateur d'API).
