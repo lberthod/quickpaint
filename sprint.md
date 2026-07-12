@@ -116,22 +116,20 @@ Règles du jeu (identiques aux sprints 12.5/13.8) :
 Candidats à extraire, du plus autonome au plus imbriqué (à confirmer en
 lisant les blocs — l'ordre peut changer) :
 
-- [ ] **T3.1 — `app/selection.rs`** : `select_in_rect`/`select_in_ellipse`/
-      `select_in_lasso`/`magic_wand` ([app/mod.rs:991-1037](src/app/mod.rs:991)),
-      opérations d'ensemble (invert, combine), pont vers `selection_mask`
-      ([app/mod.rs:1146](src/app/mod.rs:1146)) et les tests associés
-      (feather/dilate/contract déjà testés). Probablement le plus gros gain.
-- [ ] **T3.2 — `app/layers_ops.rs`** : opérations sur calques et groupes
+- [x] **T3.1 — `app/selection.rs`** ✅ FAIT : `select_in_rect`/`select_in_ellipse`/
+      `select_in_lasso`/`magic_wand`, opérations d'ensemble (invert, combine),
+      pont vers `selection_mask` et les tests associés (feather/dilate/contract).
+- [x] **T3.2 — `app/layers_ops.rs`** ✅ FAIT : opérations sur calques et groupes
       (création, duplication, fusion, verrouillage granulaire de v0.19,
-      nommage [app/mod.rs:3208](src/app/mod.rs:3208)) — distinct de
-      [ui/layers.rs](src/ui/layers.rs) qui reste la vue.
-- [ ] **T3.3 — `app/io.rs`** : ouverture/sauvegarde de projet, import
-      (PSD/SVG/image, [app/mod.rs:1960](src/app/mod.rs:1960)), dialogues
-      `rfd`, chemins récents.
-- [ ] **T3.4 — `app/shortcuts.rs`** : dispatch clavier / mapping des
+      alignement/répartition) — distinct de [ui/layers.rs](src/ui/layers.rs)
+      qui reste la vue.
+- [x] **T3.3 — `app/io.rs`** ✅ FAIT : ouverture/sauvegarde de projet, import
+      (PSD/SVG/image), dialogues `rfd`, chemins récents.
+- [x] **T3.4 — `app/shortcuts.rs`** ✅ FAIT : dispatch clavier / mapping des
       raccourcis vers les actions (le tableau de bindings vit déjà dans
-      [keybindings.rs](src/keybindings.rs) ; ici il s'agit du gros `match`
-      de traitement des événements).
+      [keybindings.rs](src/keybindings.rs) ; ici il s'agissait du gros `match`
+      de traitement des événements), menu Édition natif macOS, glisser-déposer
+      de fichiers.
 - [x] **T3.5 — passe `unwrap`** ✅ FAIT : les 3 `unwrap()` non-test restants
       dans le périmètre `app/` (T3.1-T3.4) traités — `picked.sort_by(...z.
       partial_cmp(...).unwrap())` → `total_cmp` (évite un panic si `z`
@@ -144,13 +142,21 @@ lisant les blocs — l'ordre peut changer) :
       `layers_ops.rs`, `io.rs`, `shortcuts.rs`, `animation.rs`,
       `pen_edit.rs`, `transform.rs` (les deux `expect` restants dans
       `animation.rs` sont dans un test de round-trip sérialisation).
+- [x] **T3.6 — `app/raster_paint.rs`** ✅ FAIT (au-delà du plan initial,
+      nécessaire pour continuer à faire baisser `app/mod.rs`) : pinceau/gomme
+      pixel, aérographe, tampon de clonage/correcteur, retouche locale
+      (densité +/-, éponge, flou, netteté) et estompe — partagent l'undo par
+      tuile (`touch_raster_tiles`/`commit_raster_stroke`), seule la fonction
+      de peinture pixel appelée diffère par outil. ~420 lignes déplacées.
 - [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes (actuellement
-      ~6 050 lignes après T3.1-T3.5 ; `selection.rs`/`layers_ops.rs`/
-      `io.rs`/`shortcuts.rs` extraits, restent `animation.rs`/`pen_edit.rs`/
-      `transform.rs` déjà extraits avant ce sprint — candidats suivants pour
-      repasser sous la barre : découper le reste du fichier restant, par ex.
-      le rendu canevas/UI panels encore en place), `cargo test` vert à
-      chaque commit, aucun diff de comportement.
+      ~5 630 lignes après T3.1-T3.6 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
+      `shortcuts.rs`/`raster_paint.rs` extraits, plus `animation.rs`/
+      `pen_edit.rs`/`transform.rs` déjà extraits avant ce sprint — candidat
+      suivant pour continuer à repasser sous la barre : le rendu canevas/
+      overlays (`paint_grid`/`paint_rulers`/`paint_selection`/`paint_crop`/…,
+      ~700 lignes) et/ou le pipeline export (`render_for_export`…
+      `export_pdf_vector`, ~280 lignes)), `cargo test` vert à chaque commit,
+      aucun diff de comportement.
 
 ---
 
