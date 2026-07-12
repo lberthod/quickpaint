@@ -148,15 +148,24 @@ lisant les blocs — l'ordre peut changer) :
       (densité +/-, éponge, flou, netteté) et estompe — partagent l'undo par
       tuile (`touch_raster_tiles`/`commit_raster_stroke`), seule la fonction
       de peinture pixel appelée diffère par outil. ~420 lignes déplacées.
+- [x] **T3.7 — `app/export_ops.rs`** ✅ FAIT (au-delà du plan initial) : pipeline
+      d'export (`render_for_export` → encodage → écriture disque), aperçu/
+      poids estimé avant export, export par lots, profils d'export nommés,
+      export SVG/PDF vectoriels — un seul rendu natif par export, tout le
+      reste en dérive. Laissé de côté volontairement : `layer_thumbnail`/
+      `selection_overlay_texture` (restés dans `app/mod.rs`, ce sont des
+      caches de texture d'aperçu UI, pas le pipeline d'export à proprement
+      parler). ~250 lignes déplacées.
 - [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes (actuellement
-      ~5 630 lignes après T3.1-T3.6 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
-      `shortcuts.rs`/`raster_paint.rs` extraits, plus `animation.rs`/
-      `pen_edit.rs`/`transform.rs` déjà extraits avant ce sprint — candidat
-      suivant pour continuer à repasser sous la barre : le rendu canevas/
-      overlays (`paint_grid`/`paint_rulers`/`paint_selection`/`paint_crop`/…,
-      ~700 lignes) et/ou le pipeline export (`render_for_export`…
-      `export_pdf_vector`, ~280 lignes)), `cargo test` vert à chaque commit,
-      aucun diff de comportement.
+      ~5 400 lignes après T3.1-T3.7 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
+      `shortcuts.rs`/`raster_paint.rs`/`export_ops.rs` extraits, plus
+      `animation.rs`/`pen_edit.rs`/`transform.rs` déjà extraits avant ce
+      sprint — candidat suivant pour continuer à repasser sous la barre : le
+      rendu canevas/overlays (`paint_grid`/`paint_rulers`/`paint_selection`/
+      `paint_crop`/…, ~700 lignes) et le bloc `handle_*`/`paint_*` des outils
+      raster restants (bucket fill, détourage, geste de dessin générique,
+      ~600 lignes)), `cargo test` vert à chaque commit, aucun diff de
+      comportement.
 
 ---
 
