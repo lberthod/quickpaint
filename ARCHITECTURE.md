@@ -11,11 +11,13 @@
 ┌────────────────────────────────────────────────────────────┐
 │ ui/          toolbar, layers, footer            (egui)     │
 ├────────────────────────────────────────────────────────────┤
-│ app/         état global (mod.rs), machine à états des     │
-│              outils, sélection, dialogues ; sous-modules    │
-│              extraits : pen_edit.rs (édition de nœuds       │
-│              Bézier après coup), transform.rs (échelle/     │
-│              rotation glissée de la sélection)              │
+│ app/         état global (mod.rs) + boucle de frame ;       │
+│              sous-modules extraits par domaine (sprint.md   │
+│              T3) : selection.rs, layers_ops.rs, io.rs,      │
+│              shortcuts.rs, raster_paint.rs, export_ops.rs,  │
+│              canvas_overlay.rs, canvas_input.rs,            │
+│              bucket_cutout.rs, pen_edit.rs, transform.rs,   │
+│              animation.rs                                   │
 ├────────────────────────────────────────────────────────────┤
 │ tools/       brush, eraser, pen, shape, bucket, boolean,   │
 │              guides, filter, assets, eyedropper, hit       │
