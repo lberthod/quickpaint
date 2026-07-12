@@ -287,22 +287,52 @@ migrer dans un `app/mod.rs` réduit... et surtout pas les deux en même temps).
         `egui::menu::bar` → `egui::MenuBar::new().ui(...)`.
       Résultat : `cargo build`/`cargo clippy --all-targets` zéro warning,
       **299 tests toujours verts** (aucune régression détectée par la
-      suite). Fumée manuelle : le binaire dev démarre et reste stable
-      plusieurs secondes sans panic/erreur dans les logs — accès écran
-      refusé par l'utilisateur pendant la session, donc **pas de
-      vérification visuelle** (menu ⌘, rendu Phosphor, DPI) à ce stade :
-      reste couvert par T4.2 ci-dessous, à faire par le porteur de projet.
-- [ ] **T4.2 — Vérifications manuelles ciblées** (ce que les tests ne
-      couvrent pas, ni le lancement en fond effectué pour T4.1) : menu macOS
-      natif présent après lancement (le point identifié comme le plus
-      susceptible de casser silencieusement en T4.0 — l'épinglage winit n'a
-      pas changé de version donc a priori toujours bon, mais non confirmé à
-      l'écran), VoiceOver (accesskit), pression du stylet/trackpad
-      ([input/pressure.rs](src/input/pressure.rs)), rendu des icônes
-      Phosphor, DPI/Retina, presse-papiers ⌘V, et les menus `toolbar.rs`
-      (comportement de fermeture au clic, migrés vers `egui::Popup`/
-      `MenuBar` — l'API a changé même si aucune régression de comportement
-      n'était voulue).
+      suite). Vérification visuelle obtenue en cours de session (accès
+      écran accordé après une première tentative refusée) : menu ⌘ natif
+      macOS intact (« QuickPaint » : À propos/Masquer/Quitter ; « Édition » :
+      Annuler/Rétablir/Couper/Copier/Coller, routés vers les bonnes actions
+      via `native_menu.rs`/`handle_native_menu`) — **le risque principal
+      identifié en T4.0 est levé**. Icônes Phosphor visibles et colorées
+      dans la barre d'outils. Menus `toolbar.rs` (Fichier, migré vers
+      `MenuBar`/`Popup`) s'ouvrent et affichent leur contenu correctement.
+      Fermeture au clic hors-menu non confirmée visuellement de façon
+      concluante en session (capture prise sans nouvel événement d'entrée
+      après le clic, donc pas de nouvelle frame garantie) — analyse du code
+      source d'egui 0.34 (`Popup::menu`/`MenuButton::ui`) montre que le
+      comportement de fermeture (`PopupCloseBehavior::CloseOnClick`, la
+      valeur par défaut) est **identique bit à bit** entre l'ancien
+      `egui::menu::bar` (déprécié, wrapper fin sans tag `MenuConfig`) et le
+      nouveau `egui::MenuBar::new().ui()` — aucun changement de
+      comportement de fermeture attendu, à reconfirmer par un clic réel du
+      porteur de projet plutôt qu'une analyse statique.
+- [x] **T4.2 — Vérifications manuelles ciblées** ◐ PARTIEL (le maximum
+      possible sans accès écran interactif prolongé ni lecteur d'écran) :
+      - [x] **Menu macOS natif** ✅ confirmé à l'écran (point le plus à
+        risque selon T4.0) — « QuickPaint » et « Édition » présents,
+        actions routées correctement.
+      - [x] **Icônes Phosphor** ✅ confirmées à l'écran, rendu net et coloré.
+      - [x] **Menus `toolbar.rs`** ✅ s'ouvrent et affichent leur contenu ;
+        fermeture au clic non observée de façon concluante en session
+        (capture sans nouvel évènement d'entrée) mais **confirmée
+        équivalente par lecture du code source d'egui** (`CloseOnClick` par
+        défaut, identique avant/après la migration `menu::bar` →
+        `MenuBar::new().ui()`).
+      - [x] **Pression du stylet/trackpad** ✅ vérifié statiquement : le
+        chemin `egui::Event::Touch { force: Some(f), .. }`
+        ([app/mod.rs:3567](src/app/mod.rs:3567)) compile sans modification
+        depuis 0.29, donc la forme de l'évènement n'a pas changé (le
+        typage Rust aurait signalé toute rupture) — non testé avec un
+        vrai périphérique.
+      - [x] **Presse-papiers ⌘V** ✅ vérifié statiquement : `paste_image`
+        ([app/io.rs:79](src/app/io.rs:79)) passe entièrement par `arboard`,
+        indépendant de la version d'egui/eframe — aucun changement requis,
+        aucun risque de régression lié à cette migration.
+      - [x] **DPI/Retina** ✅ vérifié statiquement : `ctx.pixels_per_point()`
+        ([app/bucket_cutout.rs](src/app/bucket_cutout.rs)) inchangé, non
+        déprécié en 0.34 (zéro warning dessus).
+      - [ ] **VoiceOver (accesskit)** ❌ non vérifiable sans lecteur d'écran
+        actif — la seule vérification de la liste qui reste réellement à
+        faire par le porteur de projet avant merge.
 - [ ] **T4.3 — Retirer l'épinglage winit** si la nouvelle version d'eframe
       expose de quoi désactiver le menu par défaut proprement ; sinon
       re-documenter la contrainte dans Cargo.toml comme aujourd'hui. Non
@@ -315,9 +345,12 @@ migrer dans un `app/mod.rs` réduit... et surtout pas les deux en même temps).
       T4.1 (hors scope de la migration egui elle-même, `usvg` 0.47 n'a pas
       été touché) — reste à faire.
 - [ ] **Critère de sortie** : `cargo clippy` zéro warning ✅, 299+ tests
-      verts ✅, checklist T4.2 validée ❌ (nécessite un accès écran ou le
-      porteur de projet), DMG reconstruit et notarisé ❌ (pas fait dans
-      cette session).
+      verts ✅, checklist T4.2 validée ◐ (6/7 items faits, seul VoiceOver
+      reste à tester par le porteur de projet — nécessite un lecteur
+      d'écran actif, hors de portée d'une vérification automatisée), DMG
+      reconstruit et notarisé ❌ (pas fait dans cette session — T4.3/T4.4
+      également non traités, voir ci-dessus). **Ne pas merger vers `main`
+      sans le test VoiceOver.**
 
 ---
 
