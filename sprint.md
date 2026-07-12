@@ -170,15 +170,23 @@ lisant les blocs — l'ordre peut changer) :
       `app/mod.rs`) depuis le point cliqué, seul moyen de raisonner sur les
       pixels réellement vus (fusion de calques comprise) sous le clic.
       ~220 lignes déplacées.
+- [x] **T3.10 — `app/canvas_input.rs`** ✅ FAIT (au-delà du plan initial) :
+      `handle_canvas` — pan/zoom, verrouillage de calque, puis le `match` par
+      outil actif qui route vers les gestes déjà implémentés dans
+      `selection`/`transform`/`pen_edit`/`raster_paint`/`bucket_cutout` —
+      aucune nouvelle logique, juste le point d'entrée déplacé. ~340 lignes
+      déplacées.
 - [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes (actuellement
-      ~4 870 lignes après T3.1-T3.9 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
+      ~4 530 lignes après T3.1-T3.10 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
       `shortcuts.rs`/`raster_paint.rs`/`export_ops.rs`/`canvas_overlay.rs`/
-      `bucket_cutout.rs` extraits, plus `animation.rs`/`pen_edit.rs`/
-      `transform.rs` déjà extraits avant ce sprint — candidat suivant pour
-      continuer à repasser sous la barre : `handle_canvas` (dispatch d'entrée
-      canevas, ~340 lignes, plus risqué à isoler car il route vers des
-      méthodes réparties dans presque tous les sous-modules désormais)),
-      `cargo test` vert à chaque commit, aucun diff de comportement.
+      `bucket_cutout.rs`/`canvas_input.rs` extraits, plus `animation.rs`/
+      `pen_edit.rs`/`transform.rs` déjà extraits avant ce sprint — le reste
+      est majoritairement la définition de `PaintApp` (champs, `Default`,
+      `update()`/`on_exit()`, dialogues UI ponctuels, constructeurs de
+      commande) qui n'a plus de domaine autonome évident à isoler sans
+      fragmenter artificiellement l'état central de l'app ; prochaine passe
+      à évaluer au cas par cas plutôt que planifiée d'avance), `cargo test`
+      vert à chaque commit, aucun diff de comportement.
 
 ---
 
