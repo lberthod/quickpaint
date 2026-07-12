@@ -169,7 +169,7 @@ impl PaintApp {
         let p0 = view.doc_to_screen((min.0 + d.0, min.1 + d.1));
         let p1 = view.doc_to_screen((max.0 + d.0, max.1 + d.1));
         let r = Rect::from_two_pos(p0, p1).expand(2.0);
-        painter.rect_stroke(r, 2.0, egui::Stroke::new(1.5, blue));
+        painter.rect_stroke(r, 2.0, egui::Stroke::new(1.5, blue), egui::StrokeKind::Middle);
 
         // Poignées d'échelle (coins) + rotation (au-dessus) — toute sélection.
         if !moving {
@@ -181,7 +181,7 @@ impl PaintApp {
                 for c in corners {
                     let hr = Rect::from_center_size(c, Vec2::splat(9.0));
                     painter.rect_filled(hr, 1.0, Color32::WHITE);
-                    painter.rect_stroke(hr, 1.0, egui::Stroke::new(1.5, blue));
+                    painter.rect_stroke(hr, 1.0, egui::Stroke::new(1.5, blue), egui::StrokeKind::Middle);
                 }
             }
             // Poignées de cisaillement (Sprint M.2) : losanges, pour rester
@@ -208,7 +208,7 @@ impl PaintApp {
         if let Some((a, b)) = self.crop_rect {
             if self.crop_angle.abs() < 1e-4 {
                 let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, orange));
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, orange), egui::StrokeKind::Middle);
             } else {
                 // Redressement d'horizon (Sprint 2.3) : montre la région de
                 // l'image source (encore affichée droite) qui finira droite
@@ -228,7 +228,7 @@ impl PaintApp {
         } else if let Some((_, corners)) = self.selected_image_corners() {
             // Avant le glissé : souligne l'image à recadrer.
             let r = Rect::from_two_pos(view.doc_to_screen(corners[0]), view.doc_to_screen(corners[2]));
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, orange));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, orange), egui::StrokeKind::Middle);
         }
     }
 
@@ -245,10 +245,10 @@ impl PaintApp {
         };
         if let Some((a, b)) = self.retouch_rect {
             let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, color));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, color), egui::StrokeKind::Middle);
         } else if let Some((_, corners)) = self.selected_image_corners() {
             let r = Rect::from_two_pos(view.doc_to_screen(corners[0]), view.doc_to_screen(corners[2]));
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, color));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, color), egui::StrokeKind::Middle);
         }
     }
 
@@ -267,7 +267,7 @@ impl PaintApp {
                 )));
             } else {
                 painter.rect_filled(r, 0.0, fill);
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, blue));
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, blue), egui::StrokeKind::Middle);
             }
         } else if self.lasso.len() >= 2 {
             let pts: Vec<Pos2> = self.lasso.iter().map(|&d| view.doc_to_screen(d)).collect();

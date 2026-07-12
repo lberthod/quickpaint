@@ -11,11 +11,17 @@ license = "MIT"
 [dependencies]
 # "accesskit" : arbre d'accessibilité natif (VoiceOver) construit automatiquement
 # par egui à partir des widgets (boutons, libellés, curseurs) — UIX_ANALYSE.md U2.
-eframe = { version = "0.29", features = ["accesskit"] }
-egui = { version = "0.29", features = ["accesskit"] }
+# "glow" explicite : depuis eframe 0.30+, "wgpu" est devenu le backend par
+# défaut (bascule silencieuse de rendu, cf. sprint.md Sprint N — décision
+# d'architecture délibérément hors scope de cette migration). `glow` reste
+# le backend historique de ce projet ; default-features désactivées pour ne
+# PAS tirer "wgpu" en même temps (sinon `Renderer::default()` retomberait
+# quand même sur Wgpu, cf. eframe::epi::Renderer).
+eframe = { version = "0.34", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "web_screen_reader", "x11"] }
+egui = { version = "0.34" }
 # Icônes vectorielles (barre d'outils, calques, menus) — police Phosphor
 # embarquée, rendu net à toute taille, sans dépendre des emojis du système.
-egui-phosphor = { version = "0.7", features = ["fill"] }
+egui-phosphor = { version = "0.12", features = ["fill"] }
 # Encodage images pour l'export (PNG/JPG/WebP/GIF). default-features off = build léger.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff", "gif"] }
 # Sauvegarde / ouverture de projet vectoriel (.json, étape 7).
@@ -39,8 +45,9 @@ psd = "0.3.5"
 muda = "0.19"
 # Désactive le menu ⌘ par défaut de winit (`with_default_menu`), qui sinon
 # écrase silencieusement le nôtre après `PaintApp::new` — même version que
-# celle utilisée en interne par `eframe` 0.29 (winit 0.30), pour rester sur
-# le même type d'`EventLoopBuilder`.
+# celle utilisée en interne par `eframe` 0.34 (winit 0.30), pour rester sur
+# le même type d'`EventLoopBuilder`. Reconfirmé après migration egui 0.29→0.34
+# (sprint.md T4) : eframe 0.34 embarque toujours winit 0.30.x en interne.
 winit = { version = "0.30", default-features = false }
 usvg = "0.47.0"
 

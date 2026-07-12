@@ -182,7 +182,7 @@ impl PaintApp {
         for a in &path.anchors {
             let c = view.doc_to_screen(a.pos);
             painter.rect_filled(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, orange);
-            painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, egui::Stroke::new(1.0, Color32::WHITE));
+            painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, egui::Stroke::new(1.0, Color32::WHITE), egui::StrokeKind::Middle);
             for h in [a.h_in, a.h_out] {
                 if h != a.pos {
                     let hp = view.doc_to_screen(h);

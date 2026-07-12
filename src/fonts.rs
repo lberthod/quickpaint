@@ -56,7 +56,7 @@ impl FontManager {
         let Some(bytes) = self.db.with_face_data(id, |data, _face_index| data.to_vec()) else {
             return false;
         };
-        self.defs.font_data.insert(family.to_string(), egui::FontData::from_owned(bytes));
+        self.defs.font_data.insert(family.to_string(), egui::FontData::from_owned(bytes).into());
         self.defs
             .families
             .entry(egui::FontFamily::Name(family.into()))

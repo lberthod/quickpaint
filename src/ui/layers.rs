@@ -248,13 +248,11 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                         .map(|c| egui::Color32::from_rgb(c[0], c[1], c[2]))
                         .unwrap_or(egui::Color32::TRANSPARENT);
                     ui.painter().rect_filled(swatch_rect, 3.0, swatch_color);
-                    ui.painter().rect_stroke(swatch_rect, 3.0, ui.visuals().widgets.noninteractive.bg_stroke);
+                    ui.painter().rect_stroke(swatch_rect, 3.0, ui.visuals().widgets.noninteractive.bg_stroke, egui::StrokeKind::Middle);
                     let swatch_resp = swatch_resp.on_hover_text(t("Code couleur du calque", "Layer color tag"));
-                    let popup_id = ui.make_persistent_id("layer_color_tag").with(layer_id);
-                    if swatch_resp.clicked() {
-                        ui.memory_mut(|m| m.toggle_popup(popup_id));
-                    }
-                    egui::popup_below_widget(ui, popup_id, &swatch_resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                    egui::Popup::from_toggle_button_response(&swatch_resp)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+                        .show(|ui| {
                         ui.horizontal(|ui| {
                             const PALETTE: [[u8; 3]; 8] = [
                                 [237, 85, 101],  // rouge

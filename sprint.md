@@ -241,20 +241,83 @@ migrer dans un `app/mod.rs` réduit... et surtout pas les deux en même temps).
       impact sur ce dépôt d'après le grep. Le risque documenté sur le hack
       winit/menu natif reste le point le plus incertain — non vérifiable
       sans compiler réellement contre chaque palier.
-- [ ] **T4.1 — Bump sur branche `egui-upgrade`** : monter eframe/egui/
-      egui-phosphor/winit d'un bloc, corriger les erreurs de compilation
-      module par module (`ui/` d'abord, plus gros consommateur d'API).
+- [x] **T4.1 — Bump sur branche `egui-upgrade`** ✅ FAIT : cible finale
+      **0.29 → 0.34** (pas 0.35 — `egui-phosphor` 0.12, la dernière version,
+      ne dépasse pas `^0.34` ; y aller aurait dupliqué egui dans l'arbre de
+      dépendances et cassé le typage des icônes). `winit` reste épinglé
+      0.30 (toujours la version interne d'eframe 0.34, revérifié dans
+      `Cargo.lock`). **`glow` forcé explicitement** (`default-features =
+      false` + liste exacte de features) : depuis eframe 0.30+, `wgpu` est
+      devenu le backend par défaut — sans cette précaution, la migration
+      aurait basculé silencieusement le rendu UI vers `wgpu`, exactement la
+      décision d'architecture que Sprint N (plus bas) réserve à une
+      confirmation explicite du porteur de projet. Corrections (~15 sites,
+      tous compile-only, aucun changement de comportement voulu) :
+      - `App::update(&Context)` → `App::ui(&mut Ui, ...)` : `ctx` récupéré
+        via `top_ui.ctx().clone()` (Context = `Arc`, clone bon marché) pour
+        garder `top_ui` empruntable mutablement — les panels (`TopBottomPanel`/
+        `SidePanel` dépréciés) migrés vers `Panel::top/right/bottom` +
+        `show_inside(top_ui, ...)` plutôt que l'ancien `.show(ctx, ...)`.
+      - `epaint::FontImage` supprimé → `egui::ColorImage` (le canal alpha
+        remplace l'ancienne couverture `f32` brute — `.a() as f32 / 255.0`,
+        [render/compositor.rs](src/render/compositor.rs)) ; `ColorImage`
+        construit via `::new(size, pixels)` plutôt que le literal de champs
+        (nouveau champ `source_size` sinon manquant).
+      - `ctx.fonts(|f| ...)` : closures mutantes (`layout_no_wrap`/
+        `layout_job`) basculées vers `ctx.fonts_mut(...)`
+        ([render/text.rs](src/render/text.rs)) — `fonts()` seul ne donne
+        plus qu'un accès immuable.
+      - `Painter::rect_stroke` exige un 4ᵉ argument `StrokeKind` (11 sites) :
+        `StrokeKind::Middle` partout (reproduit exactement l'ancien rendu
+        centré sur le bord, seul comportement qu'avait cette API avant).
+      - `ViewportCommand::Screenshot` prend maintenant un `UserData`
+        (`egui::UserData::default()`, sans effet ici — le handler ignore déjà
+        ce champ via `Event::Screenshot { image, .. }`).
+      - `FontData::from_owned(...)` retourne désormais `FontData` et pas
+        `Arc<FontData>` : `.into()` ajouté aux deux sites d'insertion
+        ([app/mod.rs](src/app/mod.rs), [fonts.rs](src/fonts.rs)).
+      - `Margin::symmetric` prend des `i8` (plus des `f32`).
+      - Nettoyage des dépréciations pures (zéro impact fonctionnel,
+        mécanique) pour respecter le critère de sortie « zéro warning » :
+        `close_menu()` → `close()` (73 sites), `wants_keyboard_input()` →
+        `egui_wants_keyboard_input()`, `ctx.style()` → `ctx.global_style()`,
+        `popup_below_widget`/`Memory::toggle_popup` → `egui::Popup::
+        from_toggle_button_response(...).close_behavior(...).show(...)`
+        (2 sites, [ui/layers.rs](src/ui/layers.rs)/[ui/toolbar.rs](src/ui/toolbar.rs)),
+        `egui::menu::bar` → `egui::MenuBar::new().ui(...)`.
+      Résultat : `cargo build`/`cargo clippy --all-targets` zéro warning,
+      **299 tests toujours verts** (aucune régression détectée par la
+      suite). Fumée manuelle : le binaire dev démarre et reste stable
+      plusieurs secondes sans panic/erreur dans les logs — accès écran
+      refusé par l'utilisateur pendant la session, donc **pas de
+      vérification visuelle** (menu ⌘, rendu Phosphor, DPI) à ce stade :
+      reste couvert par T4.2 ci-dessous, à faire par le porteur de projet.
 - [ ] **T4.2 — Vérifications manuelles ciblées** (ce que les tests ne
-      couvrent pas) : menu macOS natif présent après lancement, VoiceOver
-      (accesskit), pression du stylet/trackpad ([input/pressure.rs](src/input/pressure.rs)),
-      rendu des icônes Phosphor, DPI/Retina, presse-papiers ⌘V.
+      couvrent pas, ni le lancement en fond effectué pour T4.1) : menu macOS
+      natif présent après lancement (le point identifié comme le plus
+      susceptible de casser silencieusement en T4.0 — l'épinglage winit n'a
+      pas changé de version donc a priori toujours bon, mais non confirmé à
+      l'écran), VoiceOver (accesskit), pression du stylet/trackpad
+      ([input/pressure.rs](src/input/pressure.rs)), rendu des icônes
+      Phosphor, DPI/Retina, presse-papiers ⌘V, et les menus `toolbar.rs`
+      (comportement de fermeture au clic, migrés vers `egui::Popup`/
+      `MenuBar` — l'API a changé même si aucune régression de comportement
+      n'était voulue).
 - [ ] **T4.3 — Retirer l'épinglage winit** si la nouvelle version d'eframe
       expose de quoi désactiver le menu par défaut proprement ; sinon
-      re-documenter la contrainte dans Cargo.toml comme aujourd'hui.
+      re-documenter la contrainte dans Cargo.toml comme aujourd'hui. Non
+      revisité en T4.1 (winit reste à la même version 0.30, donc le hack
+      était déjà correct sans action) — à réévaluer si on rebase un jour sur
+      egui 0.35 (`egui-phosphor` le permettant), où `eframe` pourrait
+      embarquer un winit différent.
 - [ ] **T4.4 — Dans la foulée** (même branche) : bump `usvg`/`fontdb` vers
-      des versions à `ttf-parser` maintenu (reliquat de T2).
-- [ ] **Critère de sortie** : `cargo clippy` zéro warning, 299+ tests
-      verts, checklist T4.2 validée, DMG reconstruit et notarisé.
+      des versions à `ttf-parser` maintenu (reliquat de T2). Non fait en
+      T4.1 (hors scope de la migration egui elle-même, `usvg` 0.47 n'a pas
+      été touché) — reste à faire.
+- [ ] **Critère de sortie** : `cargo clippy` zéro warning ✅, 299+ tests
+      verts ✅, checklist T4.2 validée ❌ (nécessite un accès écran ou le
+      porteur de projet), DMG reconstruit et notarisé ❌ (pas fait dans
+      cette session).
 
 ---
 

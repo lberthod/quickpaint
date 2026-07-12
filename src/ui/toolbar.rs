@@ -1339,19 +1339,19 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
 /// plus du texte, sans dépendre des emojis du système.
 fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     use egui_phosphor::regular as ic;
-    egui::menu::bar(ui, |ui| {
+    egui::MenuBar::new().ui(ui, |ui| {
         ui.menu_button(t("Fichier", "File"), |ui| {
             if ui.button(t("Nouveau (⌘N)", "New (⌘N)")).clicked() {
                 app.new_document();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Nouveau depuis un modèle…", "New from template…")).clicked() {
                 app.show_template_gallery = true;
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Ouvrir… (⌘O)", "Open… (⌘O)")).clicked() {
                 app.open_project();
-                ui.close_menu();
+                ui.close();
             }
             // Fichiers récents (UX-4.3) : avant, rouvrir le projet d'hier
             // repartait toujours d'un dialogue de fichiers vide (constat C10,
@@ -1367,19 +1367,19 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                             .unwrap_or_else(|| path.clone());
                         if ui.button(name).on_hover_text(path.as_str()).clicked() {
                             app.open_recent_project(path);
-                            ui.close_menu();
+                            ui.close();
                         }
                     }
                 });
             });
             if ui.button(t("Enregistrer le projet (⌘S)", "Save project (⌘S)")).clicked() {
                 app.save_project();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui.button(t("Importer une image…", "Import image…")).clicked() {
                 app.import_image();
-                ui.close_menu();
+                ui.close();
             }
             if ui
                 .button(t("Importer un PSD…", "Import PSD…"))
@@ -1390,7 +1390,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 .clicked()
             {
                 app.import_psd();
-                ui.close_menu();
+                ui.close();
             }
             if ui
                 .button(t("Importer un SVG…", "Import SVG…"))
@@ -1401,16 +1401,16 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 .clicked()
             {
                 app.import_svg();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Coller une image (⌘V)", "Paste image (⌘V)")).clicked() {
                 app.paste_image();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui.button(t("Exporter en PNG (⌘E)", "Export as PNG (⌘E)")).clicked() {
                 app.request_export(ctx, ExportFormat::Png);
-                ui.close_menu();
+                ui.close();
             }
             ui.menu_button(t("Exporter sous…", "Export as…"), |ui| {
                 ui.horizontal(|ui| {
@@ -1426,13 +1426,13 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                         .clicked()
                     {
                         app.open_export_dialog(ctx, fmt);
-                        ui.close_menu();
+                        ui.close();
                     }
                 }
                 ui.separator();
                 if ui.button(t("SVG (vectoriel)", "SVG (vector)")).clicked() {
                     app.export_svg();
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui
                     .button(t("PDF (vectoriel)", "PDF (vector)"))
@@ -1443,12 +1443,12 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     .clicked()
                 {
                     app.export_pdf_vector();
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             if ui.button(t("Exporter en plusieurs tailles…", "Export multiple sizes…")).clicked() {
                 app.show_batch_export = true;
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui
@@ -1460,64 +1460,64 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 .clicked()
             {
                 app.show_animation_panel = true;
-                ui.close_menu();
+                ui.close();
             }
         });
 
         ui.menu_button(t("Édition", "Edit"), |ui| {
             if ui.add_enabled(app.history.can_undo(), egui::Button::new(t("↶ Annuler (⌘Z)", "↶ Undo (⌘Z)"))).clicked() {
                 app.undo();
-                ui.close_menu();
+                ui.close();
             }
             if ui
                 .add_enabled(app.history.can_redo(), egui::Button::new(t("↷ Rétablir (⌘⇧Z)", "↷ Redo (⌘⇧Z)")))
                 .clicked()
             {
                 app.redo();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             let has_sel = !app.selection.is_empty();
             if ui.add_enabled(has_sel, egui::Button::new(t("Copier (⌘C)", "Copy (⌘C)"))).clicked() {
                 app.copy_selection();
-                ui.close_menu();
+                ui.close();
             }
             if ui.add_enabled(has_sel, egui::Button::new(t("Couper (⌘X)", "Cut (⌘X)"))).clicked() {
                 app.cut_selection();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Coller (⌘V)", "Paste (⌘V)")).clicked() {
                 if !app.paste_clipboard() {
                     app.paste_image();
                 }
-                ui.close_menu();
+                ui.close();
             }
             if ui.add_enabled(has_sel, egui::Button::new(t("Dupliquer (⌘D)", "Duplicate (⌘D)"))).clicked() {
                 app.duplicate_selection();
-                ui.close_menu();
+                ui.close();
             }
             if ui.add_enabled(has_sel, egui::Button::new(t("Supprimer (Suppr)", "Delete (Del)"))).clicked() {
                 app.delete_selection();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Inverser la sélection (⌘⇧I)", "Invert selection (⌘⇧I)")).clicked() {
                 app.invert_selection();
-                ui.close_menu();
+                ui.close();
             }
             ui.menu_button(t("Masque de sélection", "Selection mask"), |ui| {
                 let has_mask = app.selection_mask.is_some();
                 ui.add_enabled_ui(has_mask, |ui| {
                     if ui.button(t("Contour progressif…", "Feather…")).clicked() {
                         app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Feather, 4.0));
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button(t("Dilater…", "Dilate…")).clicked() {
                         app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Dilate, 4.0));
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button(t("Contracter…", "Contract…")).clicked() {
                         app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Contract, 4.0));
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
             })
@@ -1532,30 +1532,30 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 .clicked()
             {
                 app.copy_style();
-                ui.close_menu();
+                ui.close();
             }
             if ui
                 .add_enabled(has_sel, egui::Button::new(t("Coller le style (⌥⌘V)", "Paste style (⌥⌘V)")))
                 .clicked()
             {
                 app.paste_style();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             ui.add_enabled_ui(has_sel, |ui| {
                 ui.menu_button(t("Dégradé", "Gradient"), |ui| {
                     if ui.button(t("Linéaire", "Linear")).clicked() {
                         app.apply_gradient(crate::model::GradientKind::Linear);
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button(t("Radial", "Radial")).clicked() {
                         app.apply_gradient(crate::model::GradientKind::Radial);
-                        ui.close_menu();
+                        ui.close();
                     }
                     ui.separator();
                     if ui.button(t("Retirer le dégradé", "Remove gradient")).clicked() {
                         app.remove_gradient();
-                        ui.close_menu();
+                        ui.close();
                     }
                 })
                 .response
@@ -1566,15 +1566,15 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
             if ui.button(t("🎨 Presets de style…", "🎨 Style presets…")).clicked() {
                 app.show_style_presets = true;
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("✨ Bibliothèque d'éléments…", "✨ Element library…")).clicked() {
                 app.show_asset_library = true;
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("🖌 Bibliothèque de brosses…", "🖌 Brush library…")).clicked() {
                 app.show_brush_library = true;
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             let two_filled_shapes = app.selection.len() == 2
@@ -1589,15 +1589,15 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     use crate::tools::boolean::BooleanKind;
                     if ui.button(BooleanKind::Union.label()).clicked() {
                         app.boolean_op(BooleanKind::Union);
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button(BooleanKind::Subtract.label()).clicked() {
                         app.boolean_op(BooleanKind::Subtract);
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button(BooleanKind::Intersect.label()).clicked() {
                         app.boolean_op(BooleanKind::Intersect);
-                        ui.close_menu();
+                        ui.close();
                     }
                 })
                 .response
@@ -1611,19 +1611,19 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 use crate::app::ZMove;
                 if ui.button(t("Premier plan (⌘⇧])", "Bring to front (⌘⇧])")).clicked() {
                     app.reorder(ZMove::Front);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button(t("Avancer (⌘])", "Bring forward (⌘])")).clicked() {
                     app.reorder(ZMove::Forward);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button(t("Reculer (⌘[)", "Send backward (⌘[)")).clicked() {
                     app.reorder(ZMove::Backward);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button(t("Arrière-plan (⌘⇧[)", "Send to back (⌘⇧[)")).clicked() {
                     app.reorder(ZMove::Back);
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             // Fusionné depuis un ancien menu « Aligner » séparé au niveau
@@ -1645,17 +1645,17 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 for (label, mode) in items {
                     if ui.button(*label).clicked() {
                         app.align(*mode);
-                        ui.close_menu();
+                        ui.close();
                     }
                 }
                 ui.separator();
                 if ui.button(t("Répartir horizontalement", "Distribute horizontally")).clicked() {
                     app.align(AlignMode::DistributeH);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button(t("Répartir verticalement", "Distribute vertically")).clicked() {
                     app.align(AlignMode::DistributeV);
-                    ui.close_menu();
+                    ui.close();
                 }
                 ui.separator();
                 ui.menu_button(t("Calques", "Layers"), |ui| {
@@ -1670,7 +1670,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     for (label, mode) in items {
                         if ui.button(*label).clicked() {
                             app.align_layer_to_document(*mode);
-                            ui.close_menu();
+                            ui.close();
                         }
                     }
                 })
@@ -1682,20 +1682,20 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
             if ui.button(t("Effacer le calque", "Clear layer")).clicked() {
                 app.clear_active_layer();
-                ui.close_menu();
+                ui.close();
             }
         });
 
         ui.menu_button(t("Calque", "Layer"), |ui| {
             if ui.button(t("Ajouter", "Add")).clicked() {
                 app.add_layer();
-                ui.close_menu();
+                ui.close();
             }
             ui.menu_button(t("Ajouter un calque d'ajustement", "Add adjustment layer"), |ui| {
                 for f in crate::tools::filter::Filter::ALL {
                     if ui.button(f.label()).clicked() {
                         app.add_adjustment_layer(crate::tools::filter::Adjustment::Preset(f));
-                        ui.close_menu();
+                        ui.close();
                     }
                 }
                 ui.separator();
@@ -1713,7 +1713,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 ] {
                     if ui.button(label).clicked() {
                         app.add_adjustment_layer(make());
-                        ui.close_menu();
+                        ui.close();
                     }
                 }
             })
@@ -1727,7 +1727,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 let bounds = ((0.0, 0.0), (dw as f32, dh as f32));
                 if ui.button(t("Uni", "Solid")).clicked() {
                     app.add_fill_layer(crate::model::FillKind::Solid([128, 128, 128, 255]));
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button(t("Dégradé linéaire", "Linear gradient")).clicked() {
                     let g = crate::model::Gradient::two_stop(
@@ -1737,7 +1737,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                         [255, 255, 255, 255],
                     );
                     app.add_fill_layer(crate::model::FillKind::Linear(g));
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button(t("Dégradé radial", "Radial gradient")).clicked() {
                     let g = crate::model::Gradient::two_stop(
@@ -1747,21 +1747,21 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                         [0, 0, 0, 255],
                     );
                     app.add_fill_layer(crate::model::FillKind::Radial(g));
-                    ui.close_menu();
+                    ui.close();
                 }
             });
             if ui.button(t("Dupliquer", "Duplicate")).clicked() {
                 app.duplicate_layer();
-                ui.close_menu();
+                ui.close();
             }
             let can = app.doc.active_layer > 0;
             if ui.add_enabled(can, egui::Button::new(t("Fusionner vers le bas", "Merge down"))).clicked() {
                 app.merge_down();
-                ui.close_menu();
+                ui.close();
             }
             if ui.add_enabled(app.doc.layers.len() > 1, egui::Button::new(t("Aplatir", "Flatten"))).clicked() {
                 app.flatten();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui
@@ -1769,26 +1769,26 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 .clicked()
             {
                 app.group_with_below();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Dégrouper ce calque", "Ungroup this layer")).clicked() {
                 app.ungroup_active();
-                ui.close_menu();
+                ui.close();
             }
         });
 
         ui.menu_button(t("Image", "Image"), |ui| {
             if ui.button(t("Redimensionner l'image…", "Resize image…")).clicked() {
                 app.open_resize_dialog(false);
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Taille du canevas…", "Canvas size…")).clicked() {
                 app.open_resize_dialog(true);
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Rogner les bords vides", "Trim empty borders")).clicked() {
                 app.trim_transparent_borders(ctx);
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             ui.menu_button(t("Taille du document", "Document size"), |ui| {
@@ -1797,7 +1797,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                         for (label, w, h) in items {
                             if ui.button(format!("{label} ({w}×{h})")).clicked() {
                                 app.set_canvas_size(w, h);
-                                ui.close_menu();
+                                ui.close();
                             }
                         }
                     });
@@ -1845,7 +1845,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             for f in crate::tools::filter::Filter::ALL {
                 if ui.button(f.label()).clicked() {
                     app.filter_selection(f);
-                    ui.close_menu();
+                    ui.close();
                 }
             }
         });
@@ -1865,7 +1865,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
         ui.menu_button(t("Préférences", "Preferences"), |ui| {
             if ui.button(t("Raccourcis clavier…", "Keyboard shortcuts…")).clicked() {
                 app.show_shortcuts_prefs = true;
-                ui.close_menu();
+                ui.close();
             }
         });
 
@@ -1881,7 +1881,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             ui.separator();
             if ui.button(t("📖 Documentation des outils", "📖 Tool documentation")).clicked() {
                 app.show_help = true;
-                ui.close_menu();
+                ui.close();
             }
         });
 
@@ -2032,10 +2032,6 @@ fn shape_family_selector(ui: &mut Ui, app: &mut PaintApp, group: &[(ActiveTool, 
         icon_col,
     );
 
-    let popup_id = ui.make_persistent_id("shape_family_popup");
-    if resp.clicked() {
-        ui.memory_mut(|m| m.toggle_popup(popup_id));
-    }
     let resp = match shortcut_for_tool(face_tool) {
         Some(action) => resp.on_hover_text(format!(
             "{face_name} — {face_hint}\n{} : {}",
@@ -2045,13 +2041,15 @@ fn shape_family_selector(ui: &mut Ui, app: &mut PaintApp, group: &[(ActiveTool, 
         None => resp.on_hover_text(format!("{face_name} — {face_hint}")),
     };
 
-    egui::popup_below_widget(ui, popup_id, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
-        ui.horizontal(|ui| {
-            for (tool, name, hint) in group {
-                tool_button(ui, app, *tool, name, hint);
-            }
+    egui::Popup::from_toggle_button_response(&resp)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
+            ui.horizontal(|ui| {
+                for (tool, name, hint) in group {
+                    tool_button(ui, app, *tool, name, hint);
+                }
+            });
         });
-    });
 }
 
 /// Famille de la police Phosphor "Fill" (silhouettes pleines, cf. `PaintApp::new`).
@@ -2695,7 +2693,7 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
                 if ui.button(*name).clicked() {
                     app.capture_pressure_strength = *pressure;
                     app.brush.color[3] = *a;
-                    ui.close_menu();
+                    ui.close();
                 }
             }
         })
@@ -2824,7 +2822,7 @@ fn swatch(ui: &mut Ui, rgb: [u8; 3]) -> egui::Response {
     } else {
         egui::Stroke::new(1.0, Color32::from_gray(170))
     };
-    ui.painter().rect_stroke(rect, rounding, stroke);
+    ui.painter().rect_stroke(rect, rounding, stroke, egui::StrokeKind::Middle);
     response
 }
 

@@ -99,7 +99,7 @@ impl PaintApp {
             }
             return;
         }
-        let typing = ctx.wants_keyboard_input();
+        let typing = ctx.egui_wants_keyboard_input();
         // Les actions ouvrant une boîte de dialogue native sont exécutées
         // APRÈS la fermeture du verrou d'entrée (évite tout blocage modal).
         let mut want_export = false;

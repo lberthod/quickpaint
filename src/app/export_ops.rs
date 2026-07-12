@@ -99,7 +99,7 @@ impl PaintApp {
         let (w, h, rgba) = self.render_export_region(ctx, selection_only)?;
         let bytes = crate::export::encode_to_bytes(w, h, &rgba, format, self.jpeg_quality).ok()?;
         let pixels: Vec<Color32> = rgba.chunks_exact(4).map(|c| Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3])).collect();
-        let image = egui::ColorImage { size: [w as usize, h as usize], pixels };
+        let image = egui::ColorImage::new([w as usize, h as usize], pixels);
         let texture = ctx.load_texture("export_preview", image, egui::TextureOptions::LINEAR);
         Some(ExportPreviewDialog { format, selection_only, w, h, bytes, texture })
     }

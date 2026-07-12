@@ -111,7 +111,7 @@ impl Compositor {
                 pixels.push(Color32::from_rgba_premultiplied(data[i], data[i + 1], data[i + 2], data[i + 3]));
             }
         }
-        Some(ColorImage { size: [tw as usize, th as usize], pixels })
+        Some(ColorImage::new([tw as usize, th as usize], pixels))
     }
 
     /// Rendu du document à sa résolution **native** (`doc.size`), pour
@@ -175,7 +175,7 @@ impl Compositor {
         // contient réellement du texte. Récupéré paresseusement, une seule fois
         // par appel, une fois la pré-passe ci-dessus garantie complète (perf :
         // ce chemin s'exécute à chaque frame pendant la peinture raster/pixel).
-        let mut atlas: Option<egui::epaint::FontImage> = None;
+        let mut atlas: Option<egui::ColorImage> = None;
         let mut live = std::collections::HashSet::new();
         // Pixmap du dernier calque NON écrêté : base d'écrêtage des suivants.
         let mut clip_base: Option<Pixmap> = None;
@@ -274,7 +274,7 @@ impl Compositor {
             .chunks_exact(4)
             .map(|c| Color32::from_rgba_premultiplied(c[0], c[1], c[2], c[3]))
             .collect();
-        Some(ColorImage { size: [w as usize, h as usize], pixels })
+        Some(ColorImage::new([w as usize, h as usize], pixels))
     }
 }
 
@@ -784,7 +784,7 @@ fn raster_text(
     ctx: &egui::Context,
     pm: &mut Pixmap,
     t: &crate::model::TextItem,
-    atlas: &egui::epaint::FontImage,
+    atlas: &egui::ColorImage,
 ) {
     if t.text.trim().is_empty() {
         return;
@@ -821,7 +821,7 @@ fn raster_text(
 /// `origin == rotation_center == t.pos`, comme avant ce refactor).
 fn raster_text_glyphs(
     pm: &mut Pixmap,
-    atlas: &egui::epaint::FontImage,
+    atlas: &egui::ColorImage,
     galley: &egui::Galley,
     origin: (f32, f32),
     rotation_center: (f32, f32),
@@ -850,10 +850,14 @@ fn raster_text_glyphs(
                 }
                 let ox = base.0 + g.pos.x + uv.offset.x;
                 let oy = base.1 + g.pos.y + uv.offset.y;
+                // Depuis egui 0.31, `Fonts::image()` renvoie un `ColorImage`
+                // (pixels blancs, alpha = couverture) plutôt que l'ancien
+                // `FontImage` (couverture brute en `f32`) — on relit la
+                // couverture via le canal alpha.
                 let sample = |u: f32, v: f32| {
                     let sx = (mnx + u * (mxx - mnx)).clamp(0.0, (aw - 1) as f32) as usize;
                     let sy = (mny + v * (mxy - mny)).clamp(0.0, (ah - 1) as f32) as usize;
-                    atlas.pixels[sy * aw + sx]
+                    atlas.pixels[sy * aw + sx].a() as f32 / 255.0
                 };
                 if !rotated {
                     for dy in 0..dh.ceil() as i32 {
@@ -1280,7 +1284,7 @@ mod tests {
         let ctx = egui::Context::default();
         // Le glyph atlas d'egui n'existe qu'après un premier passage de
         // frame — un `Context::default()` nu panique sur `ctx.fonts()`.
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         let mut c = Compositor::new();
         let (_, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
         assert!(rgba.chunks_exact(4).any(|px| px != [255, 255, 255, 255]), "le texte devrait marquer des pixels");
@@ -1296,7 +1300,7 @@ mod tests {
             crate::model::FillKind::Solid([255, 0, 0, 255]),
         ));
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         let mut c = Compositor::new();
         let (_, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
         assert!(rgba.chunks_exact(4).all(|px| px == [255, 0, 0, 255]), "le composite devrait être entièrement rouge");
@@ -1308,7 +1312,7 @@ mod tests {
         doc.layers[0].fill = Some(crate::model::FillKind::Solid([0, 255, 0, 255]));
         doc.layers[0].id = 7;
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         let mut c = Compositor::new();
         // Repeuple le cache par calque (`self.layers`) avant de demander une
         // vignette — reflète l'usage réel (le canevas est déjà affiché).
@@ -1335,7 +1339,7 @@ mod tests {
         item.arc = Some(crate::model::text::TextArc { radius: 25.0, start_angle_deg: -90.0, flip: false });
         doc.layers[0].texts.push(item);
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
         let mut c = Compositor::new();
         let (w, _, rgba) = c.render_to_rgba(&ctx, &doc, Color32::WHITE).expect("render");
         // Le centre (40,40) ne doit pas être marqué (le texte est sur le

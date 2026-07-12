@@ -94,7 +94,7 @@ fn sandbox_selftest() {
     // passer par CoreText (sandbox-safe) alors que la lecture du fichier
     // pourrait rouvrir le chemin en direct.
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
     let (mut ok, mut fail) = (0usize, 0usize);
     for name in names.iter().take(10) {
         if mgr.ensure_loaded(&ctx, name) {

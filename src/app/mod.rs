@@ -719,7 +719,7 @@ impl PaintApp {
         // de famille dédié : utilisée pour les icônes d'outils (tuiles
         // colorées, style boîte à outils), plus contrastée que Regular qui
         // reste la famille par défaut pour les menus/texte.
-        fonts.font_data.insert("phosphor-fill".into(), egui_phosphor::Variant::Fill.font_data());
+        fonts.font_data.insert("phosphor-fill".into(), egui_phosphor::Variant::Fill.font_data().into());
         fonts
             .families
             .insert(egui::FontFamily::Name("phosphor-fill".into()), vec!["phosphor-fill".into()]);
@@ -2893,7 +2893,7 @@ impl PaintApp {
         // Alpha max borné (120/255) : la teinte reste lisible sans masquer
         // complètement le contenu hors sélection.
         let pixels: Vec<Color32> = dense.iter().map(|&a| Color32::from_black_alpha((120 * (255 - a as u32) / 255) as u8)).collect();
-        let image = egui::ColorImage { size: [w as usize, h as usize], pixels };
+        let image = egui::ColorImage::new([w as usize, h as usize], pixels);
         let tex = ctx.load_texture("selection_mask_overlay", image, egui::TextureOptions::LINEAR);
         self.selection_mask_texture = Some((hash, tex.clone()));
         Some(tex)
@@ -3086,37 +3086,37 @@ impl PaintApp {
             }
             if ui.button(t("Dupliquer (⌘D)", "Duplicate (⌘D)")).clicked() {
                 self.duplicate_selection();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Supprimer (Suppr)", "Delete (Del)")).clicked() {
                 self.delete_selection();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui.button(t("Copier le style (⌥⌘C)", "Copy style (⌥⌘C)")).clicked() {
                 self.copy_style();
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Coller le style (⌥⌘V)", "Paste style (⌥⌘V)")).clicked() {
                 self.paste_style();
-                ui.close_menu();
+                ui.close();
             }
             ui.separator();
             if ui.button(t("Premier plan (⌘⇧])", "Bring to front (⌘⇧])")).clicked() {
                 self.reorder(ZMove::Front);
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Avancer (⌘])", "Bring forward (⌘])")).clicked() {
                 self.reorder(ZMove::Forward);
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Reculer (⌘[)", "Send backward (⌘[)")).clicked() {
                 self.reorder(ZMove::Backward);
-                ui.close_menu();
+                ui.close();
             }
             if ui.button(t("Arrière-plan (⌘⇧[)", "Send to back (⌘⇧[)")).clicked() {
                 self.reorder(ZMove::Back);
-                ui.close_menu();
+                ui.close();
             }
         });
     }
@@ -3271,7 +3271,18 @@ impl PaintApp {
 }
 
 impl eframe::App for PaintApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    /// `App::update` a été remplacé par `App::ui` (egui 0.30+, migration
+    /// sprint.md T4) : le point d'entrée reçoit désormais un `&mut Ui` sans
+    /// marge/fond plutôt qu'un `&Context` — `ctx` est simplement récupéré via
+    /// `top_ui.ctx()`, le reste du corps (panels attachés au `Context`, pas à
+    /// cet `Ui`) est inchangé.
+    fn ui(&mut self, top_ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Clone (bon marché, `Context` est un `Arc`) plutôt qu'emprunter
+        // `top_ui` : les panels utilisent `show_inside(top_ui, ...)`
+        // (`Panel::show(ctx, ...)` est déprécié depuis la migration egui
+        // 0.30+, sprint.md T4), donc `top_ui` doit rester empruntable
+        // mutablement pendant que `ctx` est encore utilisé plus loin.
+        let ctx = &top_ui.ctx().clone();
         self.autosave_tick();
         // Sans repaint périodique, une session restée inactive (aucune
         // interaction) ne redéclenche jamais `update` et l'autosave ne
@@ -3294,22 +3305,22 @@ impl eframe::App for PaintApp {
         }
 
         let panel_frame = egui::Frame::default()
-            .fill(ctx.style().visuals.panel_fill)
-            .inner_margin(Margin::symmetric(10.0, 6.0));
+            .fill(ctx.global_style().visuals.panel_fill)
+            .inner_margin(Margin::symmetric(10, 6));
 
-        egui::TopBottomPanel::top("toolbar")
+        egui::Panel::top("toolbar")
             .frame(panel_frame)
-            .show(ctx, |ui| toolbar::show(ui, self, ctx));
+            .show_inside(top_ui, |ui| toolbar::show(ui, self, ctx));
 
         // Panneau redimensionnable (UX-3.2) — était figé à 170px, un nom de
-        // calque long était tronqué sans recours (constat C5). `default_width`
+        // calque long était tronqué sans recours (constat C5). `default_size`
         // ne s'applique qu'à la toute première frame d'une session egui : au
         // relancement de l'app, elle restaure donc la largeur persistée.
-        let layers_resp = egui::SidePanel::right("layers")
+        let layers_resp = egui::Panel::right("layers")
             .resizable(true)
-            .default_width(self.layers_panel_width)
-            .width_range(140.0..=320.0)
-            .show(ctx, |ui| layers::show(ui, self));
+            .default_size(self.layers_panel_width)
+            .size_range(140.0..=320.0)
+            .show_inside(top_ui, |ui| layers::show(ui, self));
         let new_width = layers_resp.response.rect.width();
         if (new_width - self.layers_panel_width).abs() > 0.5 {
             self.layers_panel_width = new_width;
@@ -3320,11 +3331,11 @@ impl eframe::App for PaintApp {
             }
         }
 
-        egui::TopBottomPanel::bottom("footer")
+        egui::Panel::bottom("footer")
             .frame(panel_frame)
-            .show(ctx, |ui| footer::show(ui, self));
+            .show_inside(top_ui, |ui| footer::show(ui, self));
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(top_ui, |ui| {
             let avail = ui.available_size();
             let (response, painter) = ui.allocate_painter(avail, Sense::click_and_drag());
 
@@ -3498,7 +3509,7 @@ impl eframe::App for PaintApp {
             }
 
             // Bord du document (sur le plan de travail, non rogné).
-            painter.rect_stroke(doc_rect, 0.0, egui::Stroke::new(1.0, Color32::from_gray(120)));
+            painter.rect_stroke(doc_rect, 0.0, egui::Stroke::new(1.0, Color32::from_gray(120)), egui::StrokeKind::Middle);
             // Masque de sélection en pixels (Sprint H) : teinte semi-
             // transparente hors sélection, sous les poignées/pointillés de
             // la sélection d'objets classique.

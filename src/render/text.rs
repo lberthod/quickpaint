@@ -68,11 +68,11 @@ pub fn layout(ctx: &egui::Context, t: &TextItem, px_per_doc: f32) -> Arc<egui::G
         TextAlign::Right => egui::Align::RIGHT,
     };
     if t.align == TextAlign::Left {
-        return ctx.fonts(|f| f.layout_no_wrap(text, font_id, egui::Color32::WHITE));
+        return ctx.fonts_mut(|f| f.layout_no_wrap(text, font_id, egui::Color32::WHITE));
     }
 
     // Largeur naturelle (sans retour à la ligne) puis alignement dans ce bloc.
-    let natural = ctx.fonts(|f| f.layout_no_wrap(text.clone(), font_id.clone(), egui::Color32::WHITE));
+    let natural = ctx.fonts_mut(|f| f.layout_no_wrap(text.clone(), font_id.clone(), egui::Color32::WHITE));
     let block_w = natural.rect.width() + 2.0;
     let mut job = egui::text::LayoutJob::single_section(
         text,
@@ -80,7 +80,7 @@ pub fn layout(ctx: &egui::Context, t: &TextItem, px_per_doc: f32) -> Arc<egui::G
     );
     job.halign = halign;
     job.wrap.max_width = block_w;
-    ctx.fonts(|f| f.layout_job(job))
+    ctx.fonts_mut(|f| f.layout_job(job))
 }
 
 /// Passes de dépôt : ombre (si activée), contour (8 directions), faux-bold

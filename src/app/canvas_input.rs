@@ -30,7 +30,7 @@ impl PaintApp {
 
         // Espace maintenu = déplacement temporaire (réflexe « main » à la
         // Photoshop), quel que soit l'outil.
-        let space_pan = ctx.input(|i| i.key_down(egui::Key::Space)) && !ctx.wants_keyboard_input();
+        let space_pan = ctx.input(|i| i.key_down(egui::Key::Space)) && !ctx.egui_wants_keyboard_input();
         if space_pan {
             ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
             if response.dragged() {
@@ -237,7 +237,7 @@ impl PaintApp {
                     if let Some(p) = response.interact_pointer_pos() {
                         // Remplissage différé : on capture la composition affichée.
                         self.bucket_click = Some(p);
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
                     }
                 }
             }
@@ -250,7 +250,7 @@ impl PaintApp {
                         // repasser par « Éditer le masque ».
                         let restore = ctx.input(|i| i.modifiers.alt);
                         self.cutout_click = Some((p, restore));
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
                     }
                 }
             }
