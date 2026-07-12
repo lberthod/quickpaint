@@ -1,0 +1,9 @@
+# Configuration de `cargo audit`. Voir sprint.md T2 pour le contexte.
+[advisories]
+ignore = [
+    # quick-xml : tiré uniquement par wayland-scanner et zbus_xml, deux
+    # dépendances transitives Linux-only (via arboard) jamais compilées
+    # dans le binaire macOS. Pas de code affecté dans QuickPaint.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
