@@ -156,16 +156,23 @@ lisant les blocs — l'ordre peut changer) :
       `selection_overlay_texture` (restés dans `app/mod.rs`, ce sont des
       caches de texture d'aperçu UI, pas le pipeline d'export à proprement
       parler). ~250 lignes déplacées.
+- [x] **T3.8 — `app/canvas_overlay.rs`** ✅ FAIT (au-delà du plan initial) :
+      `paint_grid`/`paint_rulers`/`paint_pen`/`paint_selection`/`paint_crop`/
+      `paint_retouch`/`paint_marquee`/`paint_measure`/`paint_cursor` — pur
+      rendu d'overlay (`&self`, jamais de mutation), appelés en séquence par
+      `update()` après le rendu du document composite. Laissé de côté
+      volontairement : `canvas_context_menu`/`handle_canvas` (restés dans
+      `app/mod.rs`, ce sont le dispatch d'entrée qui mute l'état — domaine
+      différent, plus risqué à isoler). ~320 lignes déplacées.
 - [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes (actuellement
-      ~5 400 lignes après T3.1-T3.7 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
-      `shortcuts.rs`/`raster_paint.rs`/`export_ops.rs` extraits, plus
-      `animation.rs`/`pen_edit.rs`/`transform.rs` déjà extraits avant ce
-      sprint — candidat suivant pour continuer à repasser sous la barre : le
-      rendu canevas/overlays (`paint_grid`/`paint_rulers`/`paint_selection`/
-      `paint_crop`/…, ~700 lignes) et le bloc `handle_*`/`paint_*` des outils
-      raster restants (bucket fill, détourage, geste de dessin générique,
-      ~600 lignes)), `cargo test` vert à chaque commit, aucun diff de
-      comportement.
+      ~5 090 lignes après T3.1-T3.8 ; `selection.rs`/`layers_ops.rs`/`io.rs`/
+      `shortcuts.rs`/`raster_paint.rs`/`export_ops.rs`/`canvas_overlay.rs`
+      extraits, plus `animation.rs`/`pen_edit.rs`/`transform.rs` déjà
+      extraits avant ce sprint — candidat suivant pour continuer à repasser
+      sous la barre : `handle_canvas` (dispatch d'entrée canevas, ~340
+      lignes) et le bloc pot de peinture/détourage (`do_bucket_fill`/
+      `do_cutout`, ~220 lignes)), `cargo test` vert à chaque commit, aucun
+      diff de comportement.
 
 ---
 
