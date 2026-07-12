@@ -132,16 +132,25 @@ lisant les blocs — l'ordre peut changer) :
       raccourcis vers les actions (le tableau de bindings vit déjà dans
       [keybindings.rs](src/keybindings.rs) ; ici il s'agit du gros `match`
       de traitement des événements).
-- [ ] **T3.5 — passe `unwrap`** (profite du déménagement) : dans chaque
-      fichier extrait, convertir les `unwrap()` sur des chemins atteignables
-      par l'utilisateur en `unwrap_or`/early-return, p. ex. le
-      `partial_cmp(...).unwrap()` sur des flottants
-      ([app/mod.rs:2793](src/app/mod.rs:2793) → `total_cmp`), et les
-      `sorted.first().unwrap()` ([app/mod.rs:2310](src/app/mod.rs:2310)).
-      Les `expect` d'invariants internes réels peuvent rester, avec un
-      message qui dit l'invariant.
-- [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes, `cargo test`
-      vert à chaque commit, aucun diff de comportement.
+- [x] **T3.5 — passe `unwrap`** ✅ FAIT : les 3 `unwrap()` non-test restants
+      dans le périmètre `app/` (T3.1-T3.4) traités — `picked.sort_by(...z.
+      partial_cmp(...).unwrap())` → `total_cmp` (évite un panic si `z`
+      devient `NaN`, ex. donnée corrompue rechargée), et
+      `sorted.first()/last().unwrap()` dans `align_layer_to_document`
+      (Distribute) → `let ... else { return }` explicite (le garde
+      `elems.len() < 3` en amont rendait déjà le panic inatteignable, mais
+      le rendre visible au lecteur vaut le coût nul). Aucun autre `unwrap`/
+      `expect` non-test trouvé dans `app/mod.rs`, `selection.rs`,
+      `layers_ops.rs`, `io.rs`, `shortcuts.rs`, `animation.rs`,
+      `pen_edit.rs`, `transform.rs` (les deux `expect` restants dans
+      `animation.rs` sont dans un test de round-trip sérialisation).
+- [ ] **Critère de sortie** : `app/mod.rs` < 3 000 lignes (actuellement
+      ~6 050 lignes après T3.1-T3.5 ; `selection.rs`/`layers_ops.rs`/
+      `io.rs`/`shortcuts.rs` extraits, restent `animation.rs`/`pen_edit.rs`/
+      `transform.rs` déjà extraits avant ce sprint — candidats suivants pour
+      repasser sous la barre : découper le reste du fichier restant, par ex.
+      le rendu canevas/UI panels encore en place), `cargo test` vert à
+      chaque commit, aucun diff de comportement.
 
 ---
 

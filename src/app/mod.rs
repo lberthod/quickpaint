@@ -1880,8 +1880,10 @@ impl PaintApp {
                 };
                 let mut sorted = elems.clone();
                 sorted.sort_by(|a, b| center(&a.1).total_cmp(&center(&b.1)));
-                let first = center(&sorted.first().unwrap().1);
-                let last = center(&sorted.last().unwrap().1);
+                // `elems.len() < 3` a déjà retourné plus haut : first/last existent forcément.
+                let (Some(first_el), Some(last_el)) = (sorted.first(), sorted.last()) else { return };
+                let first = center(&first_el.1);
+                let last = center(&last_el.1);
                 let step = (last - first) / (sorted.len() as f32 - 1.0);
                 for (i, (id, b)) in sorted.iter().enumerate() {
                     let target = first + step * i as f32;
@@ -2194,7 +2196,7 @@ impl PaintApp {
             ));
             return;
         }
-        picked.sort_by(|a, b| a.1.z.partial_cmp(&b.1.z).unwrap());
+        picked.sort_by(|a, b| a.1.z.total_cmp(&b.1.z));
         let (idx_a, subject) = picked[0];
         let (idx_b, clip) = picked[1];
         let result = crate::tools::boolean::apply(subject, clip, kind);
