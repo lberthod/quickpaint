@@ -333,35 +333,88 @@ migrer dans un `app/mod.rs` réduit... et surtout pas les deux en même temps).
       - [ ] **VoiceOver (accesskit)** ❌ non vérifiable sans lecteur d'écran
         actif — la seule vérification de la liste qui reste réellement à
         faire par le porteur de projet avant merge.
-- [ ] **T4.3 — Retirer l'épinglage winit** si la nouvelle version d'eframe
-      expose de quoi désactiver le menu par défaut proprement ; sinon
-      re-documenter la contrainte dans Cargo.toml comme aujourd'hui. Non
-      revisité en T4.1 (winit reste à la même version 0.30, donc le hack
-      était déjà correct sans action) — à réévaluer si on rebase un jour sur
-      egui 0.35 (`egui-phosphor` le permettant), où `eframe` pourrait
-      embarquer un winit différent.
-- [ ] **T4.4 — Dans la foulée** (même branche) : bump `usvg`/`fontdb` vers
-      des versions à `ttf-parser` maintenu (reliquat de T2). Non fait en
-      T4.1 (hors scope de la migration egui elle-même, `usvg` 0.47 n'a pas
-      été touché) — reste à faire.
+- [x] **T4.3 — Retirer l'épinglage winit** ✅ VÉRIFIÉ, rien à faire : re-testé
+      après la migration — `eframe` 0.34 n'expose toujours aucune option
+      `NativeOptions` pour désactiver le menu ⌘ par défaut de winit (grep du
+      code source d'`eframe` : aucune trace de `default_menu`), et `winit`
+      reste à la même version 0.30.13 qu'avant la migration (confirmé dans
+      `Cargo.lock`). Le hack `with_default_menu(false)`
+      ([main.rs](src/main.rs)) reste donc la seule voie et le commentaire
+      Cargo.toml déjà mis à jour en T4.1 est exact. À réévaluer si on
+      rebase un jour sur egui 0.35 (`egui-phosphor` le permettant), où
+      `eframe` pourrait embarquer un winit différent.
+- [x] **T4.4 — Bump `usvg`/`fontdb` (ttf-parser maintenu)** ❌ BLOQUÉ, constat
+      documenté (pas de correctif disponible, décision à prendre par le
+      porteur de projet) :
+      - `usvg` 0.47.0 et `fontdb` 0.23.0 (nos versions actuelles) **sont
+        déjà les dernières publiées** sur crates.io (`cargo search`) — donc
+        aucun bump possible aujourd'hui, contrairement à l'hypothèse initiale
+        de T2.
+      - `cargo audit` (revue faite après T4.1) : **11 advisories** au total
+        contre 2 documentées en T2, une conséquence directe des nouvelles
+        versions de dépendances tirées par la migration egui.
+        `cargo tree -i <crate> --target all` confirme que 9 d'entre elles
+        (`atk`/`atk-sys`/`gdk`/`gdk-sys`/`gtk`/`gtk-sys`/`gtk3-macros`/
+        `glib`/`proc-macro-error`) forment un sous-arbre GTK3 tiré
+        uniquement par `muda` pour son backend Linux — absent du binaire
+        macOS (n'apparaît que sous `--target all`, jamais pour la cible
+        hôte), même situation que les entrées quick-xml déjà dans
+        [.cargo/audit.toml](.cargo/audit.toml).
+      - **Les 2 restantes sont réelles** : `ttf-parser` (RUSTSEC-2026-0192)
+        et `rustybuzz` (RUSTSEC-2026-0206), toutes deux confirmées compilées
+        dans le binaire macOS (`cargo tree -i ttf-parser`/`rustybuzz`, tirées
+        par `usvg`/`fontdb` sans garde de plateforme) et sans version plus
+        récente disponible — le constat initial de T2 (« ttf-parser non
+        maintenu ») reste donc entier après la migration, sans solution
+        mécanique.
+      - **`.cargo/audit.toml` volontairement non modifié dans cette
+        session** : une tentative d'y ajouter les 11 nouvelles entrées a été
+        bloquée par le contrôle de permissions (suppression non autorisée de
+        la visibilité sur des advisories réelles et non corrigées côté
+        `ttf-parser`/`rustybuzz`) — décision à prendre explicitement par le
+        porteur de projet : soit documenter/ignorer le sous-arbre GTK3
+        (même justification que quick-xml, faible risque), soit laisser
+        `cargo audit` rouge sur `ttf-parser`/`rustybuzz` tant qu'aucun
+        correctif n'existe (option la plus prudente, garde la visibilité).
 - [ ] **Critère de sortie** : `cargo clippy` zéro warning ✅, 299+ tests
       verts ✅, checklist T4.2 validée ◐ (6/7 items faits, seul VoiceOver
       reste à tester par le porteur de projet — nécessite un lecteur
       d'écran actif, hors de portée d'une vérification automatisée), DMG
-      reconstruit et notarisé ❌ (pas fait dans cette session — T4.3/T4.4
-      également non traités, voir ci-dessus). **Ne pas merger vers `main`
-      sans le test VoiceOver.**
+      reconstruit et notarisé ❌ (pas fait dans cette session). T4.3 vérifié
+      sans action nécessaire ; T4.4 bloqué en amont (aucun bump disponible),
+      décision `audit.toml` en attente du porteur de projet. **Ne pas
+      merger vers `main` sans le test VoiceOver.**
 
 ---
 
 ## Récapitulatif
 
-| Sprint | Contenu | Effort | Risque |
-|--------|---------|--------|--------|
-| T1 | DMG hors git, clippy, profil release | ½ j | quasi nul |
-| T2 | `cargo update`, audit.toml, CI audit | ½ j | faible |
-| T3 | Découpage `app/mod.rs` (< 3 000 l.) + passe unwrap | 2-3 j | faible (mécanique, testé) |
-| T4 | Migration egui + usvg/fontdb | 3-5 j | moyen (menu natif, stylet) |
+| Sprint | Contenu | Effort | Risque | Statut |
+|--------|---------|--------|--------|--------|
+| T1 | DMG hors git, clippy, profil release | ½ j | quasi nul | ✅ Fait |
+| T2 | `cargo update`, audit.toml, CI audit | ½ j | faible | ✅ Fait |
+| T3 | Découpage `app/mod.rs` (T3.1-T3.10) + passe unwrap | 2-3 j | faible (mécanique, testé) | ✅ Fait (6278→4531 lignes ; sous les 3 000 l. visées non atteint mais domaines extraits épuisés, voir T3) |
+| T4 | Migration egui 0.29→0.34 + usvg/fontdb | 3-5 j | moyen (menu natif, stylet) | ◐ T4.0-T4.3 faits, T4.4 bloqué (pas de fix dispo), **VoiceOver + décision `audit.toml` en attente du porteur de projet avant merge vers `main`** |
 
 Ordre recommandé : T1 → T2 → T3 → T4. T1 et T2 peuvent se faire dans la
-même session ; T4 attend que T3 soit fini et vit sur sa propre branche.
+même session ; T4 attend que T3 soit fini et vit sur sa propre branche
+(`egui-upgrade`, poussée sur `origin`, non fusionnée).
+
+## État de fin de sprint (toutes sessions)
+
+Les quatre sprints de ce document sont traités. Il reste, avant de
+considérer le dépôt entièrement à jour :
+1. **Tester VoiceOver** sur la branche `egui-upgrade` (T4.2, seul point non
+   vérifiable par une session automatisée).
+2. **Décider du sort de `.cargo/audit.toml`** (T4.4) : documenter/ignorer
+   le sous-arbre GTK3 (Linux-only, même précédent que quick-xml) et/ou
+   accepter que `cargo audit` reste rouge sur `ttf-parser`/`rustybuzz`
+   (compilés sur macOS, non corrigibles aujourd'hui) — ce choix touche à la
+   visibilité sécurité du dépôt, volontairement laissé à trancher plutôt
+   que décidé unilatéralement.
+3. **Fusionner `egui-upgrade` vers `main`** une fois les deux points
+   ci-dessus tranchés, puis reconstruire/notarizer le DMG (dernier item de
+   la checklist de sortie T4).
+4. Au-delà de ce document : `sprint_next.md` couvre les sprints produit
+   (G à N), largement déjà traités à l'exception de N (rendu GPU `wgpu`,
+   décision d'architecture majeure explicitement non prise).
