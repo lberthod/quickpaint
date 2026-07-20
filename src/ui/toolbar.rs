@@ -34,6 +34,8 @@ fn templates() -> Vec<TemplateGroup> {
             t("Impression", "Print"),
             vec![
                 (t("Affiche A4", "A4 poster"), 1748, 2480),
+                (t("Document A5", "A5 document"), 1232, 1748),
+                (t("Document A6", "A6 document"), 874, 1232),
                 (t("Carte de visite", "Business card"), 1050, 600),
                 (t("Carte postale", "Postcard"), 1748, 1240),
             ],
@@ -1299,6 +1301,7 @@ fn template_gallery(ctx: &egui::Context, app: &mut PaintApp) {
                 for (label, w, h, content) in [
                     (t("Post promo Instagram", "Instagram promo post"), 1080, 1080, TemplateContent::InstagramPromo),
                     (t("Bannière Facebook", "Facebook banner"), 1200, 630, TemplateContent::FacebookBanner),
+                    (t("Flyer A6 Barbato", "A6 Barbato flyer"), 874, 1232, TemplateContent::BarbatoFlyer),
                 ] {
                     let text = format!("{label}\n{w}×{h}");
                     if ui.add(egui::Button::new(text).min_size(egui::vec2(150.0, 40.0))).clicked() {

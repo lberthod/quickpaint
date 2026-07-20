@@ -15,7 +15,6 @@
 //! [`poll_events`] route donc les clics vers les mêmes méthodes que les
 //! raccourcis clavier déjà câblés dans `app/mod.rs::handle_shortcuts`.
 
-use muda::accelerator::{Accelerator, Code, Modifiers};
 use muda::{AboutMetadata, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
 /// Identifiants des entrées « Édition » à faire correspondre aux méthodes de
@@ -62,15 +61,21 @@ pub fn install() -> EditMenuIds {
         &PredefinedMenuItem::quit(None),
     ]);
 
-    let undo = MenuItem::new("Annuler", true, Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyZ)));
-    let redo = MenuItem::new(
-        "Rétablir",
-        true,
-        Some(Accelerator::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyZ)),
-    );
-    let cut = MenuItem::new("Couper", true, Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyX)));
-    let copy = MenuItem::new("Copier", true, Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyC)));
-    let paste = MenuItem::new("Coller", true, Some(Accelerator::new(Some(Modifiers::SUPER), Code::KeyV)));
+    // Pas d'`Accelerator` sur ces items : ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V sont déjà gérés
+    // indépendamment au niveau clavier egui (`app/shortcuts.rs`). Leur
+    // assigner le même raccourci ici fait qu'AppKit route l'« équivalent
+    // clavier » vers l'action `muda` du menu — ce qui plante (SIGSEGV dans
+    // `objc2`/`CFStringCreateImmutableFunnel3`, deux versions incompatibles
+    // d'`objc2` coexistent dans l'arbre de dépendances entre `muda` 0.6.x et
+    // `winit`/`eframe` 0.5.x — cf. rapport de crash `quickpaint-*.ips`,
+    // reproduit en collant une image depuis le presse-papiers via ⌘V). Les
+    // items restent cliquables à la souris, seul l'affichage du raccourci
+    // dans le menu disparaît.
+    let undo = MenuItem::new("Annuler", true, None);
+    let redo = MenuItem::new("Rétablir", true, None);
+    let cut = MenuItem::new("Couper", true, None);
+    let copy = MenuItem::new("Copier", true, None);
+    let paste = MenuItem::new("Coller", true, None);
 
     let edit_menu = Submenu::new("Édition", true);
     let _ = edit_menu.append_items(&[&undo, &redo, &PredefinedMenuItem::separator(), &cut, &copy, &paste]);

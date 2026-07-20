@@ -245,7 +245,13 @@ pub struct ExportPreviewDialog {
 pub enum TemplateContent {
     InstagramPromo,
     FacebookBanner,
+    BarbatoFlyer,
 }
+
+/// Logo Barbato Peintures (assets/templates/barbato_logo.png), embarqué dans
+/// le binaire pour le gabarit riche `BarbatoFlyer` — pas de dépendance à un
+/// fichier externe au runtime.
+static BARBATO_LOGO_PNG: &[u8] = include_bytes!("../../assets/templates/barbato_logo.png");
 
 /// Action sur le masque de sélection en pixels en attente de validation
 /// (Sprint H) — un seul dialogue partagé, le paramètre (rayon en pixels)
@@ -791,6 +797,75 @@ impl PaintApp {
                 self.add_template_text((w * 0.06, h * 0.28), t("Nom de la marque", "Brand name"), h * 0.16, [255, 255, 255, 255]);
                 self.add_template_text((w * 0.06, h * 0.58), t("Votre slogan ici", "Your tagline here"), h * 0.07, [212, 226, 240, 255]);
             }
+            TemplateContent::BarbatoFlyer => {
+                // Fond général.
+                self.add_template_rect((0.0, 0.0), (w, h), [122, 116, 108, 255]);
+                // Bandeau photo (placeholder, à remplacer par la photo du chantier).
+                self.add_template_rect((0.0, h * 0.26), (w, h * 0.58), [188, 178, 166, 255]);
+                self.add_template_text_aligned(
+                    (w * 0.5, h * 0.42),
+                    t("Votre photo ici", "Your photo here"),
+                    h * 0.03,
+                    [255, 255, 255, 255],
+                    crate::model::TextAlign::Center,
+                );
+                // Carte blanche du logo, en haut à droite — assez large pour
+                // que le logo (carré) et le bloc de texte ne se chevauchent
+                // pas : logo à gauche de la carte, texte à droite de son bord.
+                self.add_template_rect((w * 0.36, h * 0.02), (w * 0.98, h * 0.165), [255, 255, 255, 255]);
+                self.add_template_image((w * 0.38, h * 0.037), h * 0.09, BARBATO_LOGO_PNG);
+                self.add_template_text((w * 0.55, h * 0.045), "BARBATO", h * 0.032, [15, 30, 60, 255]);
+                self.add_template_text((w * 0.55, h * 0.08), "PEINTURES", h * 0.032, [122, 74, 40, 255]);
+                self.add_template_text_aligned(
+                    (w * 0.67, h * 0.135),
+                    t("PEINTRE PROFESSIONNEL EN VALAIS", "PROFESSIONAL PAINTER IN VALAIS"),
+                    h * 0.0135,
+                    [90, 90, 90, 255],
+                    crate::model::TextAlign::Center,
+                );
+                // Accroche.
+                self.add_template_text(
+                    (w * 0.06, h * 0.185),
+                    t("VOTRE SPÉCIALISTE EN\nPEINTURE & DÉCORATION", "YOUR SPECIALIST IN\nPAINTING & DECORATION"),
+                    h * 0.026,
+                    [15, 30, 60, 255],
+                );
+                // Bloc « Pourquoi nous choisir ? ».
+                self.add_template_rect((0.0, h * 0.60), (w, h * 0.905), [237, 233, 227, 255]);
+                self.add_template_text(
+                    (w * 0.06, h * 0.615),
+                    t("POURQUOI NOUS CHOISIR ?", "WHY CHOOSE US?"),
+                    h * 0.026,
+                    [15, 30, 60, 255],
+                );
+                let bullets = [
+                    t("• Devis gratuit et sans engagement", "• Free, no-obligation quote"),
+                    t("• Visite sur place pour évaluation précise", "• On-site visit for an accurate estimate"),
+                    t("• Conseil personnalisé sur les couleurs", "• Personalized color advice"),
+                    t("• Travail soigné et chantier propre", "• Careful work, clean job site"),
+                ];
+                for (i, line) in bullets.iter().enumerate() {
+                    self.add_template_text((w * 0.06, h * (0.665 + i as f32 * 0.033)), line, h * 0.019, [30, 30, 30, 255]);
+                }
+                self.add_template_text(
+                    (w * 0.06, h * 0.805),
+                    t("CONTACTEZ-NOUS :", "CONTACT US:"),
+                    h * 0.024,
+                    [15, 30, 60, 255],
+                );
+                self.add_template_text((w * 0.06, h * 0.84), t("Téléphone : +41 79 284 53 33", "Phone: +41 79 284 53 33"), h * 0.0185, [30, 30, 30, 255]);
+                self.add_template_text((w * 0.06, h * 0.863), "Email : contact@barbato-peinture.ch", h * 0.0185, [30, 30, 30, 255]);
+                self.add_template_text((w * 0.06, h * 0.886), "Site web : www.barbato-peinture.ch", h * 0.0185, [30, 30, 30, 255]);
+                // Bandeau d'appel à l'action, en bas.
+                self.add_template_rect((0.0, h * 0.93), (w, h), [15, 30, 60, 255]);
+                self.add_template_text_aligned(
+                    (w * 0.5, h * 0.955),
+                    t("DEMANDEZ VOTRE DEVIS GRATUIT !", "REQUEST YOUR FREE QUOTE!"),
+                    h * 0.022,
+                    [255, 255, 255, 255],
+                    crate::model::TextAlign::Center,
+                );
+            }
         }
         self.info(t("Modèle chargé avec du contenu à personnaliser.", "Template loaded with content to customize."));
     }
@@ -817,14 +892,38 @@ impl PaintApp {
 
     /// Bloc de texte substituable (Sprint 10.2), gras, aligné à gauche.
     fn add_template_text(&mut self, pos: (f32, f32), text: &str, size: f32, color: [u8; 4]) {
+        self.add_template_text_aligned(pos, text, size, color, crate::model::TextAlign::Left);
+    }
+
+    /// Variante de [`Self::add_template_text`] avec alignement explicite
+    /// (gabarit Barbato : texte centré pour l'accroche photo et le bandeau).
+    fn add_template_text_aligned(&mut self, pos: (f32, f32), text: &str, size: f32, color: [u8; 4], align: crate::model::TextAlign) {
         let id = self.next_id;
         self.next_id += 1;
         let mut item = crate::model::TextItem::new(id, pos, size, color);
         item.text = text.to_string();
         item.bold = true;
+        item.align = align;
         item.z = self.bump_z();
         let layer = self.doc.active_id();
         self.history.push(&mut self.doc, Command::AddText { layer, text: item });
+    }
+
+    /// Image bitmap embarquée dans un gabarit (logo Barbato) : `png_bytes`
+    /// est le PNG source, `height` la hauteur affichée en coordonnées
+    /// document — la largeur suit le ratio natif de l'image.
+    fn add_template_image(&mut self, pos: (f32, f32), height: f32, png_bytes: &[u8]) {
+        let Ok(decoded) = image::load_from_memory(png_bytes) else { return };
+        let rgba = decoded.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let scale = height / h.max(1) as f32;
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut item = crate::model::ImageItem::from_rgba(id, pos, w, h, rgba.into_raw());
+        item.size = (w as f32 * scale, height);
+        item.z = self.bump_z();
+        let layer = self.doc.active_id();
+        self.history.push(&mut self.doc, Command::AddImage { layer, image: item });
     }
 
     /// Insère un élément de la bibliothèque (Sprint 10.1) au centre du
