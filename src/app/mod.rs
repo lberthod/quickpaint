@@ -245,13 +245,7 @@ pub struct ExportPreviewDialog {
 pub enum TemplateContent {
     InstagramPromo,
     FacebookBanner,
-    BarbatoFlyer,
 }
-
-/// Logo Barbato Peintures (assets/templates/barbato_logo.png), embarqué dans
-/// le binaire pour le gabarit riche `BarbatoFlyer` — pas de dépendance à un
-/// fichier externe au runtime.
-static BARBATO_LOGO_PNG: &[u8] = include_bytes!("../../assets/templates/barbato_logo.png");
 
 /// Action sur le masque de sélection en pixels en attente de validation
 /// (Sprint H) — un seul dialogue partagé, le paramètre (rayon en pixels)
@@ -797,75 +791,6 @@ impl PaintApp {
                 self.add_template_text((w * 0.06, h * 0.28), t("Nom de la marque", "Brand name"), h * 0.16, [255, 255, 255, 255]);
                 self.add_template_text((w * 0.06, h * 0.58), t("Votre slogan ici", "Your tagline here"), h * 0.07, [212, 226, 240, 255]);
             }
-            TemplateContent::BarbatoFlyer => {
-                // Fond général.
-                self.add_template_rect((0.0, 0.0), (w, h), [122, 116, 108, 255]);
-                // Bandeau photo (placeholder, à remplacer par la photo du chantier).
-                self.add_template_rect((0.0, h * 0.26), (w, h * 0.58), [188, 178, 166, 255]);
-                self.add_template_text_aligned(
-                    (w * 0.5, h * 0.42),
-                    t("Votre photo ici", "Your photo here"),
-                    h * 0.03,
-                    [255, 255, 255, 255],
-                    crate::model::TextAlign::Center,
-                );
-                // Carte blanche du logo, en haut à droite — assez large pour
-                // que le logo (carré) et le bloc de texte ne se chevauchent
-                // pas : logo à gauche de la carte, texte à droite de son bord.
-                self.add_template_rect((w * 0.36, h * 0.02), (w * 0.98, h * 0.165), [255, 255, 255, 255]);
-                self.add_template_image((w * 0.38, h * 0.037), h * 0.09, BARBATO_LOGO_PNG);
-                self.add_template_text((w * 0.55, h * 0.045), "BARBATO", h * 0.032, [15, 30, 60, 255]);
-                self.add_template_text((w * 0.55, h * 0.08), "PEINTURES", h * 0.032, [122, 74, 40, 255]);
-                self.add_template_text_aligned(
-                    (w * 0.67, h * 0.135),
-                    t("PEINTRE PROFESSIONNEL EN VALAIS", "PROFESSIONAL PAINTER IN VALAIS"),
-                    h * 0.0135,
-                    [90, 90, 90, 255],
-                    crate::model::TextAlign::Center,
-                );
-                // Accroche.
-                self.add_template_text(
-                    (w * 0.06, h * 0.185),
-                    t("VOTRE SPÉCIALISTE EN\nPEINTURE & DÉCORATION", "YOUR SPECIALIST IN\nPAINTING & DECORATION"),
-                    h * 0.026,
-                    [15, 30, 60, 255],
-                );
-                // Bloc « Pourquoi nous choisir ? ».
-                self.add_template_rect((0.0, h * 0.60), (w, h * 0.905), [237, 233, 227, 255]);
-                self.add_template_text(
-                    (w * 0.06, h * 0.615),
-                    t("POURQUOI NOUS CHOISIR ?", "WHY CHOOSE US?"),
-                    h * 0.026,
-                    [15, 30, 60, 255],
-                );
-                let bullets = [
-                    t("• Devis gratuit et sans engagement", "• Free, no-obligation quote"),
-                    t("• Visite sur place pour évaluation précise", "• On-site visit for an accurate estimate"),
-                    t("• Conseil personnalisé sur les couleurs", "• Personalized color advice"),
-                    t("• Travail soigné et chantier propre", "• Careful work, clean job site"),
-                ];
-                for (i, line) in bullets.iter().enumerate() {
-                    self.add_template_text((w * 0.06, h * (0.665 + i as f32 * 0.033)), line, h * 0.019, [30, 30, 30, 255]);
-                }
-                self.add_template_text(
-                    (w * 0.06, h * 0.805),
-                    t("CONTACTEZ-NOUS :", "CONTACT US:"),
-                    h * 0.024,
-                    [15, 30, 60, 255],
-                );
-                self.add_template_text((w * 0.06, h * 0.84), t("Téléphone : +41 79 284 53 33", "Phone: +41 79 284 53 33"), h * 0.0185, [30, 30, 30, 255]);
-                self.add_template_text((w * 0.06, h * 0.863), "Email : contact@barbato-peinture.ch", h * 0.0185, [30, 30, 30, 255]);
-                self.add_template_text((w * 0.06, h * 0.886), "Site web : www.barbato-peinture.ch", h * 0.0185, [30, 30, 30, 255]);
-                // Bandeau d'appel à l'action, en bas.
-                self.add_template_rect((0.0, h * 0.93), (w, h), [15, 30, 60, 255]);
-                self.add_template_text_aligned(
-                    (w * 0.5, h * 0.955),
-                    t("DEMANDEZ VOTRE DEVIS GRATUIT !", "REQUEST YOUR FREE QUOTE!"),
-                    h * 0.022,
-                    [255, 255, 255, 255],
-                    crate::model::TextAlign::Center,
-                );
-            }
         }
         self.info(t("Modèle chargé avec du contenu à personnaliser.", "Template loaded with content to customize."));
     }
@@ -892,38 +817,14 @@ impl PaintApp {
 
     /// Bloc de texte substituable (Sprint 10.2), gras, aligné à gauche.
     fn add_template_text(&mut self, pos: (f32, f32), text: &str, size: f32, color: [u8; 4]) {
-        self.add_template_text_aligned(pos, text, size, color, crate::model::TextAlign::Left);
-    }
-
-    /// Variante de [`Self::add_template_text`] avec alignement explicite
-    /// (gabarit Barbato : texte centré pour l'accroche photo et le bandeau).
-    fn add_template_text_aligned(&mut self, pos: (f32, f32), text: &str, size: f32, color: [u8; 4], align: crate::model::TextAlign) {
         let id = self.next_id;
         self.next_id += 1;
         let mut item = crate::model::TextItem::new(id, pos, size, color);
         item.text = text.to_string();
         item.bold = true;
-        item.align = align;
         item.z = self.bump_z();
         let layer = self.doc.active_id();
         self.history.push(&mut self.doc, Command::AddText { layer, text: item });
-    }
-
-    /// Image bitmap embarquée dans un gabarit (logo Barbato) : `png_bytes`
-    /// est le PNG source, `height` la hauteur affichée en coordonnées
-    /// document — la largeur suit le ratio natif de l'image.
-    fn add_template_image(&mut self, pos: (f32, f32), height: f32, png_bytes: &[u8]) {
-        let Ok(decoded) = image::load_from_memory(png_bytes) else { return };
-        let rgba = decoded.to_rgba8();
-        let (w, h) = rgba.dimensions();
-        let scale = height / h.max(1) as f32;
-        let id = self.next_id;
-        self.next_id += 1;
-        let mut item = crate::model::ImageItem::from_rgba(id, pos, w, h, rgba.into_raw());
-        item.size = (w as f32 * scale, height);
-        item.z = self.bump_z();
-        let layer = self.doc.active_id();
-        self.history.push(&mut self.doc, Command::AddImage { layer, image: item });
     }
 
     /// Insère un élément de la bibliothèque (Sprint 10.1) au centre du
@@ -4063,34 +3964,35 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// Le gabarit Barbato doit produire tout son contenu : les rectangles de
-    /// mise en page, les blocs de texte substituables et surtout le logo PNG
-    /// embarqué (décodage `include_bytes!` → `ImageItem`) au bon ratio.
+    /// Chaque gabarit riche doit produire au moins un fond et des blocs de
+    /// texte substituables, avec des ids uniques et des z croissants (le
+    /// texte doit rester au-dessus du fond).
     #[test]
-    fn seed_template_barbato_flyer_adds_rects_texts_and_the_embedded_logo() {
-        let mut app = app_with_layers(1);
-        app.doc.size = (874, 1232);
-        app.seed_template_content(TemplateContent::BarbatoFlyer);
+    fn seed_template_content_adds_a_background_and_editable_texts() {
+        for content in [TemplateContent::InstagramPromo, TemplateContent::FacebookBanner] {
+            let mut app = app_with_layers(1);
+            app.doc.size = (1080, 1080);
+            app.seed_template_content(content);
 
-        let layer = &app.doc.layers[0];
-        assert_eq!(layer.images.len(), 1, "le logo embarqué doit être décodé et inséré");
-        assert!(layer.strokes.iter().filter(|s| s.fill).count() >= 5, "rectangles de mise en page attendus");
-        assert!(layer.texts.len() >= 12, "blocs de texte du flyer attendus, trouvé {}", layer.texts.len());
-
-        let logo = &layer.images[0];
-        let native_ratio = logo.w as f32 / logo.h as f32;
-        let shown_ratio = logo.size.0 / logo.size.1;
-        assert!((native_ratio - shown_ratio).abs() < 0.01, "le ratio natif du logo doit être préservé");
-        assert!((logo.size.1 - 1232.0 * 0.09).abs() < 0.5, "hauteur du logo = 9 % du document");
+            let layer = &app.doc.layers[0];
+            assert!(layer.strokes.iter().any(|s| s.fill), "fond attendu ({content:?})");
+            assert!(layer.texts.len() >= 2, "textes substituables attendus ({content:?})");
+            let bg_z = layer.strokes[0].z;
+            assert!(layer.texts.iter().all(|t| t.z > bg_z), "le texte doit passer au-dessus du fond ({content:?})");
+            let mut ids: Vec<u64> = layer.strokes.iter().map(|s| s.id).chain(layer.texts.iter().map(|t| t.id)).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), layer.strokes.len() + layer.texts.len(), "ids uniques ({content:?})");
+        }
     }
 
     /// Chaque gabarit riche doit passer par `seed_template_content` sans
     /// paniquer et laisser un historique annulable jusqu'au document vide.
     #[test]
     fn seed_template_content_is_fully_undoable_for_every_template() {
-        for content in [TemplateContent::InstagramPromo, TemplateContent::FacebookBanner, TemplateContent::BarbatoFlyer] {
+        for content in [TemplateContent::InstagramPromo, TemplateContent::FacebookBanner] {
             let mut app = app_with_layers(1);
-            app.doc.size = (874, 1232);
+            app.doc.size = (1080, 1080);
             app.seed_template_content(content);
             let layer = &app.doc.layers[0];
             assert!(layer.strokes.len() + layer.texts.len() + layer.images.len() > 0);
@@ -4106,21 +4008,23 @@ mod tests {
         }
     }
 
-    /// Rendu d'export du flyer Barbato hors écran : le compositeur doit
-    /// produire une image A6 non uniforme (fond + bandeaux + logo + texte).
+    /// Rendu d'export hors écran des gabarits riches : le compositeur doit
+    /// produire une image à la résolution native, non uniforme (fond + texte).
     #[test]
-    fn barbato_flyer_renders_to_rgba_at_native_a6_resolution() {
-        let mut app = app_with_layers(1);
-        app.doc.size = (874, 1232);
-        app.seed_template_content(TemplateContent::BarbatoFlyer);
+    fn seeded_templates_render_to_rgba_at_native_resolution() {
+        for (content, size) in [(TemplateContent::InstagramPromo, (1080, 1080)), (TemplateContent::FacebookBanner, (1200, 630))] {
+            let mut app = app_with_layers(1);
+            app.doc.size = size;
+            app.seed_template_content(content);
 
-        let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |_| {});
-        let mut c = crate::render::compositor::Compositor::new();
-        let (w, h, rgba) = c.render_to_rgba(&ctx, &app.doc, Color32::WHITE).expect("render");
-        assert_eq!((w, h), (874, 1232));
-        let first = &rgba[0..4];
-        assert!(rgba.chunks_exact(4).any(|px| px != first), "le rendu ne doit pas être un aplat uniforme");
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput::default(), |_| {});
+            let mut c = crate::render::compositor::Compositor::new();
+            let (w, h, rgba) = c.render_to_rgba(&ctx, &app.doc, Color32::WHITE).expect("render");
+            assert_eq!((w, h), size, "résolution native attendue ({content:?})");
+            let first = &rgba[0..4];
+            assert!(rgba.chunks_exact(4).any(|px| px != first), "rendu non uniforme attendu ({content:?})");
+        }
     }
 
     fn app_with_layers(n: usize) -> PaintApp {
