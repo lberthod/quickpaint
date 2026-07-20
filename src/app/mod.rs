@@ -4063,6 +4063,66 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// Le gabarit Barbato doit produire tout son contenu : les rectangles de
+    /// mise en page, les blocs de texte substituables et surtout le logo PNG
+    /// embarqué (décodage `include_bytes!` → `ImageItem`) au bon ratio.
+    #[test]
+    fn seed_template_barbato_flyer_adds_rects_texts_and_the_embedded_logo() {
+        let mut app = app_with_layers(1);
+        app.doc.size = (874, 1232);
+        app.seed_template_content(TemplateContent::BarbatoFlyer);
+
+        let layer = &app.doc.layers[0];
+        assert_eq!(layer.images.len(), 1, "le logo embarqué doit être décodé et inséré");
+        assert!(layer.strokes.iter().filter(|s| s.fill).count() >= 5, "rectangles de mise en page attendus");
+        assert!(layer.texts.len() >= 12, "blocs de texte du flyer attendus, trouvé {}", layer.texts.len());
+
+        let logo = &layer.images[0];
+        let native_ratio = logo.w as f32 / logo.h as f32;
+        let shown_ratio = logo.size.0 / logo.size.1;
+        assert!((native_ratio - shown_ratio).abs() < 0.01, "le ratio natif du logo doit être préservé");
+        assert!((logo.size.1 - 1232.0 * 0.09).abs() < 0.5, "hauteur du logo = 9 % du document");
+    }
+
+    /// Chaque gabarit riche doit passer par `seed_template_content` sans
+    /// paniquer et laisser un historique annulable jusqu'au document vide.
+    #[test]
+    fn seed_template_content_is_fully_undoable_for_every_template() {
+        for content in [TemplateContent::InstagramPromo, TemplateContent::FacebookBanner, TemplateContent::BarbatoFlyer] {
+            let mut app = app_with_layers(1);
+            app.doc.size = (874, 1232);
+            app.seed_template_content(content);
+            let layer = &app.doc.layers[0];
+            assert!(layer.strokes.len() + layer.texts.len() + layer.images.len() > 0);
+            for _ in 0..64 {
+                app.undo();
+            }
+            let layer = &app.doc.layers[0];
+            assert_eq!(
+                layer.strokes.len() + layer.texts.len() + layer.images.len(),
+                0,
+                "l'annulation complète doit revenir au document vide ({content:?})"
+            );
+        }
+    }
+
+    /// Rendu d'export du flyer Barbato hors écran : le compositeur doit
+    /// produire une image A6 non uniforme (fond + bandeaux + logo + texte).
+    #[test]
+    fn barbato_flyer_renders_to_rgba_at_native_a6_resolution() {
+        let mut app = app_with_layers(1);
+        app.doc.size = (874, 1232);
+        app.seed_template_content(TemplateContent::BarbatoFlyer);
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = crate::render::compositor::Compositor::new();
+        let (w, h, rgba) = c.render_to_rgba(&ctx, &app.doc, Color32::WHITE).expect("render");
+        assert_eq!((w, h), (874, 1232));
+        let first = &rgba[0..4];
+        assert!(rgba.chunks_exact(4).any(|px| px != first), "le rendu ne doit pas être un aplat uniforme");
+    }
+
     fn app_with_layers(n: usize) -> PaintApp {
         let mut app = PaintApp::default();
         app.doc.layers.clear();
@@ -4628,3 +4688,4 @@ mod tests {
         assert!(app.doc.named_selections.is_empty());
     }
 }
+
