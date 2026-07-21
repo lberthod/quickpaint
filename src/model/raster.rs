@@ -595,6 +595,43 @@ impl RasterLayer {
         }
     }
 
+    /// Compose `upper` par-dessus `self` (fusion de calques, Sprint P point
+    /// 30 : `merge_down`/`flatten` perdaient silencieusement le contenu
+    /// peint). Alpha-over classique par pixel, en ne parcourant que les
+    /// tuiles non vides de `upper` (épars). L'alpha source est multiplié par
+    /// `opacity` et par la couverture du `mask` de calque éventuel — ces deux
+    /// attributs du calque source disparaissent à la fusion, leur effet est
+    /// donc « cuit » dans les pixels pour préserver l'apparence.
+    pub fn composite_over(&mut self, upper: &RasterLayer, opacity: f32, mask: Option<&RasterLayer>) {
+        let keys: Vec<TileKey> = upper.tiles.keys().copied().collect();
+        for (tx, ty) in keys {
+            let (bx, by) = (tx * TILE, ty * TILE);
+            for ly in 0..TILE {
+                for lx in 0..TILE {
+                    let (x, y) = (bx + lx, by + ly);
+                    let src = upper.get_pixel(x, y);
+                    let mut sa = src[3] as f32 / 255.0 * opacity.clamp(0.0, 1.0);
+                    if let Some(m) = mask {
+                        sa *= m.mask_coverage(x, y) as f32 / 255.0;
+                    }
+                    if sa <= 0.0 {
+                        continue;
+                    }
+                    let dst = self.get_pixel(x, y);
+                    let da = dst[3] as f32 / 255.0;
+                    let oa = sa + da * (1.0 - sa);
+                    let mut out = [0u8; 4];
+                    for c in 0..3 {
+                        let v = (src[c] as f32 * sa + dst[c] as f32 * da * (1.0 - sa)) / oa;
+                        out[c] = v.round().clamp(0.0, 255.0) as u8;
+                    }
+                    out[3] = (oa * 255.0).round().clamp(0.0, 255.0) as u8;
+                    self.set_pixel(x, y, out);
+                }
+            }
+        }
+    }
+
     /// Couverture d'un pixel utilisé comme **masque de calque** (roadmap P2
     /// #14) : un pixel jamais peint est visible par défaut (255, comme un
     /// masque neuf, blanc) ; un pixel peint utilise son canal rouge comme
@@ -661,6 +698,32 @@ impl RasterLayer {
         let resized = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
         let (nox, noy) = ((ox as f32 * sx).round() as i32, (oy as f32 * sy).round() as i32);
         Self::from_flat(nox, noy, nw, nh, resized.as_raw())
+    }
+
+    /// Copie retournée en miroir (point 66 de l'audit : Retourner
+    /// horizontalement/verticalement) dans un document de taille
+    /// `(doc_w, doc_h)` : les pixels sont inversés et l'origine repositionnée
+    /// pour que le contenu occupe l'emplacement miroir dans le document.
+    /// Même approche `flatten`/`from_flat` que `translated`/`scaled` :
+    /// action ponctuelle, pas une opération par frame.
+    pub fn flipped(&self, horizontal: bool, doc_w: u32, doc_h: u32) -> Self {
+        let Some((ox, oy, w, h, rgba)) = self.flatten() else { return Self::default() };
+        let (w_us, h_us) = (w as usize, h as usize);
+        let mut out = vec![0u8; rgba.len()];
+        for y in 0..h_us {
+            for x in 0..w_us {
+                let (sx, sy) = if horizontal { (w_us - 1 - x, y) } else { (x, h_us - 1 - y) };
+                let d = (y * w_us + x) * 4;
+                let s = (sy * w_us + sx) * 4;
+                out[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+            }
+        }
+        let (nox, noy) = if horizontal {
+            (doc_w as i32 - (ox + w as i32), oy)
+        } else {
+            (ox, doc_h as i32 - (oy + h as i32))
+        };
+        Self::from_flat(nox, noy, w, h, &out)
     }
 
     /// Reconstruit depuis un buffer RGBA dense placé à `(ox, oy)`.
@@ -749,6 +812,37 @@ pub fn decode(enc: &RasterEncoded) -> RasterLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fusion de calques (Sprint P, point 30) : un pixel opaque du calque
+    /// source recouvre le fond ; opacité et masque du calque source sont
+    /// cuits dans l'alpha résultant.
+    #[test]
+    fn composite_over_applies_opacity_and_layer_mask() {
+        let mut lower = RasterLayer::default();
+        lower.set_pixel(5, 5, [0, 0, 255, 255]);
+        let mut upper = RasterLayer::default();
+        upper.set_pixel(5, 5, [255, 0, 0, 255]);
+        upper.set_pixel(9, 9, [0, 255, 0, 255]);
+
+        // Masque du calque source : noir peint sur (9,9) = masqué.
+        let mut mask = RasterLayer::default();
+        mask.set_pixel(9, 9, [0, 0, 0, 255]);
+
+        lower.composite_over(&upper, 0.5, Some(&mask));
+        let merged = lower.get_pixel(5, 5);
+        assert_eq!(merged[3], 255, "fond opaque : l'alpha reste plein");
+        assert_eq!(merged[0], 128, "rouge à 50 % d'opacité sur fond bleu");
+        assert_eq!(lower.get_pixel(9, 9)[3], 0, "pixel masqué par le masque du calque source : rien de déposé");
+    }
+
+    #[test]
+    fn composite_over_on_empty_ground_copies_the_source() {
+        let mut lower = RasterLayer::default();
+        let mut upper = RasterLayer::default();
+        upper.set_pixel(3, 4, [10, 20, 30, 200]);
+        lower.composite_over(&upper, 1.0, None);
+        assert_eq!(lower.get_pixel(3, 4), [10, 20, 30, 200]);
+    }
 
     #[test]
     fn mask_coverage_defaults_to_fully_visible() {

@@ -73,6 +73,26 @@ impl ImageItem {
     pub fn bounds(&self) -> ((f32, f32), (f32, f32)) {
         (self.pos, (self.pos.0 + self.size.0, self.pos.1 + self.size.1))
     }
+
+    /// Retourne les pixels source en miroir (point 66 de l'audit). Invalide
+    /// le PNG persisté, ré-encodé paresseusement via [`Self::ensure_encoded`].
+    pub fn flip_pixels(&mut self, horizontal: bool) {
+        self.decode();
+        let (w, h) = (self.w as usize, self.h as usize);
+        if w == 0 || h == 0 || self.rgba.len() < w * h * 4 {
+            return;
+        }
+        let src = self.rgba.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let (sx, sy) = if horizontal { (w - 1 - x, y) } else { (x, h - 1 - y) };
+                let d = (y * w + x) * 4;
+                let s = (sy * w + sx) * 4;
+                self.rgba[d..d + 4].copy_from_slice(&src[s..s + 4]);
+            }
+        }
+        self.png_b64.clear();
+    }
 }
 
 fn encode_png_b64(w: u32, h: u32, rgba: &[u8]) -> Option<String> {

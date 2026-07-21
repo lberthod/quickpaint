@@ -17,11 +17,15 @@ pub enum GuideLine {
 /// `delta`) accroche un de ses bords/centre à un bord/centre de `targets`,
 /// axe X et axe Y indépendamment, dans la limite de `threshold` (unités
 /// document — déjà converti depuis un seuil écran par l'appelant, pour
-/// rester constant visuellement quel que soit le zoom). Renvoie le delta
+/// rester constant visuellement quel que soit le zoom). `extra_x`/`extra_y` :
+/// lignes candidates supplémentaires (guides manuels, Sprint R point 95) —
+/// candidates sur un seul axe, contrairement aux boîtes. Renvoie le delta
 /// corrigé et les guides à afficher (au plus un par axe : le plus proche).
 pub fn snap(
     moving: Box2,
     targets: &[Box2],
+    extra_x: &[f32],
+    extra_y: &[f32],
     threshold: f32,
     delta: (f32, f32),
 ) -> ((f32, f32), Vec<GuideLine>) {
@@ -39,6 +43,8 @@ pub fn snap(
         ys.push(tmx.1);
         ys.push((tmn.1 + tmx.1) * 0.5);
     }
+    xs.extend_from_slice(extra_x);
+    ys.extend_from_slice(extra_y);
 
     // (distance, décalage à appliquer, position exacte de la ligne accrochée)
     let best_axis = |candidates: &[f32], probes: [f32; 3]| -> Option<(f32, f32, f32)> {
@@ -82,7 +88,7 @@ mod tests {
         let targets = [((50.0, 0.0), (70.0, 10.0))];
         // Plage Y du bloc cible très différente de celle du mobile, pour ne
         // pas accrocher accidentellement l'axe Y aussi (isole le test à X).
-        let (delta, guides) = snap(moving, &targets, 6.0, (48.0, 500.0));
+        let (delta, guides) = snap(moving, &targets, &[], &[], 6.0, (48.0, 500.0));
         assert_eq!(delta, (50.0, 500.0));
         assert_eq!(guides, vec![GuideLine::Vertical(50.0)]);
     }
@@ -91,7 +97,7 @@ mod tests {
     fn no_snap_outside_threshold() {
         let moving = ((0.0, 0.0), (10.0, 10.0));
         let targets = [((50.0, 0.0), (70.0, 10.0))];
-        let (delta, guides) = snap(moving, &targets, 6.0, (20.0, 500.0));
+        let (delta, guides) = snap(moving, &targets, &[], &[], 6.0, (20.0, 500.0));
         assert_eq!(delta, (20.0, 500.0));
         assert!(guides.is_empty());
     }
@@ -102,9 +108,19 @@ mod tests {
         // que son centre tombe près de x=100 (axe X) et y=200 (axe Y).
         let moving = ((0.0, 0.0), (10.0, 10.0)); // centre (5,5)
         let targets = [((95.0, 195.0), (105.0, 205.0))]; // centre (100,200)
-        let (delta, guides) = snap(moving, &targets, 6.0, (93.0, 193.0));
+        let (delta, guides) = snap(moving, &targets, &[], &[], 6.0, (93.0, 193.0));
         assert_eq!(delta, (95.0, 195.0));
         assert_eq!(guides.len(), 2);
+    }
+
+    #[test]
+    fn snaps_to_a_manual_guide_line() {
+        // Guide vertical à x=50 : le bord gauche approché à 2px s'y accroche,
+        // sans polluer l'axe Y (contrairement à une boîte dégénérée).
+        let moving = ((0.0, 0.0), (10.0, 10.0));
+        let (delta, guides) = snap(moving, &[], &[50.0], &[], 6.0, (48.0, 500.0));
+        assert_eq!(delta, (50.0, 500.0));
+        assert_eq!(guides, vec![GuideLine::Vertical(50.0)]);
     }
 
     #[test]
@@ -115,7 +131,7 @@ mod tests {
         // dans ce test : seule la distance entre candidats compte ici.
         let targets = [((49.0, 500.0), (49.0, 510.0)), ((53.0, 500.0), (53.0, 510.0))];
         // Bord gauche mobile visé vers x≈49.5 : 49 (dist 0.5) bat 53 (dist 1.5).
-        let (delta, _) = snap(moving, &targets, 6.0, (49.5, 500.0));
+        let (delta, _) = snap(moving, &targets, &[], &[], 6.0, (49.5, 500.0));
         assert_eq!(delta, (49.0, 500.0));
     }
 }

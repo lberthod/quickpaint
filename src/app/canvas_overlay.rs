@@ -5,7 +5,7 @@
 //! de peinture pures (`&self`, jamais de mutation), appelées en séquence par
 //! `update()` après le rendu du document composite.
 
-use super::{ellipse_points, ruler_step, ActiveTool, Color32, PaintApp, Pos2, Rect, SelectMode, Vec2, ViewTransform};
+use super::{ruler_step, ActiveTool, Color32, PaintApp, Pos2, Rect, SelectMode, Vec2, ViewTransform};
 use crate::tools::hit;
 
 impl PaintApp {
@@ -35,14 +35,42 @@ impl PaintApp {
         }
     }
 
+    /// Guides manuels (Sprint R, point 95) : lignes cyan sur toute la
+    /// hauteur/largeur du document, plus l'aperçu du guide en cours de
+    /// glissé (plus opaque). Peints sous les règles, au-dessus du contenu.
+    pub(super) fn paint_manual_guides(&self, painter: &egui::Painter, view: &ViewTransform) {
+        if self.doc.guides.is_empty() && self.guide_drag_preview().is_none() {
+            return;
+        }
+        let p = painter.with_clip_rect(self.last_canvas_rect);
+        let (w, h) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
+        let color = Color32::from_rgba_unmultiplied(0, 170, 230, 170);
+        let line = |vertical: bool, pos: f32, stroke: egui::Stroke| {
+            let (a, b) = if vertical {
+                (view.doc_to_screen((pos, 0.0)), view.doc_to_screen((pos, h)))
+            } else {
+                (view.doc_to_screen((0.0, pos)), view.doc_to_screen((w, pos)))
+            };
+            p.line_segment([a, b], stroke);
+        };
+        for g in &self.doc.guides {
+            line(g.vertical, g.pos, egui::Stroke::new(1.0, color));
+        }
+        if let Some((vertical, pos)) = self.guide_drag_preview() {
+            line(vertical, pos, egui::Stroke::new(1.5, Color32::from_rgb(0, 170, 230)));
+        }
+    }
+
     /// Règles graduées (haut + gauche) en coordonnées document. Le pas est
     /// choisi pour rester lisible quel que soit le zoom.
     pub(super) fn paint_rulers(&self, painter: &egui::Painter, view: &ViewTransform) {
         const TH: f32 = 18.0; // épaisseur de la règle (px écran)
         let cr = self.last_canvas_rect;
-        let bg = Color32::from_gray(244);
+        // Thème (Sprint R, point 96) : les règles suivent le mode clair/sombre.
+        let dark = painter.ctx().style().visuals.dark_mode;
+        let bg = if dark { Color32::from_gray(38) } else { Color32::from_gray(244) };
         let line = Color32::from_gray(120);
-        let text = Color32::from_gray(90);
+        let text = if dark { Color32::from_gray(170) } else { Color32::from_gray(90) };
         let top = Rect::from_min_max(cr.min, egui::pos2(cr.max.x, cr.min.y + TH));
         let left = Rect::from_min_max(cr.min, egui::pos2(cr.min.x + TH, cr.max.y));
         painter.rect_filled(top, 0.0, bg);
@@ -166,10 +194,18 @@ impl PaintApp {
         }
 
         let d = if moving { self.move_delta } else { (0.0, 0.0) };
-        let p0 = view.doc_to_screen((min.0 + d.0, min.1 + d.1));
-        let p1 = view.doc_to_screen((max.0 + d.0, max.1 + d.1));
-        let r = Rect::from_two_pos(p0, p1).expand(2.0);
-        painter.rect_stroke(r, 2.0, egui::Stroke::new(1.5, blue));
+        // Cadre = polygone des 4 coins projetés : suit la rotation de la vue
+        // (Sprint T, point 93) là où un Rect écran resterait axis-aligned.
+        let frame: Vec<Pos2> = [
+            (min.0 + d.0, min.1 + d.1),
+            (max.0 + d.0, min.1 + d.1),
+            (max.0 + d.0, max.1 + d.1),
+            (min.0 + d.0, max.1 + d.1),
+        ]
+        .into_iter()
+        .map(|c| view.doc_to_screen(c))
+        .collect();
+        painter.add(egui::Shape::closed_line(frame, egui::Stroke::new(1.5, blue)));
 
         // Poignées d'échelle (coins) + rotation (au-dessus) — toute sélection.
         if !moving {
@@ -258,22 +294,50 @@ impl PaintApp {
         let blue = Color32::from_rgb(40, 110, 240);
         let fill = Color32::from_rgba_unmultiplied(40, 110, 240, 28);
         if let Some((a, b)) = self.marquee {
-            let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
+            // Géométrie construite en coordonnées document puis projetée
+            // point à point : suit la rotation de la vue (Sprint T, point 93).
             if self.select_mode == SelectMode::Ellipse {
+                let (cx, cy) = ((a.0 + b.0) * 0.5, (a.1 + b.1) * 0.5);
+                let (rx, ry) = (((b.0 - a.0) * 0.5).abs(), ((b.1 - a.1) * 0.5).abs());
+                let pts: Vec<Pos2> = (0..48)
+                    .map(|i| {
+                        let t = i as f32 / 48.0 * std::f32::consts::TAU;
+                        view.doc_to_screen((cx + rx * t.cos(), cy + ry * t.sin()))
+                    })
+                    .collect();
                 painter.add(egui::Shape::Path(egui::epaint::PathShape::convex_polygon(
-                    ellipse_points(r, 48),
+                    pts,
                     fill,
                     egui::Stroke::new(1.0, blue),
                 )));
             } else {
-                painter.rect_filled(r, 0.0, fill);
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.0, blue));
+                let corners: Vec<Pos2> = [(a.0, a.1), (b.0, a.1), (b.0, b.1), (a.0, b.1)]
+                    .into_iter()
+                    .map(|c| view.doc_to_screen(c))
+                    .collect();
+                painter.add(egui::Shape::Path(egui::epaint::PathShape::convex_polygon(
+                    corners,
+                    fill,
+                    egui::Stroke::new(1.0, blue),
+                )));
             }
-        } else if self.lasso.len() >= 2 {
-            let pts: Vec<Pos2> = self.lasso.iter().map(|&d| view.doc_to_screen(d)).collect();
-            painter.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0, blue)));
-            // Trait de fermeture (du dernier point au premier).
-            painter.line_segment([pts[pts.len() - 1], pts[0]], egui::Stroke::new(1.0, fill));
+        } else if !self.lasso.is_empty() {
+            let mut pts: Vec<Pos2> = self.lasso.iter().map(|&d| view.doc_to_screen(d)).collect();
+            // Lasso polygonal (point 52) : segment élastique du dernier sommet
+            // posé vers le curseur, comme l'aperçu de la plume (`paint_pen`).
+            if self.select_mode == SelectMode::PolyLasso {
+                if let Some(hp) = painter.ctx().pointer_hover_pos() {
+                    pts.push(hp);
+                }
+                for &p in &pts {
+                    painter.rect_filled(Rect::from_center_size(p, Vec2::splat(5.0)), 1.0, blue);
+                }
+            }
+            if pts.len() >= 2 {
+                painter.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0, blue)));
+                // Trait de fermeture (du dernier point au premier).
+                painter.line_segment([pts[pts.len() - 1], pts[0]], egui::Stroke::new(1.0, fill));
+            }
         }
     }
 

@@ -219,6 +219,45 @@ pub fn save_animated_gif(frames: Vec<image::Frame>) -> std::io::Result<PathBuf> 
     Ok(path)
 }
 
+/// Ouvre un sélecteur « Enregistrer » et écrit un **APNG animé** (Sprint T,
+/// point 100a — décision produit du 20 juillet 2026 : APNG plutôt que MP4,
+/// aucune dépendance système, couleurs 24 bits + alpha là où le GIF est
+/// limité à 256 couleurs). `frames` = (délai ms, pixels RGBA pleine taille).
+pub fn save_animated_apng(frames: &[(u32, Vec<u8>)], w: u32, h: u32) -> std::io::Result<PathBuf> {
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("PNG animé (APNG)", &["png"])
+        .set_file_name(format!("QuickPaint-{stamp}-anime.png"))
+        .save_file()
+    else {
+        return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, t("annulé", "cancelled")));
+    };
+    let file = std::fs::File::create(&path)?;
+    encode_animated_apng(file, frames, w, h)?;
+    Ok(path)
+}
+
+/// Encodage APNG proprement dit, séparé de la sélection de fichier pour
+/// rester testable sans dialogue natif. Boucle infinie (num_plays = 0).
+fn encode_animated_apng<W: std::io::Write>(out: W, frames: &[(u32, Vec<u8>)], w: u32, h: u32) -> std::io::Result<()> {
+    if frames.len() < 2 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, t("au moins 2 frames requises", "at least 2 frames required")));
+    }
+    let to_io = |e: png::EncodingError| std::io::Error::other(e.to_string());
+    let mut enc = png::Encoder::new(out, w, h);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.set_animated(frames.len() as u32, 0).map_err(to_io)?;
+    let mut writer = enc.write_header().map_err(to_io)?;
+    for (delay_ms, rgba) in frames {
+        // Délai en fraction de seconde (ms/1000), plafonné au u16 du format.
+        writer.set_frame_delay((*delay_ms).min(u16::MAX as u32) as u16, 1000).map_err(to_io)?;
+        writer.write_image_data(rgba).map_err(to_io)?;
+    }
+    writer.finish().map_err(to_io)?;
+    Ok(())
+}
+
 /// Encodage GIF animé proprement dit (Sprint L.6), séparé de la sélection de
 /// fichier pour rester testable sans dialogue natif. `frames` doit porter au
 /// moins 2 éléments (sinon ce n'est pas une animation) et déjà son délai par
@@ -390,6 +429,27 @@ mod tests {
         assert!((num as f32 / den as f32 - 100.0).abs() < 15.0, "délai frame 0 ≈ 100ms, got {num}/{den}");
         let (num, den) = decoded[1].delay().numer_denom_ms();
         assert!((num as f32 / den as f32 - 250.0).abs() < 15.0, "délai frame 1 ≈ 250ms, got {num}/{den}");
+    }
+
+    /// APNG (Sprint T, point 100a) : le fichier produit est un PNG valide
+    /// portant le chunk d'animation `acTL` et un `fcTL` par frame.
+    #[test]
+    fn encode_animated_apng_writes_animation_chunks() {
+        let mut buf = Vec::new();
+        let px = vec![255u8; 2 * 2 * 4];
+        let frames = vec![(100u32, px.clone()), (200u32, px)];
+        encode_animated_apng(&mut buf, &frames, 2, 2).expect("apng");
+        assert!(buf.starts_with(&[0x89, b'P', b'N', b'G']));
+        let has = |tag: &[u8]| buf.windows(tag.len()).any(|w| w == tag);
+        assert!(has(b"acTL"), "chunk de contrôle d'animation manquant");
+        assert!(has(b"fcTL"), "chunk de contrôle de frame manquant");
+    }
+
+    #[test]
+    fn encode_animated_apng_rejects_fewer_than_two_frames() {
+        let mut buf = Vec::new();
+        let frames = vec![(100u32, vec![0u8; 4])];
+        assert!(encode_animated_apng(&mut buf, &frames, 1, 1).is_err());
     }
 
     #[test]

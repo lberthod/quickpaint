@@ -24,7 +24,7 @@ pub fn arc_chars(t: &TextItem, arc: &TextArc) -> Vec<ArcChar> {
     let dir = if arc.flip { -1.0 } else { 1.0 };
     t.text
         .chars()
-        .zip(arc.char_angles(&t.text, t.size))
+        .zip(arc.char_angles(&t.text, t.size, t.letter_spacing))
         .map(|(ch, theta)| ArcChar {
             ch,
             offset: (arc.radius * theta.cos(), arc.radius * theta.sin()),
@@ -44,6 +44,12 @@ pub type Pass = ((f32, f32), [u8; 4]);
 /// silencieusement sur la police par défaut (aucun crash).
 pub fn family(t: &TextItem) -> egui::FontFamily {
     if let Some(name) = &t.font_family {
+        // Italique (Sprint Q, point 82) : famille egui dédiée, toujours
+        // enregistrée par `ensure_loaded` (vraie fonte italique si la
+        // famille en a une, sinon repli romain — jamais un nom inconnu).
+        if t.italic {
+            return egui::FontFamily::Name(crate::fonts::FontManager::italic_key(name).as_str().into());
+        }
         return egui::FontFamily::Name(name.as_str().into());
     }
     match t.font {
@@ -62,22 +68,26 @@ pub fn layout(ctx: &egui::Context, t: &TextItem, px_per_doc: f32) -> Arc<egui::G
     let font_id = egui::FontId::new((t.size * px_per_doc).max(1.0), family(t));
     let text = if t.text.is_empty() { " ".to_string() } else { t.text.clone() };
 
+    // Interligne et crénage réglables (Sprint Q, point 83) : portés par le
+    // `TextFormat` — même format pour tous les alignements, la mise en page
+    // reste cohérente entre le painter live et le compositeur CPU.
+    let mut format = egui::text::TextFormat::simple(font_id, egui::Color32::WHITE);
+    format.extra_letter_spacing = t.letter_spacing * px_per_doc;
+    format.line_height = Some((t.size * t.line_height.max(0.5) * px_per_doc).max(1.0));
+
     let halign = match t.align {
         TextAlign::Left => egui::Align::LEFT,
         TextAlign::Center => egui::Align::Center,
         TextAlign::Right => egui::Align::RIGHT,
     };
+    let mut job = egui::text::LayoutJob::single_section(text, format);
     if t.align == TextAlign::Left {
-        return ctx.fonts(|f| f.layout_no_wrap(text, font_id, egui::Color32::WHITE));
+        return ctx.fonts(|f| f.layout_job(job));
     }
 
     // Largeur naturelle (sans retour à la ligne) puis alignement dans ce bloc.
-    let natural = ctx.fonts(|f| f.layout_no_wrap(text.clone(), font_id.clone(), egui::Color32::WHITE));
+    let natural = ctx.fonts(|f| f.layout_job(job.clone()));
     let block_w = natural.rect.width() + 2.0;
-    let mut job = egui::text::LayoutJob::single_section(
-        text,
-        egui::text::TextFormat::simple(font_id, egui::Color32::WHITE),
-    );
     job.halign = halign;
     job.wrap.max_width = block_w;
     ctx.fonts(|f| f.layout_job(job))

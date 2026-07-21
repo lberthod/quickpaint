@@ -426,7 +426,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // composé. Le menu déroulant choisit le *type* (preset discret, niveaux,
     // teinte/saturation, courbes) ; les paramètres continus s'éditent avec
     // des sliders juste en dessous.
-    if let Some(mut adj) = layer.adjustment {
+    if let Some(mut adj) = layer.adjustment.clone() {
         use crate::tools::filter::{Adjustment, Filter};
         ui.horizontal(|ui| {
             ui.label(t("Réglage", "Adjustment"));
@@ -515,6 +515,9 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     ui.label(t("Hautes lumières", "Highlights"));
                     ui.add(egui::Slider::new(highlight, 0..=255));
                 });
+            }
+            Adjustment::CurvesFree { master, r, g, b } => {
+                curves_free_editor(ui, master, r, g, b);
             }
             Adjustment::Distortion { amount } => {
                 ui.horizontal(|ui| {
@@ -937,4 +940,139 @@ fn short(s: &str) -> String {
     } else {
         s.to_string()
     }
+}
+
+/// Éditeur de courbes libres (Sprint S, point 73) : sélecteur de canal
+/// (RVB composite / R / V / B) + petit canevas interactif — glisser un point
+/// le déplace, cliquer sur le vide en ajoute un, clic droit en retire un
+/// (les deux extrêmes restent). L'état transitoire (canal actif, point en
+/// cours de glissé) vit dans la mémoire temporaire d'egui, pas dans le
+/// document.
+fn curves_free_editor(
+    ui: &mut Ui,
+    master: &mut Vec<(u8, u8)>,
+    r: &mut Vec<(u8, u8)>,
+    g: &mut Vec<(u8, u8)>,
+    b: &mut Vec<(u8, u8)>,
+) {
+    let chan_id = ui.id().with("curves_channel");
+    let mut chan: u8 = ui.ctx().data_mut(|d| *d.get_temp_mut_or(chan_id, 0u8));
+    ui.horizontal(|ui| {
+        for (i, label) in [t("RVB", "RGB"), "R", t("V", "G"), "B"].into_iter().enumerate() {
+            if ui.selectable_label(chan == i as u8, label).clicked() {
+                chan = i as u8;
+            }
+        }
+    });
+    ui.ctx().data_mut(|d| d.insert_temp(chan_id, chan));
+    let points = match chan {
+        1 => r,
+        2 => g,
+        3 => b,
+        _ => master,
+    };
+
+    let (resp, painter) = ui.allocate_painter(Vec2::new(200.0, 150.0), Sense::click_and_drag());
+    let rect = resp.rect;
+    let to_screen = |x: f32, y: f32| {
+        egui::pos2(
+            rect.left() + x / 255.0 * rect.width(),
+            rect.bottom() - y / 255.0 * rect.height(),
+        )
+    };
+    let to_curve = |p: egui::Pos2| {
+        (
+            ((p.x - rect.left()) / rect.width() * 255.0).clamp(0.0, 255.0),
+            ((rect.bottom() - p.y) / rect.height() * 255.0).clamp(0.0, 255.0),
+        )
+    };
+
+    // Fond, quadrillage aux quarts, diagonale identité.
+    painter.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
+    let grid = egui::Stroke::new(1.0, ui.visuals().weak_text_color());
+    for q in 1..4 {
+        let f = q as f32 / 4.0;
+        painter.line_segment([to_screen(255.0 * f, 0.0), to_screen(255.0 * f, 255.0)], grid);
+        painter.line_segment([to_screen(0.0, 255.0 * f), to_screen(255.0, 255.0 * f)], grid);
+    }
+    painter.line_segment([to_screen(0.0, 0.0), to_screen(255.0, 255.0)], grid);
+
+    // Interaction : glissé d'un point existant, ajout au clic, retrait au
+    // clic droit.
+    let drag_id = ui.id().with(("curves_drag", chan));
+    let nearest = |points: &Vec<(u8, u8)>, p: egui::Pos2| {
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, &(x, y))| (i, (to_screen(x as f32, y as f32) - p).length()))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    };
+    if resp.drag_started() {
+        if let Some(p) = resp.interact_pointer_pos() {
+            let idx = nearest(points, p).filter(|&(_, d)| d <= 10.0).map(|(i, _)| i);
+            ui.ctx().data_mut(|d| d.insert_temp(drag_id, idx));
+        }
+    }
+    if resp.dragged() {
+        let idx: Option<usize> = ui.ctx().data_mut(|d| *d.get_temp_mut_or(drag_id, None));
+        if let (Some(i), Some(p)) = (idx, resp.interact_pointer_pos()) {
+            if i < points.len() {
+                let (cx, cy) = to_curve(p);
+                // L'abscisse reste strictement entre les points voisins
+                // (courbe = fonction de l'entrée, jamais deux sorties pour
+                // une même entrée).
+                let lo = if i == 0 { 0.0 } else { points[i - 1].0 as f32 + 1.0 };
+                let hi = if i + 1 == points.len() { 255.0 } else { points[i + 1].0 as f32 - 1.0 };
+                points[i] = (cx.clamp(lo, hi).round() as u8, cy.round() as u8);
+            }
+        }
+    }
+    if resp.drag_stopped() {
+        ui.ctx().data_mut(|d| d.insert_temp(drag_id, None::<usize>));
+    }
+    if resp.clicked() {
+        if let Some(p) = resp.interact_pointer_pos() {
+            let on_point = nearest(points, p).filter(|&(_, d)| d <= 10.0).is_some();
+            if !on_point && points.len() < 16 {
+                let (cx, cy) = to_curve(p);
+                points.push((cx.round() as u8, cy.round() as u8));
+                points.sort_by_key(|pt| pt.0);
+                points.dedup_by_key(|pt| pt.0);
+            }
+        }
+    }
+    if resp.secondary_clicked() {
+        if let Some(p) = resp.interact_pointer_pos() {
+            if points.len() > 2 {
+                if let Some((i, d)) = nearest(points, p) {
+                    if d <= 10.0 {
+                        points.remove(i);
+                    }
+                }
+            }
+        }
+    }
+
+    // Courbe (LUT rééchantillonnée) puis points de contrôle par-dessus.
+    let lut = crate::tools::filter::points_lut(points);
+    let curve_color = match chan {
+        1 => egui::Color32::from_rgb(220, 60, 60),
+        2 => egui::Color32::from_rgb(60, 180, 60),
+        3 => egui::Color32::from_rgb(70, 110, 230),
+        _ => ui.visuals().text_color(),
+    };
+    let samples: Vec<egui::Pos2> = (0..=64).map(|i| {
+        let x = i as f32 / 64.0 * 255.0;
+        to_screen(x, lut[(x.round() as usize).min(255)] as f32)
+    }).collect();
+    painter.add(egui::Shape::line(samples, egui::Stroke::new(1.5, curve_color)));
+    for &(x, y) in points.iter() {
+        let c = to_screen(x as f32, y as f32);
+        painter.circle_filled(c, 3.5, egui::Color32::WHITE);
+        painter.circle_stroke(c, 3.5, egui::Stroke::new(1.5, curve_color));
+    }
+    ui.label(t(
+        "Clic : ajouter · glisser : déplacer · clic droit : retirer",
+        "Click: add · drag: move · right-click: remove",
+    ));
 }

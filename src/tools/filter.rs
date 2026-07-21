@@ -96,17 +96,29 @@ impl Filter {
 
 /// Réglage non destructif d'un calque d'ajustement (Sprint 8.1/8.2), en plus
 /// des 9 presets discrets de [`Filter`] : niveaux et teinte/saturation à
-/// paramètres continus, courbe à 3 points ancrés (ombres/tons
-/// moyens/hautes lumières). Canal composite RVB uniquement (pas de réglage
-/// par canal séparé) — suffisant pour retrouver le cœur PhotoFiltre/Photoshop
-/// sans la complexité d'un éditeur de courbe à points libres.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+/// paramètres continus, courbes libres par canal (Sprint S, point 73).
+/// Plus `Copy` depuis le Sprint S (les courbes portent des `Vec` de points).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Adjustment {
     Preset(Filter),
     Levels { black: u8, white: u8, gamma: f32 },
     /// `hue` en degrés (-180..180), `sat`/`light` en écart relatif (-1.0..1.0).
     HueSaturation { hue: f32, sat: f32, light: f32 },
+    /// Ancienne courbe à 3 points ancrés (ombres/tons moyens/hautes
+    /// lumières) — conservée pour rouvrir les projets existants ; les
+    /// nouveaux calques utilisent [`Adjustment::CurvesFree`].
     Curves { shadow: u8, mid: u8, highlight: u8 },
+    /// Courbes libres par canal (Sprint S, point 73) : points de contrôle
+    /// `(entrée, sortie)` — `master` s'applique aux trois canaux, puis les
+    /// courbes `r`/`g`/`b` individuelles. Interpolation spline **monotone**
+    /// (Fritsch–Carlson : pas de dépassement entre deux points), LUT 256
+    /// précalculée à l'application. Deux points (0,0)–(255,255) = identité.
+    CurvesFree {
+        master: Vec<(u8, u8)>,
+        r: Vec<(u8, u8)>,
+        g: Vec<(u8, u8)>,
+        b: Vec<(u8, u8)>,
+    },
     /// Distorsion radiale (Sprint 4.2), -1.0..=1.0 : positif = barrel
     /// (bombé), négatif = pincushion (creusé). 0 = identité.
     Distortion { amount: f32 },
@@ -190,12 +202,13 @@ pub enum Adjustment {
 }
 
 impl Adjustment {
-    pub fn label(self) -> String {
+    pub fn label(&self) -> String {
         match self {
             Adjustment::Preset(f) => f.label().to_string(),
             Adjustment::Levels { .. } => t("Niveaux", "Levels").to_string(),
             Adjustment::HueSaturation { .. } => t("Teinte/Saturation", "Hue/Saturation").to_string(),
-            Adjustment::Curves { .. } => t("Courbes", "Curves").to_string(),
+            Adjustment::Curves { .. } => t("Courbes (3 points)", "Curves (3 points)").to_string(),
+            Adjustment::CurvesFree { .. } => t("Courbes", "Curves").to_string(),
             Adjustment::Distortion { .. } => t("Distorsion", "Distortion").to_string(),
             Adjustment::ChromaticAberration { .. } => t("Aberration chromatique", "Chromatic aberration").to_string(),
             Adjustment::MotionBlur { .. } => t("Flou de mouvement", "Motion blur").to_string(),
@@ -226,8 +239,11 @@ impl Adjustment {
         Adjustment::HueSaturation { hue: 0.0, sat: 0.0, light: 0.0 }
     }
 
+    /// Courbes libres identité (Sprint S) : deux points (0,0)–(255,255) sur
+    /// chaque canal.
     pub fn default_curves() -> Self {
-        Adjustment::Curves { shadow: 0, mid: 128, highlight: 255 }
+        let id = vec![(0u8, 0u8), (255u8, 255u8)];
+        Adjustment::CurvesFree { master: id.clone(), r: id.clone(), g: id.clone(), b: id }
     }
 
     pub fn default_distortion() -> Self {
@@ -310,7 +326,7 @@ impl Adjustment {
 
     /// Signature FNV-1a des paramètres, pour l'invalidation du cache de rendu
     /// (`Adjustment` porte des `f32`, donc pas de `Hash`/`Eq` dérivable).
-    pub fn hash_key(self) -> u64 {
+    pub fn hash_key(&self) -> u64 {
         let mut h = 0xcbf29ce484222325u64;
         let mut mix = |v: u64| {
             h ^= v;
@@ -319,12 +335,12 @@ impl Adjustment {
         match self {
             Adjustment::Preset(f) => {
                 mix(1);
-                mix(f as u64);
+                mix(*f as u64);
             }
             Adjustment::Levels { black, white, gamma } => {
                 mix(2);
-                mix(black as u64);
-                mix(white as u64);
+                mix(*black as u64);
+                mix(*white as u64);
                 mix(gamma.to_bits() as u64);
             }
             Adjustment::HueSaturation { hue, sat, light } => {
@@ -335,9 +351,19 @@ impl Adjustment {
             }
             Adjustment::Curves { shadow, mid, highlight } => {
                 mix(4);
-                mix(shadow as u64);
-                mix(mid as u64);
-                mix(highlight as u64);
+                mix(*shadow as u64);
+                mix(*mid as u64);
+                mix(*highlight as u64);
+            }
+            Adjustment::CurvesFree { master, r, g, b } => {
+                mix(27);
+                for chan in [master, r, g, b] {
+                    mix(chan.len() as u64);
+                    for &(x, y) in chan {
+                        mix(x as u64);
+                        mix(y as u64);
+                    }
+                }
             }
             Adjustment::Distortion { amount } => {
                 mix(5);
@@ -436,6 +462,7 @@ pub fn apply_adjustment(adj: Adjustment, rgba: &mut Vec<u8>, w: u32, h: u32) {
         Adjustment::Levels { black, white, gamma } => levels(rgba, black, white, gamma),
         Adjustment::HueSaturation { hue, sat, light } => hue_saturation(rgba, hue, sat, light),
         Adjustment::Curves { shadow, mid, highlight } => curves(rgba, shadow, mid, highlight),
+        Adjustment::CurvesFree { master, r, g, b } => curves_free(rgba, &master, &r, &g, &b),
         Adjustment::Distortion { amount } => *rgba = distort_radial(rgba, w as usize, h as usize, amount),
         Adjustment::ChromaticAberration { amount } => *rgba = chromatic_aberration(rgba, w as usize, h as usize, amount),
         Adjustment::MotionBlur { angle, distance } => *rgba = motion_blur(rgba, w as usize, h as usize, angle, distance),
@@ -840,6 +867,81 @@ fn curve_lut(shadow: u8, mid: u8, highlight: u8) -> [u8; 256] {
         let x = i as f32;
         let y = if x <= 128.0 { s + (m - s) * (x / 128.0) } else { m + (h - m) * ((x - 128.0) / 127.0) };
         *slot = y.round().clamp(0.0, 255.0) as u8;
+    }
+    lut
+}
+
+/// Courbes libres par canal (Sprint S, point 73) : composition LUT master
+/// puis LUT du canal — `sortie = canal[master[entrée]]`.
+fn curves_free(rgba: &mut [u8], master: &[(u8, u8)], r: &[(u8, u8)], g: &[(u8, u8)], b: &[(u8, u8)]) {
+    let ml = points_lut(master);
+    let luts = [points_lut(r), points_lut(g), points_lut(b)];
+    for px in rgba.chunks_exact_mut(4) {
+        for c in 0..3 {
+            px[c] = luts[c][ml[px[c] as usize] as usize];
+        }
+    }
+}
+
+/// LUT 256 d'une courbe à points de contrôle `(entrée, sortie)` : tri par
+/// entrée (doublons fusionnés, dernier gagne), puis spline **monotone** de
+/// Fritsch–Carlson entre les points — lisse comme une courbe Photoshop mais
+/// sans jamais dépasser l'intervalle des sorties voisines (pas d'oscillation
+/// parasite). Hors de la plage des points : prolongé à plat. Moins de 2
+/// points = identité.
+pub fn points_lut(points: &[(u8, u8)]) -> [u8; 256] {
+    let mut lut = [0u8; 256];
+    let mut pts: Vec<(u8, u8)> = points.to_vec();
+    pts.sort_by_key(|p| p.0);
+    pts.dedup_by_key(|p| p.0);
+    if pts.len() < 2 {
+        for (i, v) in lut.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+        return lut;
+    }
+    let xs: Vec<f32> = pts.iter().map(|p| p.0 as f32).collect();
+    let ys: Vec<f32> = pts.iter().map(|p| p.1 as f32).collect();
+    let n = pts.len();
+    // Pentes des segments, puis tangentes de Fritsch–Carlson.
+    let d: Vec<f32> = (0..n - 1).map(|i| (ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i])).collect();
+    let mut m = vec![0.0f32; n];
+    m[0] = d[0];
+    m[n - 1] = d[n - 2];
+    for i in 1..n - 1 {
+        m[i] = if d[i - 1] * d[i] <= 0.0 { 0.0 } else { (d[i - 1] + d[i]) * 0.5 };
+    }
+    for i in 0..n - 1 {
+        if d[i] == 0.0 {
+            m[i] = 0.0;
+            m[i + 1] = 0.0;
+            continue;
+        }
+        let (a, b) = (m[i] / d[i], m[i + 1] / d[i]);
+        let s = a * a + b * b;
+        if s > 9.0 {
+            let t = 3.0 / s.sqrt();
+            m[i] = t * a * d[i];
+            m[i + 1] = t * b * d[i];
+        }
+    }
+    for (x, v) in lut.iter_mut().enumerate() {
+        let xf = x as f32;
+        *v = if xf <= xs[0] {
+            ys[0].round() as u8
+        } else if xf >= xs[n - 1] {
+            ys[n - 1].round() as u8
+        } else {
+            let i = (0..n - 1).find(|&i| xf <= xs[i + 1]).unwrap_or(n - 2);
+            let h = xs[i + 1] - xs[i];
+            let t = (xf - xs[i]) / h;
+            let (t2, t3) = (t * t, t * t * t);
+            let y = ys[i] * (2.0 * t3 - 3.0 * t2 + 1.0)
+                + m[i] * h * (t3 - 2.0 * t2 + t)
+                + ys[i + 1] * (-2.0 * t3 + 3.0 * t2)
+                + m[i + 1] * h * (t3 - t2);
+            y.round().clamp(0.0, 255.0) as u8
+        };
     }
     lut
 }
@@ -1993,6 +2095,45 @@ mod tests {
         apply_adjustment(Adjustment::Levels { black: 20, white: 255, gamma: 1.0 }, &mut px, 1, 1);
         // En dessous du point noir : écrêté à 0.
         assert_eq!(px[0], 0);
+    }
+
+    /// Sprint S (point 73) : deux points (0,0)-(255,255) = LUT identité.
+    #[test]
+    fn points_lut_two_endpoint_points_is_identity() {
+        let lut = points_lut(&[(0, 0), (255, 255)]);
+        for (i, &v) in lut.iter().enumerate() {
+            assert_eq!(v as usize, i);
+        }
+    }
+
+    /// La spline de Fritsch-Carlson est monotone : des sorties croissantes
+    /// donnent une LUT jamais décroissante (pas d'oscillation entre points).
+    #[test]
+    fn points_lut_is_monotone_for_increasing_points() {
+        let lut = points_lut(&[(0, 0), (64, 200), (128, 210), (255, 255)]);
+        for w in lut.windows(2) {
+            assert!(w[1] >= w[0], "LUT non monotone : {} puis {}", w[0], w[1]);
+        }
+        assert_eq!(lut[64], 200);
+        assert_eq!(lut[255], 255);
+    }
+
+    /// Une courbe sur le canal rouge seul ne touche ni le vert ni le bleu.
+    #[test]
+    fn curves_free_red_channel_only_affects_red() {
+        let id = vec![(0u8, 0u8), (255u8, 255u8)];
+        let boost = vec![(0u8, 80u8), (255u8, 255u8)];
+        let mut px = vec![10u8, 10, 10, 255];
+        apply_adjustment(
+            Adjustment::CurvesFree { master: id.clone(), r: boost, g: id.clone(), b: id },
+            &mut px,
+            1,
+            1,
+        );
+        assert!(px[0] > 10, "rouge relevé");
+        assert_eq!(px[1], 10);
+        assert_eq!(px[2], 10);
+        assert_eq!(px[3], 255);
     }
 
     #[test]

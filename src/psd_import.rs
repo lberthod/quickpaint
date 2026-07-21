@@ -79,10 +79,9 @@ pub fn import_psd(path: &std::path::Path) -> Result<Document, String> {
 }
 
 /// Convertit le mode de fusion PSD (via sa représentation `Debug`, voir
-/// l'appelant) vers notre `BlendMode` (6 modes seulement). Le reste
-/// (Dissolve, ColorBurn, LinearBurn, ColorDodge, LinearDodge, SoftLight,
-/// HardLight, VividLight, LinearLight, PinLight, HardMix, Difference,
-/// Exclusion, Subtract, Divide, Hue, Saturation, Color, Luminosity,
+/// l'appelant) vers notre `BlendMode` (12 modes depuis le Sprint P). Le
+/// reste (Dissolve, LinearBurn, LinearDodge, VividLight, LinearLight,
+/// PinLight, HardMix, Subtract, Divide, Hue, Saturation, Color, Luminosity,
 /// PassThrough) n'a pas d'équivalent : retombe sur Normal plutôt que de
 /// refuser l'import — un rendu légèrement différent bat un import bloqué.
 fn map_blend_mode(debug_name: &str) -> BlendMode {
@@ -92,6 +91,12 @@ fn map_blend_mode(debug_name: &str) -> BlendMode {
         "Overlay" => BlendMode::Overlay,
         "Darken" | "DarkerColor" => BlendMode::Darken,
         "Lighten" | "LighterColor" => BlendMode::Lighten,
+        "SoftLight" => BlendMode::SoftLight,
+        "HardLight" => BlendMode::HardLight,
+        "Difference" => BlendMode::Difference,
+        "Exclusion" => BlendMode::Exclusion,
+        "ColorDodge" => BlendMode::ColorDodge,
+        "ColorBurn" => BlendMode::ColorBurn,
         _ => BlendMode::Normal,
     }
 }
@@ -105,6 +110,19 @@ mod tests {
     /// deux calques 1×1, le bas vert nommé, le haut rouge — la seule façon
     /// de vérifier l'import sur un vrai fichier binaire PSD plutôt que sur
     /// la seule gestion d'erreur.
+    /// Sprint P (point 23) : les modes ajoutés sont mappés depuis le nom
+    /// PSD au lieu de retomber sur Normal.
+    #[test]
+    fn maps_the_extended_blend_modes() {
+        assert_eq!(map_blend_mode("SoftLight"), BlendMode::SoftLight);
+        assert_eq!(map_blend_mode("HardLight"), BlendMode::HardLight);
+        assert_eq!(map_blend_mode("Difference"), BlendMode::Difference);
+        assert_eq!(map_blend_mode("Exclusion"), BlendMode::Exclusion);
+        assert_eq!(map_blend_mode("ColorDodge"), BlendMode::ColorDodge);
+        assert_eq!(map_blend_mode("ColorBurn"), BlendMode::ColorBurn);
+        assert_eq!(map_blend_mode("VividLight"), BlendMode::Normal, "toujours sans équivalent : repli Normal");
+    }
+
     #[test]
     fn imports_a_real_two_layer_psd() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/two-layers-red-green-1x1.psd");
@@ -134,6 +152,8 @@ mod tests {
         assert_eq!(map_blend_mode("Screen"), BlendMode::Screen);
         assert_eq!(map_blend_mode("Normal"), BlendMode::Normal);
         // Mode sans équivalent : repli sur Normal plutôt qu'une erreur.
-        assert_eq!(map_blend_mode("HardLight"), BlendMode::Normal);
+        // (HardLight a un équivalent depuis le Sprint P — voir
+        // `maps_the_extended_blend_modes`.)
+        assert_eq!(map_blend_mode("LinearBurn"), BlendMode::Normal);
     }
 }

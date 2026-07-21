@@ -39,6 +39,15 @@ impl PaintApp {
             return;
         }
 
+        // Guides manuels (Sprint R, point 95) : tirer depuis une règle crée
+        // un guide ; l'outil Sélection peut saisir un guide existant. Le
+        // geste, quand il est actif, a priorité sur l'outil courant.
+        // (Règles et guides masqués/inactifs quand la vue est tournée —
+        // Sprint T, point 93 : leurs graduations sont axis-aligned.)
+        if self.show_rulers && self.view_angle == 0.0 && self.handle_guide_gesture(response, view) {
+            return;
+        }
+
         // Verrouillage de calque (audit_sprint_xx.md B.1) : bloque tout geste
         // qui modifierait le contenu du calque actif — un seul point de
         // contrôle avant le dispatch par outil, plutôt qu'une vérification
@@ -64,6 +73,15 @@ impl PaintApp {
                     return;
                 }
                 if response.double_clicked() {
+                    // Lasso polygonal (point 52) : le double-clic referme le
+                    // polygone en cours, prioritaire sur l'édition de plume.
+                    if self.select_mode == SelectMode::PolyLasso && !self.lasso.is_empty() {
+                        let poly = std::mem::take(&mut self.lasso);
+                        if poly.len() >= 3 {
+                            self.select_in_lasso(&poly, combine);
+                        }
+                        return;
+                    }
                     if let Some(p) = response.interact_pointer_pos() {
                         let d = view.screen_to_doc(p);
                         if let Some(id) = self.topmost_at(d) {
@@ -154,6 +172,9 @@ impl PaintApp {
                             // Glissé sur le vide → sélection par région (marquee/lasso).
                             None => match self.select_mode {
                                 SelectMode::Lasso => self.lasso = vec![d],
+                                // Lasso polygonal : les sommets se posent au
+                                // clic, un glissé sur le vide ne fait rien.
+                                SelectMode::PolyLasso => {}
                                 _ => self.marquee = Some((d, d)),
                             },
                         }
@@ -168,7 +189,7 @@ impl PaintApp {
                         let d = view.screen_to_doc(p);
                         if let Some((s, _)) = self.marquee {
                             self.marquee = Some((s, d));
-                        } else if !self.lasso.is_empty() {
+                        } else if !self.lasso.is_empty() && self.select_mode == SelectMode::Lasso {
                             self.lasso.push(d);
                         } else if let Some(o) = self.move_origin {
                             self.apply_move_with_snap(o, d);
@@ -184,7 +205,9 @@ impl PaintApp {
                         } else {
                             self.select_in_rect(a, b, combine);
                         }
-                    } else if !self.lasso.is_empty() {
+                    } else if !self.lasso.is_empty() && self.select_mode != SelectMode::PolyLasso {
+                        // (PolyLasso : le tracé en cours survit aux glissés —
+                        // il ne se referme qu'au double-clic ou près du départ.)
                         let poly = std::mem::take(&mut self.lasso);
                         self.select_in_lasso(&poly, combine);
                     } else {
@@ -197,6 +220,19 @@ impl PaintApp {
                         // Baguette magique : sélection par couleur.
                         if self.select_mode == SelectMode::Wand {
                             self.magic_wand(d, combine);
+                        } else if self.select_mode == SelectMode::PolyLasso {
+                            // Lasso polygonal (point 52) : chaque clic pose un
+                            // sommet ; un clic près du premier sommet (≥ 3
+                            // sommets) referme, comme la plume (`pen_press`).
+                            let near_first = self.lasso.first().is_some_and(|f| {
+                                ((d.0 - f.0).powi(2) + (d.1 - f.1).powi(2)).sqrt() < 8.0 / self.zoom.max(0.01)
+                            });
+                            if near_first && self.lasso.len() >= 3 {
+                                let poly = std::mem::take(&mut self.lasso);
+                                self.select_in_lasso(&poly, combine);
+                            } else {
+                                self.lasso.push(d);
+                            }
                         } else {
                             match self.topmost_at(d) {
                                 Some(id) => {
@@ -234,6 +270,16 @@ impl PaintApp {
             }
             ActiveTool::Bucket => {
                 if response.clicked() {
+                    // Le pot échantillonne les pixels *affichés* : sous
+                    // rotation de la vue, la capture ne correspond plus au
+                    // repère document (Sprint T, point 93 — limite assumée).
+                    if self.view_angle != 0.0 {
+                        self.info(t(
+                            "Remets la rotation de la vue à 0° pour le pot de peinture (menu Vue).",
+                            "Reset the view rotation to 0° to use the paint bucket (View menu).",
+                        ));
+                        return;
+                    }
                     if let Some(p) = response.interact_pointer_pos() {
                         // Remplissage différé : on capture la composition affichée.
                         self.bucket_click = Some(p);
@@ -243,6 +289,13 @@ impl PaintApp {
             }
             ActiveTool::Cutout => {
                 if response.clicked() {
+                    if self.view_angle != 0.0 {
+                        self.info(t(
+                            "Remets la rotation de la vue à 0° pour le détourage (menu Vue).",
+                            "Reset the view rotation to 0° to use cutout (View menu).",
+                        ));
+                        return;
+                    }
                     if let Some(p) = response.interact_pointer_pos() {
                         // Détourage différé : même mécanisme que le pot de peinture.
                         // ⌥+clic restaure la visibilité au lieu de la retirer —

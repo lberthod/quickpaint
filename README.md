@@ -74,20 +74,29 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
 - **History**: non-linear (panel + jump straight to any state), automatic
   **crash recovery** (periodic autosave, restore prompt on next launch).
 - **Export**: **PNG, JPEG (adjustable quality), WebP, PDF**, vector **SVG**,
-  **batch multi-size export**; **project save** as `.json`.
+  **batch multi-size export**, animated **GIF** and **APNG** (24-bit colors +
+  alpha); **print** via ⌘P (vector PDF opened in Preview, which provides the
+  native macOS print dialog); **project save** as `.json`.
 - **Customization**: editable color palette, configurable keyboard shortcuts.
 - **Languages**: **FR/EN** UI, detected from the system locale at launch
   (switchable anytime from the menu bar, preference persisted).
 
-Not supported by design (see [audit_next.md](audit_next.md) for the
-reasoning): HEIC and camera RAW import (the only available Rust libraries are
+Not supported by design (see [audit_next.md](audit_next.md) and
+[sprint_fonctionnalites.md](sprint_fonctionnalites.md) for the reasoning):
+HEIC and camera RAW import (the only available Rust libraries are
 AGPL/LGPL-licensed, incompatible with a simple standalone distribution),
 lossy WebP export with an adjustable quality slider (would require the
 `libwebp` system dependency; the `image` crate's encoder is lossless-only —
-a deliberate trade-off, not an oversight), and ML-based background
-removal/super-resolution (replaced with heuristic equivalents —
-color-proximity cutout edges, optional edge refinement for fine detail, and
-Lanczos upscaling — to avoid bundling a neural network model).
+a deliberate trade-off, not an oversight), **PSD export** (no mature Rust
+writer exists; a hand-rolled one is out of proportion with the outbound
+interop need — PSD *import* is supported), **`.abr` third-party brush
+import** (undocumented versioned Adobe binary format; importing an image as
+a brush stamp covers the need), **MP4 video export** (would require a system
+dependency such as ffmpeg — animated GIF/APNG cover the use case), and
+ML-based background removal/super-resolution (replaced with heuristic
+equivalents — color-proximity cutout edges, optional edge refinement for
+fine detail, and Lanczos upscaling — to avoid bundling a neural network
+model).
 
 ## Non-goals (by design)
 

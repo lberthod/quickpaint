@@ -184,6 +184,64 @@ fn morphology(dense: &[u8], w: usize, h: usize, amount: i32, combine: impl Fn(u8
     out
 }
 
+/// Contours du masque (Sprint O, point 60 de l'audit : « fourmis en
+/// marche ») : polylignes fermées suivant la frontière sélectionné/non
+/// sélectionné (seuil 128), en coordonnées document. Chaque pixel intérieur
+/// émet ses arêtes de bord orientées (l'intérieur à droite), puis les arêtes
+/// sont chaînées sommet à sommet en boucles. Recalculé uniquement quand le
+/// masque change (cache par hash côté app), jamais à chaque frame.
+pub fn contours(dense: &[u8], w: usize, h: usize) -> Vec<Vec<(f32, f32)>> {
+    let inside = |x: i32, y: i32| {
+        x >= 0 && y >= 0 && (x as usize) < w && (y as usize) < h && dense[y as usize * w + x as usize] >= 128
+    };
+    // Arêtes orientées : sommet de départ → sommets d'arrivée possibles
+    // (plusieurs en cas de point-selle, où deux régions se touchent en coin).
+    let mut edges: std::collections::HashMap<(i32, i32), Vec<(i32, i32)>> = std::collections::HashMap::new();
+    let mut push = |from: (i32, i32), to: (i32, i32)| edges.entry(from).or_default().push(to);
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            if !inside(x, y) {
+                continue;
+            }
+            if !inside(x, y - 1) {
+                push((x, y), (x + 1, y)); // bord haut, gauche → droite
+            }
+            if !inside(x + 1, y) {
+                push((x + 1, y), (x + 1, y + 1)); // bord droit, haut → bas
+            }
+            if !inside(x, y + 1) {
+                push((x + 1, y + 1), (x, y + 1)); // bord bas, droite → gauche
+            }
+            if !inside(x - 1, y) {
+                push((x, y + 1), (x, y)); // bord gauche, bas → haut
+            }
+        }
+    }
+    // Chaînage en boucles : suivre les arêtes de proche en proche jusqu'à
+    // revenir au départ (l'orientation cohérente garantit la continuité).
+    let mut loops = Vec::new();
+    while let Some((&start, _)) = edges.iter().next() {
+        let mut path = vec![(start.0 as f32, start.1 as f32)];
+        let mut cur = start;
+        loop {
+            let Some(nexts) = edges.get_mut(&cur) else { break };
+            let Some(next) = nexts.pop() else { break };
+            if nexts.is_empty() {
+                edges.remove(&cur);
+            }
+            if next == start {
+                break; // boucle refermée
+            }
+            path.push((next.0 as f32, next.1 as f32));
+            cur = next;
+        }
+        if path.len() >= 4 {
+            loops.push(path);
+        }
+    }
+    loops
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,6 +252,37 @@ mod tests {
         paint_mask_region(&mut mask, SelectionCombine::Replace, 10, 10, ((2.0, 2.0), (6.0, 6.0)), |_, _| 1.0);
         assert_eq!(mask.get_pixel(3, 3)[3], 255);
         assert_eq!(mask.get_pixel(8, 8)[3], 0);
+    }
+
+    /// Fourmis en marche (Sprint O, point 60) : un carré plein 4×4 dans un
+    /// masque 10×10 produit exactement une boucle fermée de 16 sommets
+    /// (4 par côté), aux coins attendus.
+    #[test]
+    fn contours_of_a_square_mask_is_one_loop_around_it() {
+        let (w, h) = (10usize, 10usize);
+        let mut dense = vec![0u8; w * h];
+        for y in 2..6 {
+            for x in 2..6 {
+                dense[y * w + x] = 255;
+            }
+        }
+        let loops = contours(&dense, w, h);
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].len(), 16, "périmètre de 16 arêtes unitaires");
+        for corner in [(2.0, 2.0), (6.0, 2.0), (6.0, 6.0), (2.0, 6.0)] {
+            assert!(loops[0].contains(&corner), "coin manquant : {corner:?}");
+        }
+    }
+
+    /// Deux régions disjointes → deux boucles indépendantes.
+    #[test]
+    fn contours_of_two_regions_yield_two_loops() {
+        let (w, h) = (12usize, 6usize);
+        let mut dense = vec![0u8; w * h];
+        dense[1 * w + 1] = 255;
+        dense[3 * w + 8] = 255;
+        let loops = contours(&dense, w, h);
+        assert_eq!(loops.len(), 2);
     }
 
     #[test]

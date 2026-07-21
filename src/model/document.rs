@@ -7,7 +7,8 @@ use super::text::TextItem;
 use crate::i18n::t;
 use serde::{Deserialize, Serialize};
 
-/// Mode de fusion d'un calque (roadmap #8).
+/// Mode de fusion d'un calque (roadmap #8 ; étendu Sprint P, point 23 :
+/// 6 modes supplémentaires, tous supportés nativement par tiny-skia).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BlendMode {
     #[default]
@@ -17,16 +18,28 @@ pub enum BlendMode {
     Overlay,
     Darken,
     Lighten,
+    SoftLight,
+    HardLight,
+    Difference,
+    Exclusion,
+    ColorDodge,
+    ColorBurn,
 }
 
 impl BlendMode {
-    pub const ALL: [BlendMode; 6] = [
+    pub const ALL: [BlendMode; 12] = [
         BlendMode::Normal,
         BlendMode::Multiply,
         BlendMode::Screen,
         BlendMode::Overlay,
         BlendMode::Darken,
         BlendMode::Lighten,
+        BlendMode::SoftLight,
+        BlendMode::HardLight,
+        BlendMode::Difference,
+        BlendMode::Exclusion,
+        BlendMode::ColorDodge,
+        BlendMode::ColorBurn,
     ];
 
     pub fn label(self) -> &'static str {
@@ -37,8 +50,25 @@ impl BlendMode {
             BlendMode::Overlay => t("Incrustation", "Overlay"),
             BlendMode::Darken => t("Obscurcir", "Darken"),
             BlendMode::Lighten => t("Éclaircir", "Lighten"),
+            // Noms français de Photoshop, repères connus des utilisateurs.
+            BlendMode::SoftLight => t("Lumière tamisée", "Soft light"),
+            BlendMode::HardLight => t("Lumière crue", "Hard light"),
+            BlendMode::Difference => t("Différence", "Difference"),
+            BlendMode::Exclusion => t("Exclusion", "Exclusion"),
+            BlendMode::ColorDodge => t("Densité couleur −", "Color dodge"),
+            BlendMode::ColorBurn => t("Densité couleur +", "Color burn"),
         }
     }
+}
+
+/// Guide manuel (Sprint R, point 95) : ligne repère tirée depuis une règle,
+/// persistée avec le document (contrairement aux guides intelligents,
+/// calculés à la volée pendant un glissé). `vertical` = ligne verticale à
+/// `pos` (coordonnée X document) ; sinon ligne horizontale à `pos` (Y).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ManualGuide {
+    pub vertical: bool,
+    pub pos: f32,
 }
 
 /// Remplissage d'un calque de remplissage (Sprint I.1), sur le même modèle
@@ -418,6 +448,9 @@ pub struct Document {
     /// Sélections nommées enregistrées par l'utilisateur (Sprint 1.2).
     #[serde(default)]
     pub named_selections: Vec<NamedSelection>,
+    /// Guides manuels (Sprint R, point 95), persistés avec le document.
+    #[serde(default)]
+    pub guides: Vec<ManualGuide>,
     /// Frames d'animation (Sprint L.6). Vide = document statique, le
     /// comportement historique inchangé — `layers` est alors la seule
     /// image. Non vide : `layers` reflète le contenu de la frame active
@@ -441,6 +474,7 @@ impl Document {
             next_z: 1.0,
             format_version: CURRENT_FORMAT_VERSION,
             named_selections: Vec::new(),
+            guides: Vec::new(),
             frames: Vec::new(),
             active_frame: 0,
         }
@@ -512,6 +546,70 @@ impl Document {
         }
     }
 
+    /// Retourne tout le contenu en miroir (point 66 de l'audit : Retourner
+    /// horizontalement/verticalement), dans les bornes actuelles du document.
+    /// Traits, dégradés, ancres de plume et pixels (raster, masques, images)
+    /// sont réellement inversés ; les textes ne sont **pas** mis en miroir
+    /// glyphe par glyphe (ils deviendraient illisibles) : leur boîte est
+    /// repositionnée à l'emplacement miroir et leur rotation inversée, le
+    /// contenu reste lisible — même logique que le déplacement d'ancre de
+    /// `Command::Scale` pour les textes.
+    pub fn flip_content(&mut self, horizontal: bool) {
+        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+        let fp = |p: (f32, f32)| if horizontal { (w - p.0, p.1) } else { (p.0, h - p.1) };
+        let flip_gradient = |g: &mut crate::model::Gradient| {
+            g.from = fp(g.from);
+            g.to = fp(g.to);
+        };
+        for layer in &mut self.layers {
+            for s in &mut layer.strokes {
+                for p in &mut s.points {
+                    p.pos = fp(p.pos);
+                }
+                if let Some(g) = &mut s.gradient {
+                    flip_gradient(g);
+                }
+                if let Some(path) = &mut s.anchors {
+                    for a in &mut path.anchors {
+                        a.pos = fp(a.pos);
+                        a.h_in = fp(a.h_in);
+                        a.h_out = fp(a.h_out);
+                    }
+                }
+            }
+            for t in &mut layer.texts {
+                let (mn, mx) = t.approx_bounds();
+                if horizontal {
+                    t.pos.0 += w - (mx.0 + mn.0);
+                } else {
+                    t.pos.1 += h - (mx.1 + mn.1);
+                }
+                t.rot = -t.rot;
+            }
+            for im in &mut layer.images {
+                if horizontal {
+                    im.pos.0 = w - (im.pos.0 + im.size.0);
+                } else {
+                    im.pos.1 = h - (im.pos.1 + im.size.1);
+                }
+                im.rot = -im.rot;
+                im.flip_pixels(horizontal);
+            }
+            match &mut layer.fill {
+                Some(FillKind::Linear(g)) | Some(FillKind::Radial(g)) => flip_gradient(g),
+                _ => {}
+            }
+            if !layer.raster.is_empty() {
+                layer.raster = layer.raster.flipped(horizontal, self.size.0, self.size.1);
+            }
+            if let Some(mask) = &layer.mask {
+                if !mask.is_empty() {
+                    layer.mask = Some(mask.flipped(horizontal, self.size.0, self.size.1));
+                }
+            }
+        }
+    }
+
     /// Répare les id après chargement d'un ancien projet (id manquants /
     /// dupliqués) : réattribue des id uniques et recalcule le compteur.
     pub fn normalize_ids(&mut self) {
@@ -528,6 +626,43 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Retourner horizontalement (point 66) : un point à x est envoyé à
+    /// w − x, le raster peint suit, et deux flips successifs redonnent
+    /// exactement le contenu d'origine (involution).
+    #[test]
+    fn flip_content_mirrors_strokes_and_raster_and_is_involutive() {
+        let mut doc = Document::new((100, 50));
+        let mut s = crate::model::Stroke::new([255, 0, 0, 255], 2.0, crate::model::Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (10.0, 20.0), width: 2.0 }];
+        doc.layers[0].strokes.push(s);
+        doc.layers[0].raster.set_pixel(10, 20, [1, 2, 3, 255]);
+
+        doc.flip_content(true);
+        assert_eq!(doc.layers[0].strokes[0].points[0].pos, (90.0, 20.0));
+        assert_eq!(doc.layers[0].raster.get_pixel(89, 20), [1, 2, 3, 255], "le pixel raster suit le miroir (centre de pixel : x → w−1−x)");
+
+        doc.flip_content(true);
+        assert_eq!(doc.layers[0].strokes[0].points[0].pos, (10.0, 20.0));
+        assert_eq!(doc.layers[0].raster.get_pixel(10, 20), [1, 2, 3, 255]);
+    }
+
+    /// Retourner verticalement : même garantie sur l'axe Y, et l'image
+    /// voit ses pixels réellement inversés (pas seulement son ancre).
+    #[test]
+    fn flip_content_vertical_flips_image_pixels() {
+        let mut doc = Document::new((40, 40));
+        // Image 1×2 : pixel haut rouge, pixel bas bleu.
+        let rgba = vec![255, 0, 0, 255, 0, 0, 255, 255];
+        let im = crate::model::ImageItem::from_rgba(1, (5.0, 5.0), 1, 2, rgba);
+        doc.layers[0].images.push(im);
+
+        doc.flip_content(false);
+        let im = &doc.layers[0].images[0];
+        assert_eq!(im.pos, (5.0, 33.0), "ancre repositionnée en miroir : y = h − (pos.y + size.y)");
+        assert_eq!(&im.rgba[0..4], &[0, 0, 255, 255], "le pixel bleu (bas) est passé en haut");
+        assert!(im.png_b64.is_empty(), "le PNG persisté est invalidé, ré-encodé à la sauvegarde");
+    }
 
     #[test]
     fn doc_has_one_layer_at_start() {

@@ -107,6 +107,10 @@ struct Settings {
     /// batch export, réutilisables en un clic.
     #[serde(default)]
     export_profiles: Vec<crate::export::ExportProfile>,
+    /// Thème d'interface (Sprint R, point 96) : `"system"` (suit macOS),
+    /// `"light"` ou `"dark"`. Absent = système.
+    #[serde(default)]
+    theme: Option<String>,
 }
 
 /// Groupes de la barre d'outils repliés par défaut (UX-2.1) : les familles
@@ -225,6 +229,17 @@ pub fn save_custom_palette(palette: &[[u8; 3]]) {
 /// Raccourcis clavier personnalisés (Sprint 7.2), même fichier local.
 pub fn load_shortcuts() -> std::collections::HashMap<String, String> {
     read_settings().shortcuts
+}
+
+/// Thème d'interface (Sprint R, point 96), même fichier local.
+pub fn load_theme() -> Option<String> {
+    read_settings().theme
+}
+
+pub fn save_theme(theme: &str) {
+    let mut settings = read_settings();
+    settings.theme = Some(theme.to_string());
+    write_settings(&settings);
 }
 
 pub fn save_shortcuts(shortcuts: &std::collections::HashMap<String, String>) {

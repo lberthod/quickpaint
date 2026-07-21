@@ -159,7 +159,12 @@ impl PaintApp {
         );
     }
 
-    /// Aplatit tous les calques (visibles) en un seul. Annulable.
+    /// Aplatit tous les calques en un seul. Annulable. Sprint P (point 30) :
+    /// le contenu peint (raster) de chaque calque est composé de bas en haut
+    /// (opacité et masque cuits dans les pixels, comme `merge_down`) — il
+    /// était silencieusement perdu avant. Les éléments vectoriels restent
+    /// transférés tels quels, éditables (leur masquage éventuel n'est pas
+    /// cuit — même limite documentée que `merge_down`).
     pub fn flatten(&mut self) {
         if self.doc.layers.len() <= 1 {
             return;
@@ -171,12 +176,16 @@ impl PaintApp {
             base.strokes.extend(l.strokes.iter().cloned());
             base.texts.extend(l.texts.iter().cloned());
             base.images.extend(l.images.iter().cloned());
+            if !l.raster.is_empty() {
+                base.raster.composite_over(&l.raster, l.opacity, l.mask.as_ref());
+            }
         }
         self.selection.clear();
         self.history.push(
             &mut self.doc,
             Command::SetLayers { before, before_active, after: vec![base], after_active: 0 },
         );
+        self.cache.clear();
         self.info(t("Calques aplatis.", "Layers flattened."));
     }
 

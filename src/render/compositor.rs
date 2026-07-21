@@ -187,7 +187,7 @@ impl Compositor {
             // applique le filtre en direct à ce qui est déjà composé (tout,
             // ou seulement le calque du dessous si écrêté), réversible tant
             // que le calque existe. Ne devient pas la nouvelle base d'écrêtage.
-            if let Some(adjustment) = layer.adjustment {
+            if let Some(adjustment) = layer.adjustment.clone() {
                 let mask = if layer.clip { clip_base.as_ref() } else { None };
                 apply_adjustment(&mut base, adjustment, layer.opacity.clamp(0.0, 1.0), mask);
                 continue;
@@ -456,6 +456,12 @@ fn map_blend(b: BlendMode) -> SkBlend {
         BlendMode::Overlay => SkBlend::Overlay,
         BlendMode::Darken => SkBlend::Darken,
         BlendMode::Lighten => SkBlend::Lighten,
+        BlendMode::SoftLight => SkBlend::SoftLight,
+        BlendMode::HardLight => SkBlend::HardLight,
+        BlendMode::Difference => SkBlend::Difference,
+        BlendMode::Exclusion => SkBlend::Exclusion,
+        BlendMode::ColorDodge => SkBlend::ColorDodge,
+        BlendMode::ColorBurn => SkBlend::ColorBurn,
     }
 }
 

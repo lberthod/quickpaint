@@ -45,7 +45,17 @@ impl FontManager {
         set.into_iter().collect()
     }
 
-    /// Charge (si nécessaire) `family` dans egui sous `FontFamily::Name`.
+    /// Nom de la famille egui portant la variante **italique** d'une famille
+    /// système (Sprint Q, point 82). Toujours enregistrée par
+    /// [`Self::ensure_loaded`] — avec les octets italiques réels si la
+    /// famille en a, sinon les octets romains (repli sans effet visuel, mais
+    /// jamais une famille egui inconnue, qui ferait paniquer le layout).
+    pub fn italic_key(family: &str) -> String {
+        format!("{family}#italic")
+    }
+
+    /// Charge (si nécessaire) `family` dans egui sous `FontFamily::Name`,
+    /// ainsi que sa variante italique sous [`Self::italic_key`].
     /// Renvoie `false` si la police est introuvable dans la base système.
     pub fn ensure_loaded(&mut self, ctx: &egui::Context, family: &str) -> bool {
         if self.loaded.contains(family) {
@@ -62,6 +72,41 @@ impl FontManager {
             .entry(egui::FontFamily::Name(family.into()))
             .or_default()
             .insert(0, family.to_string());
+
+        // Variante italique (Sprint Q, point 82) : cherche une vraie fonte
+        // italique/oblique de la même famille ; à défaut, la famille egui
+        // italique pointe sur les octets romains déjà enregistrés.
+        let italic_key = Self::italic_key(family);
+        let italic_query = fontdb::Query {
+            families: &[fontdb::Family::Name(family)],
+            style: fontdb::Style::Italic,
+            ..Default::default()
+        };
+        let real_italic = self.db.query(&italic_query).and_then(|iid| {
+            let is_italic = self
+                .db
+                .faces()
+                .find(|f| f.id == iid)
+                .map(|f| f.style != fontdb::Style::Normal)
+                .unwrap_or(false);
+            if !is_italic {
+                return None;
+            }
+            self.db.with_face_data(iid, |data, _idx| data.to_vec())
+        });
+        let italic_data_key = match real_italic {
+            Some(italic_bytes) => {
+                self.defs.font_data.insert(italic_key.clone(), egui::FontData::from_owned(italic_bytes));
+                italic_key.clone()
+            }
+            None => family.to_string(), // repli : mêmes octets que le romain
+        };
+        self.defs
+            .families
+            .entry(egui::FontFamily::Name(italic_key.as_str().into()))
+            .or_default()
+            .insert(0, italic_data_key);
+
         ctx.set_fonts(self.defs.clone());
         self.loaded.insert(family.to_string());
         true

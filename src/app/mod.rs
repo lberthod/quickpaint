@@ -69,7 +69,7 @@ use crate::input::GestureCapture;
 use crate::model::{Document, Stroke, Tool};
 use crate::render::canvas::{self, ActiveStroke, StrokeCache, ViewTransform};
 use crate::tools::guides::GuideLine;
-use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser, SelectMode, SelectionCombine};
+use crate::tools::{eyedropper, hit, shape, ActiveTool, Brush, Eraser, SelectMode, SelectionCombine, SymmetryMode};
 use crate::ui::{footer, layers, toolbar};
 use egui::{Color32, Margin, Pos2, Rect, Sense, Vec2};
 use pen_edit::PenNodeTarget;
@@ -177,6 +177,9 @@ struct TextStyleClip {
     font: crate::model::text::TextFont,
     font_family: Option<String>,
     bold: bool,
+    italic: bool,
+    line_height: f32,
+    letter_spacing: f32,
     align: crate::model::text::TextAlign,
     outline_w: f32,
     outline_color: [u8; 4],
@@ -333,6 +336,8 @@ pub struct PaintApp {
     pub show_help: bool,
     /// Action en attente d'une nouvelle touche (capture au prochain appui).
     pub capturing_shortcut: Option<crate::keybindings::ShortcutAction>,
+    /// Capture en cours d'une commande ⌘ rebindable (Sprint R, point 97).
+    pub capturing_cmd_shortcut: Option<crate::keybindings::CommandAction>,
     /// Message éphémère affiché dans le footer (export, sauvegarde, etc.).
     pub status: Option<String>,
     /// Sévérité du message courant (UX-1.2) : `true` = échec (rouge dans le
@@ -379,6 +384,10 @@ pub struct PaintApp {
     /// hash de contenu (`RasterLayer::content_hash`) — recalculée seulement
     /// quand le masque change, pas à chaque frame.
     selection_mask_texture: Option<(u64, egui::TextureHandle)>,
+    /// Contours du masque de sélection (Sprint O, point 60 : « fourmis en
+    /// marche ») en coordonnées document — même cache par hash de contenu
+    /// que la texture de teinte, recalculé au changement du masque seulement.
+    selection_ants: Option<(u64, Vec<Vec<(f32, f32)>>)>,
     move_origin: Option<(f32, f32)>,
     move_delta: (f32, f32),
     /// Guides actifs pendant le déplacement en cours (roadmap P1 #8) : lignes
@@ -445,6 +454,13 @@ pub struct PaintApp {
     pub font_search: String,
     pub font_manager: crate::fonts::FontManager,
     pub text_bold: bool,
+    /// Italique (Sprint Q, point 82) — effectif pour les polices système
+    /// disposant d'une vraie fonte italique (voir `TextItem::italic`).
+    pub text_italic: bool,
+    /// Interligne (Sprint Q, point 83), multiple de la taille.
+    pub text_line_height: f32,
+    /// Espacement entre caractères (Sprint Q, point 83), unités document.
+    pub text_letter_spacing: f32,
     pub text_align: crate::model::text::TextAlign,
     pub text_outline_w: f32,
     pub text_outline_color: [u8; 4],
@@ -550,6 +566,9 @@ pub struct PaintApp {
     /// Miroir/symétrie (Sprint 11) : nombre d'axes (copies rotées autour du
     /// centre du document).
     pub symmetry_axes: u32,
+    /// Mode de symétrie (Sprint O, point 54 de l'audit) : radial (copies
+    /// rotées) ou réflexion miroir autour d'un axe central.
+    pub symmetry_mode: SymmetryMode,
     /// Dégradé interactif (Sprint 11) : type posé par défaut sur les formes
     /// qui n'ont pas encore de dégradé.
     pub gradient_kind: crate::model::GradientKind,
@@ -569,6 +588,21 @@ pub struct PaintApp {
     /// `PaintApp::new` — absent des instances de test (`Default`), qui ne
     /// tournent pas dans un vrai processus AppKit.
     native_edit_menu: Option<crate::native_menu::EditMenuIds>,
+    /// Thème d'interface (Sprint R, point 96), persisté dans `settings.json`.
+    pub ui_theme: UiTheme,
+    /// Guide manuel en cours de glissé (Sprint R, point 95) : création
+    /// depuis une règle ou déplacement d'un guide existant.
+    guide_drag: Option<GuideDrag>,
+    /// Rotation de la vue en radians (Sprint T, point 93) : affichage
+    /// seulement, le document n'est jamais modifié. Les règles et les
+    /// gestes qui en dépendent (guides manuels) sont désactivés hors 0°.
+    pub view_angle: f32,
+    /// Pelure d'oignon (Sprint U) : affiche les frames voisines en
+    /// semi-transparence teintée sous la frame active (animation).
+    pub onion_skin: bool,
+    /// Cache des rendus de frames voisines pour la pelure d'oignon :
+    /// index de frame → (révision d'historique au rendu, texture).
+    onion_textures: std::collections::HashMap<usize, (u64, egui::TextureHandle)>,
 }
 
 impl Default for PaintApp {
@@ -607,6 +641,7 @@ impl Default for PaintApp {
             show_shortcuts_prefs: false,
             show_help: false,
             capturing_shortcut: None,
+            capturing_cmd_shortcut: None,
             status: None,
             status_error: false,
             zoom: 1.0,
@@ -634,6 +669,7 @@ impl Default for PaintApp {
             selection_mask: None,
             selection_mask_dialog: None,
             selection_mask_texture: None,
+            selection_ants: None,
             move_origin: None,
             move_delta: (0.0, 0.0),
             active_guides: Vec::new(),
@@ -657,6 +693,9 @@ impl Default for PaintApp {
             font_search: String::new(),
             font_manager: crate::fonts::FontManager::new(),
             text_bold: false,
+            text_italic: false,
+            text_line_height: 1.25,
+            text_letter_spacing: 0.0,
             text_align: crate::model::text::TextAlign::Left,
             text_outline_w: 0.0,
             text_outline_color: [255, 255, 255, 255],
@@ -699,6 +738,7 @@ impl Default for PaintApp {
             clone_offset: None,
             effect_strength: 0.5,
             symmetry_axes: 4,
+            symmetry_mode: SymmetryMode::default(),
             gradient_kind: crate::model::GradientKind::Linear,
             gradient_drag_start: None,
             measure: None,
@@ -706,13 +746,71 @@ impl Default for PaintApp {
             autosave_last_at: std::time::Instant::now(),
             show_recovery_prompt: false,
             native_edit_menu: None,
+            ui_theme: UiTheme::load(),
+            guide_drag: None,
+            view_angle: 0.0,
+            onion_skin: false,
+            onion_textures: std::collections::HashMap::new(),
         }
+    }
+}
+
+/// Glissé de guide manuel en cours (Sprint R, point 95).
+struct GuideDrag {
+    vertical: bool,
+    pos: f32,
+    /// `Some(i)` = déplacement du guide existant `doc.guides[i]` ;
+    /// `None` = création depuis une règle.
+    existing: Option<usize>,
+}
+
+/// Thème d'interface (Sprint R, point 96) : suit macOS par défaut, avec
+/// bascule manuelle persistée dans `settings.json`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum UiTheme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl UiTheme {
+    pub const ALL: [UiTheme; 3] = [UiTheme::System, UiTheme::Light, UiTheme::Dark];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            UiTheme::System => t("Système", "System"),
+            UiTheme::Light => t("Clair", "Light"),
+            UiTheme::Dark => t("Sombre", "Dark"),
+        }
+    }
+
+    fn code(self) -> &'static str {
+        match self {
+            UiTheme::System => "system",
+            UiTheme::Light => "light",
+            UiTheme::Dark => "dark",
+        }
+    }
+
+    fn load() -> Self {
+        match crate::i18n::load_theme().as_deref() {
+            Some("light") => UiTheme::Light,
+            Some("dark") => UiTheme::Dark,
+            _ => UiTheme::System,
+        }
+    }
+
+    pub fn save(self) {
+        crate::i18n::save_theme(self.code());
     }
 }
 
 impl PaintApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
+        // Thème (Sprint R, point 96) : plus de `Visuals::light()` forcé —
+        // la préférence persistée (ou le thème système) est appliquée à
+        // chaque frame par `apply_theme`.
         let mut fonts = egui::FontDefinitions::default();
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         // Variante "Fill" (silhouettes pleines) enregistrée à part sous un nom
@@ -1050,7 +1148,10 @@ impl PaintApp {
         );
         let threshold = 6.0 / self.zoom.max(0.01);
         let targets = self.guide_targets();
-        let (snapped, guides) = crate::tools::guides::snap((mn, mx), &targets, threshold, raw);
+        // Guides manuels (Sprint R, point 95) : candidats d'accroche mono-axe.
+        let gx: Vec<f32> = self.doc.guides.iter().filter(|g| g.vertical).map(|g| g.pos).collect();
+        let gy: Vec<f32> = self.doc.guides.iter().filter(|g| !g.vertical).map(|g| g.pos).collect();
+        let (snapped, guides) = crate::tools::guides::snap((mn, mx), &targets, &gx, &gy, threshold, raw);
         self.move_delta = snapped;
         self.active_guides = guides;
     }
@@ -1139,6 +1240,9 @@ impl PaintApp {
             t.font = self.text_font;
             t.font_family = self.text_font_family.clone();
             t.bold = self.text_bold;
+            t.italic = self.text_italic;
+            t.line_height = self.text_line_height;
+            t.letter_spacing = self.text_letter_spacing;
             t.align = self.text_align;
             t.outline_w = self.text_outline_w;
             t.outline_color = self.text_outline_color;
@@ -1381,6 +1485,9 @@ impl PaintApp {
             item.font = self.text_font;
             item.font_family = self.text_font_family.clone();
             item.bold = self.text_bold;
+            item.italic = self.text_italic;
+            item.line_height = self.text_line_height;
+            item.letter_spacing = self.text_letter_spacing;
             item.align = self.text_align;
             item.outline_w = self.text_outline_w;
             item.outline_color = self.text_outline_color;
@@ -1652,6 +1759,13 @@ impl PaintApp {
     // --- Fusion de calques --------------------------------------------------
 
     /// Fusionne le calque actif dans celui du dessous (Merge Down). Annulable.
+    /// Sprint P (point 30) : le contenu **peint** (raster) est composé
+    /// par-dessus celui du calque du dessous — il disparaissait silencieusement
+    /// avant. L'opacité et le masque du calque source sont « cuits » dans les
+    /// pixels fusionnés (ces attributs disparaissent avec le calque) ; les
+    /// éléments vectoriels restent transférés tels quels, éditables — leur
+    /// éventuel masquage par le masque du calque source n'est pas cuit
+    /// (limite documentée : il faudrait les rasteriser, on perdrait l'édition).
     pub fn merge_down(&mut self) {
         let i = self.doc.active_layer;
         if i == 0 {
@@ -1664,11 +1778,15 @@ impl PaintApp {
         lower.strokes.extend(upper.strokes);
         lower.texts.extend(upper.texts);
         lower.images.extend(upper.images);
+        if !upper.raster.is_empty() {
+            lower.raster.composite_over(&upper.raster, upper.opacity, upper.mask.as_ref());
+        }
         self.selection.clear();
         self.history.push(
             &mut self.doc,
             Command::SetLayers { before, before_active: i, after, after_active: i - 1 },
         );
+        self.cache.clear();
         self.info(t("Calque fusionné vers le bas.", "Layer merged down."));
     }
 
@@ -2412,6 +2530,9 @@ impl PaintApp {
                     font: t.font,
                     font_family: t.font_family.clone(),
                     bold: t.bold,
+                    italic: t.italic,
+                    line_height: t.line_height,
+                    letter_spacing: t.letter_spacing,
                     align: t.align,
                     outline_w: t.outline_w,
                     outline_color: t.outline_color,
@@ -2458,6 +2579,9 @@ impl PaintApp {
                     t.font = ts.font;
                     t.font_family = ts.font_family.clone();
                     t.bold = ts.bold;
+                    t.italic = ts.italic;
+                    t.line_height = ts.line_height;
+                    t.letter_spacing = ts.letter_spacing;
                     t.align = ts.align;
                     t.outline_w = ts.outline_w;
                     t.outline_color = ts.outline_color;
@@ -2669,6 +2793,20 @@ impl PaintApp {
         after.size = (w, h);
         self.push_doc_snapshot(after, t("Redimensionner l'image", "Resize image"));
         self.info(format!("{} : {w}×{h}", t("Image redimensionnée", "Image resized")));
+    }
+
+    /// Retourne toute l'image en miroir (point 66 de l'audit) — menu Image,
+    /// annulable en un pas comme le redimensionnement.
+    pub fn flip_document(&mut self, horizontal: bool) {
+        let mut after = self.doc.clone();
+        after.flip_content(horizontal);
+        let label = if horizontal {
+            t("Retourner horizontalement", "Flip horizontal")
+        } else {
+            t("Retourner verticalement", "Flip vertical")
+        };
+        self.push_doc_snapshot(after, label);
+        self.info(label);
     }
 
     /// Change la taille du canevas sans mettre le contenu à l'échelle :
@@ -2899,6 +3037,174 @@ impl PaintApp {
         Some(tex)
     }
 
+    /// Gère le glissé de guide manuel (Sprint R, point 95) : tirer depuis la
+    /// règle du haut crée un guide horizontal, depuis celle de gauche un
+    /// vertical ; avec l'outil Sélection, saisir un guide existant le
+    /// déplace, et le relâcher hors du document (ou sur une règle) le
+    /// supprime. Renvoie `true` si le geste est consommé (l'outil actif ne
+    /// doit alors rien recevoir). Persisté avec le document (`history.touch`),
+    /// pas de commande d'undo dédiée — même choix que les sélections nommées.
+    pub(super) fn handle_guide_gesture(&mut self, response: &egui::Response, view: &ViewTransform) -> bool {
+        const TH: f32 = 18.0; // épaisseur des règles (voir `paint_rulers`)
+        let cr = self.last_canvas_rect;
+        if response.drag_started() && self.guide_drag.is_none() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let in_top = p.y >= cr.min.y && p.y <= cr.min.y + TH;
+                let in_left = p.x >= cr.min.x && p.x <= cr.min.x + TH;
+                if in_top && !in_left {
+                    self.guide_drag = Some(GuideDrag { vertical: false, pos: view.screen_to_doc(p).1, existing: None });
+                    return true;
+                }
+                if in_left && !in_top {
+                    self.guide_drag = Some(GuideDrag { vertical: true, pos: view.screen_to_doc(p).0, existing: None });
+                    return true;
+                }
+                // Saisie d'un guide existant — outil Sélection seulement,
+                // pour ne pas voler le geste des outils de peinture.
+                if self.active_tool == ActiveTool::Select {
+                    let d = view.screen_to_doc(p);
+                    let tol = 4.0 / self.zoom.max(0.01);
+                    if let Some(i) = self.doc.guides.iter().position(|g| {
+                        if g.vertical { (g.pos - d.0).abs() <= tol } else { (g.pos - d.1).abs() <= tol }
+                    }) {
+                        let g = self.doc.guides[i];
+                        self.guide_drag = Some(GuideDrag { vertical: g.vertical, pos: g.pos, existing: Some(i) });
+                        return true;
+                    }
+                }
+            }
+        }
+        let Some(gd) = &mut self.guide_drag else { return false };
+        if response.dragged() {
+            if let Some(p) = response.interact_pointer_pos() {
+                let d = view.screen_to_doc(p);
+                gd.pos = if gd.vertical { d.0 } else { d.1 };
+            }
+        }
+        if response.drag_stopped() {
+            let gd = self.guide_drag.take().expect("guide_drag vient d'être vérifié");
+            let (w, h) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
+            let inside = if gd.vertical { (0.0..=w).contains(&gd.pos) } else { (0.0..=h).contains(&gd.pos) };
+            match (gd.existing, inside) {
+                (Some(i), true) if i < self.doc.guides.len() => {
+                    self.doc.guides[i].pos = gd.pos;
+                    self.history.touch();
+                }
+                (Some(i), false) if i < self.doc.guides.len() => {
+                    self.doc.guides.remove(i);
+                    self.history.touch();
+                    self.info(t("Guide supprimé.", "Guide removed."));
+                }
+                (None, true) => {
+                    self.doc.guides.push(crate::model::ManualGuide { vertical: gd.vertical, pos: gd.pos });
+                    self.history.touch();
+                    self.info(t("Guide ajouté (glisser sur une règle pour le retirer).", "Guide added (drag onto a ruler to remove it)."));
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// Change la rotation de la vue (Sprint T, point 93) en gardant le
+    /// **centre du document** fixe à l'écran : la transformation pivote
+    /// autour de l'origine du document, on compense donc le pan pour que le
+    /// centre ne bouge pas — sans quoi le document balaierait l'écran.
+    pub fn set_view_angle(&mut self, angle: f32) {
+        let center = (self.doc.size.0 as f32 / 2.0, self.doc.size.1 as f32 / 2.0);
+        let before = self.current_view().doc_to_screen(center);
+        self.view_angle = angle.rem_euclid(std::f32::consts::TAU);
+        let after = self.current_view().doc_to_screen(center);
+        self.pan += before - after;
+    }
+
+    /// Dessine une texture couvrant tout le document comme un quadrilatère
+    /// texturé qui suit la rotation de la vue (Sprint T, point 93) — remplace
+    /// les `painter.image(doc_rect)` axis-aligned pour le composite, la
+    /// teinte de sélection et la pelure d'oignon.
+    fn paint_doc_quad(&self, painter: &egui::Painter, view: &ViewTransform, tex_id: egui::TextureId, tint: Color32) {
+        let (w, h) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
+        let mut mesh = egui::Mesh::with_texture(tex_id);
+        for (corner, uv) in [
+            ((0.0, 0.0), egui::pos2(0.0, 0.0)),
+            ((w, 0.0), egui::pos2(1.0, 0.0)),
+            ((w, h), egui::pos2(1.0, 1.0)),
+            ((0.0, h), egui::pos2(0.0, 1.0)),
+        ] {
+            mesh.vertices.push(egui::epaint::Vertex { pos: view.doc_to_screen(corner), uv, color: tint });
+        }
+        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+        painter.add(mesh);
+    }
+
+    /// Position du guide en cours de glissé, pour l'aperçu de l'overlay
+    /// (Sprint R, point 95) : `(vertical, position document)`.
+    pub(super) fn guide_drag_preview(&self) -> Option<(bool, f32)> {
+        self.guide_drag.as_ref().map(|g| (g.vertical, g.pos))
+    }
+
+    /// Texture du rendu composité d'une frame **non active** pour la pelure
+    /// d'oignon (Sprint U). Recalculée seulement si l'historique a changé
+    /// depuis le dernier rendu de cette frame (les frames inactives ne
+    /// changent que par des opérations annulables). Compositeur jetable à
+    /// chaque recalcul : les frames partagent les ids de calques, passer par
+    /// `self.compositor` corromprait ses caches par calque.
+    fn onion_texture(&mut self, ctx: &egui::Context, idx: usize) -> Option<egui::TextureHandle> {
+        let rev = self.history.revision();
+        if let Some((r, tex)) = self.onion_textures.get(&idx) {
+            if *r == rev {
+                return Some(tex.clone());
+            }
+        }
+        let frame = self.doc.frames.get(idx)?;
+        let mut temp = self.doc.clone();
+        temp.layers = frame.layers.clone();
+        temp.frames.clear();
+        let mut comp = crate::render::compositor::Compositor::new();
+        // Fond transparent : seul le contenu de la frame apparaît en
+        // fantôme, pas un voile sur tout le document.
+        let (w, h, rgba) = comp.render_to_rgba(ctx, &temp, Color32::TRANSPARENT)?;
+        let image = egui::ColorImage::from_rgba_unmultiplied([w as usize, h as usize], &rgba);
+        let tex = ctx.load_texture(format!("onion_{idx}"), image, egui::TextureOptions::LINEAR);
+        self.onion_textures.insert(idx, (rev, tex.clone()));
+        Some(tex)
+    }
+
+    /// Applique le thème d'interface (Sprint R, point 96) via la préférence
+    /// native d'egui 0.29 (`ThemePreference`) : `System` suit le thème macOS
+    /// remonté par winit, `Light`/`Dark` le forcent. Idempotent (ne pousse
+    /// rien si la préférence est déjà la bonne).
+    fn apply_theme(&self, ctx: &egui::Context) {
+        let pref = match self.ui_theme {
+            UiTheme::System => egui::ThemePreference::System,
+            UiTheme::Light => egui::ThemePreference::Light,
+            UiTheme::Dark => egui::ThemePreference::Dark,
+        };
+        ctx.options_mut(|o| {
+            if o.theme_preference != pref {
+                o.theme_preference = pref;
+            }
+        });
+    }
+
+    /// Recalcule (si nécessaire) les contours du masque de sélection pour les
+    /// « fourmis en marche » (Sprint O, point 60) — même invalidation par
+    /// hash de contenu que `selection_overlay_texture`.
+    fn ensure_selection_ants(&mut self) {
+        let Some(mask) = &self.selection_mask else {
+            self.selection_ants = None;
+            return;
+        };
+        let hash = mask.content_hash();
+        if self.selection_ants.as_ref().is_some_and(|(h, _)| *h == hash) {
+            return;
+        }
+        let (w, h) = self.doc.size;
+        let dense = crate::tools::selection_mask::mask_to_dense(mask, w, h);
+        let loops = crate::tools::selection_mask::contours(&dense, w as usize, h as usize);
+        self.selection_ants = Some((hash, loops));
+    }
+
     /// Capture d'écran différée : ne sert plus qu'au pot de peinture et au
     /// détourage (qui échantillonnent les pixels *affichés*, y compris les
     /// modes de fusion, sous le clic) — l'export bitmap ne dépend plus d'une
@@ -2967,7 +3273,7 @@ impl PaintApp {
     }
 
     fn current_view(&self) -> ViewTransform {
-        ViewTransform { origin: self.last_canvas_rect.min + self.pan, scale: self.zoom }
+        ViewTransform { origin: self.last_canvas_rect.min + self.pan, scale: self.zoom, angle: self.view_angle }
     }
 
     /// Libère les textures d'images supprimées (évite une fuite mémoire).
@@ -3006,7 +3312,7 @@ impl PaintApp {
             h = h.wrapping_mul(31).wrapping_add((l.opacity * 1000.0) as u64);
             h = h.wrapping_mul(31).wrapping_add(l.blend as u64);
             h = h.wrapping_mul(31).wrapping_add(l.clip as u64);
-            h = h.wrapping_mul(31).wrapping_add(l.adjustment.map(|a| a.hash_key() + 1).unwrap_or(0));
+            h = h.wrapping_mul(31).wrapping_add(l.adjustment.as_ref().map(|a| a.hash_key() + 1).unwrap_or(0));
         }
         h = h
             .wrapping_mul(31)
@@ -3191,26 +3497,59 @@ impl PaintApp {
         }
     }
 
-    /// Pousse une copie miroir/symétrie (Sprint 11) : `symmetry_axes` copies
-    /// du trait, réparties par rotation régulière autour du centre du
-    /// document, en une seule commande d'undo (comme `duplicate_selection`).
+    /// Pousse une copie miroir/symétrie (Sprint 11, modes miroir Sprint O) :
+    /// en mode radial, `symmetry_axes` copies du trait réparties par rotation
+    /// régulière autour du centre du document ; en mode miroir, le trait
+    /// original plus sa (ses) réflexion(s) autour du (des) axe(s) central
+    /// (aux) — en une seule commande d'undo (comme `duplicate_selection`).
     fn commit_symmetry_stroke(&mut self, stroke: Stroke) {
         if stroke.points.is_empty() {
             return;
         }
-        let axes = self.symmetry_axes.max(1);
         let center = (self.doc.size.0 as f32 / 2.0, self.doc.size.1 as f32 / 2.0);
-        let mut strokes = Vec::with_capacity(axes as usize);
-        for k in 0..axes {
-            let angle = k as f32 * std::f32::consts::TAU / axes as f32;
-            let (ca, sa) = (angle.cos(), angle.sin());
+        // Chaque copie = une transformation point à point du trait capturé.
+        let transforms: Vec<Box<dyn Fn((f32, f32)) -> (f32, f32)>> = match self.symmetry_mode {
+            SymmetryMode::Radial => {
+                let axes = self.symmetry_axes.max(1);
+                (0..axes)
+                    .map(|k| {
+                        let angle = k as f32 * std::f32::consts::TAU / axes as f32;
+                        let (ca, sa) = (angle.cos(), angle.sin());
+                        Box::new(move |(x, y): (f32, f32)| {
+                            let (dx, dy) = (x - center.0, y - center.1);
+                            (center.0 + dx * ca - dy * sa, center.1 + dx * sa + dy * ca)
+                        }) as Box<dyn Fn((f32, f32)) -> (f32, f32)>
+                    })
+                    .collect()
+            }
+            mode => {
+                // Réflexions : identité + miroir X et/ou Y autour du centre.
+                let flips: &[(bool, bool)] = match mode {
+                    SymmetryMode::MirrorH => &[(false, false), (true, false)],
+                    SymmetryMode::MirrorV => &[(false, false), (false, true)],
+                    _ => &[(false, false), (true, false), (false, true), (true, true)],
+                };
+                flips
+                    .iter()
+                    .map(|&(fx, fy)| {
+                        Box::new(move |(x, y): (f32, f32)| {
+                            (
+                                if fx { 2.0 * center.0 - x } else { x },
+                                if fy { 2.0 * center.1 - y } else { y },
+                            )
+                        }) as Box<dyn Fn((f32, f32)) -> (f32, f32)>
+                    })
+                    .collect()
+            }
+        };
+        let mut strokes = Vec::with_capacity(transforms.len());
+        for tf in &transforms {
             let mut c = stroke.clone();
             c.id = self.next_id;
             self.next_id += 1;
             c.z = self.bump_z();
             for p in &mut c.points {
-                let (dx, dy) = (p.pos.0 - center.0, p.pos.1 - center.1);
-                p.pos = (center.0 + dx * ca - dy * sa, center.1 + dx * sa + dy * ca);
+                p.pos = tf(p.pos);
             }
             strokes.push(c);
         }
@@ -3272,6 +3611,7 @@ impl PaintApp {
 
 impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.apply_theme(ctx);
         self.autosave_tick();
         // Sans repaint périodique, une session restée inactive (aucune
         // interaction) ne redéclenche jamais `update` et l'autosave ne
@@ -3338,15 +3678,38 @@ impl eframe::App for PaintApp {
 
             // Plan de travail (pasteboard) sombre, puis le document à sa taille.
             painter.rect_filled(rect, 0.0, Color32::from_gray(70));
-            let view = ViewTransform { origin: rect.min + self.pan, scale: self.zoom };
-            let doc_rect = Rect::from_min_max(
+            let view = ViewTransform { origin: rect.min + self.pan, scale: self.zoom, angle: self.view_angle };
+            // Coins du document projetés (suivent la rotation de la vue) ;
+            // `doc_rect` reste leur boîte englobante écran (clip, fit…).
+            let (dw, dh) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
+            let doc_corners: [Pos2; 4] = [
                 view.doc_to_screen((0.0, 0.0)),
-                view.doc_to_screen((self.doc.size.0 as f32, self.doc.size.1 as f32)),
-            );
+                view.doc_to_screen((dw, 0.0)),
+                view.doc_to_screen((dw, dh)),
+                view.doc_to_screen((0.0, dh)),
+            ];
+            let doc_rect = doc_corners.iter().skip(1).fold(Rect::from_min_max(doc_corners[0], doc_corners[0]), |r, &c| r.union(Rect::from_min_max(c, c)));
             self.last_doc_rect = doc_rect;
-            // Ombre portée + fond du document.
-            painter.rect_filled(doc_rect.translate(Vec2::splat(3.0)), 0.0, Color32::from_black_alpha(60));
-            painter.rect_filled(doc_rect, 0.0, self.bg);
+            // Ombre portée + fond du document (polygones : suivent la rotation).
+            let shadow: Vec<Pos2> = doc_corners.iter().map(|c| *c + Vec2::splat(3.0)).collect();
+            painter.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(60), egui::Stroke::NONE));
+            painter.add(egui::Shape::convex_polygon(doc_corners.to_vec(), self.bg, egui::Stroke::NONE));
+            // Pelure d'oignon (Sprint U) : frames voisines en fantôme teinté
+            // (précédente en rouge, suivante en vert) sous la frame active.
+            if self.onion_skin && self.doc.is_animated() {
+                let active = self.doc.active_frame;
+                let next = if active + 1 < self.doc.frames.len() { Some(active + 1) } else { None };
+                for (idx, tint) in [
+                    (active.checked_sub(1), Color32::from_rgba_unmultiplied(255, 140, 140, 90)),
+                    (next, Color32::from_rgba_unmultiplied(140, 255, 140, 70)),
+                ] {
+                    if let Some(i) = idx {
+                        if let Some(tex) = self.onion_texture(ctx, i) {
+                            self.paint_doc_quad(&painter, &view, tex.id(), tint);
+                        }
+                    }
+                }
+            }
             if self.show_grid {
                 self.paint_grid(&painter, &view, doc_rect);
             }
@@ -3379,9 +3742,9 @@ impl eframe::App for PaintApp {
             let use_composite = self.needs_composite();
             if use_composite {
                 let sig = self.composite_signature();
-                if let Some(tex) = self.compositor.texture(ctx, &self.doc, sig, self.editing_text) {
-                    let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    content.image(tex.id(), doc_rect, uv, Color32::WHITE);
+                let tex_id = self.compositor.texture(ctx, &self.doc, sig, self.editing_text).map(|t| t.id());
+                if let Some(tex_id) = tex_id {
+                    self.paint_doc_quad(&content, &view, tex_id, Color32::WHITE);
                 }
             }
 
@@ -3443,10 +3806,13 @@ impl eframe::App for PaintApp {
             }
             // Éléments en cours de déplacement : dessinés décalés (aperçu live).
             if moving {
+                // Décalage exprimé en doc : passer par la projection garantit
+                // qu'il suit aussi la rotation de la vue (Sprint T, point 93).
                 let off = ViewTransform {
                     origin: view.origin
-                        + Vec2::new(self.move_delta.0 * self.zoom, self.move_delta.1 * self.zoom),
+                        + (view.doc_to_screen((self.move_delta.0, self.move_delta.1)) - view.doc_to_screen((0.0, 0.0))),
                     scale: self.zoom,
+                    angle: self.view_angle,
                 };
                 for s in &self.doc.layers[active].strokes {
                     if self.selection.contains(&s.id) {
@@ -3503,8 +3869,33 @@ impl eframe::App for PaintApp {
             // transparente hors sélection, sous les poignées/pointillés de
             // la sélection d'objets classique.
             if let Some(tex) = self.selection_overlay_texture(ctx) {
-                let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                content.image(tex.id(), doc_rect, uv, Color32::WHITE);
+                self.paint_doc_quad(&content, &view, tex.id(), Color32::WHITE);
+            }
+            // Fourmis en marche (Sprint O, point 60) : contour du masque en
+            // pointillés animés (trait blanc continu + tirets noirs dont le
+            // décalage avance avec le temps), par-dessus la teinte.
+            self.ensure_selection_ants();
+            if let Some((_, loops)) = &self.selection_ants {
+                let offset = (ctx.input(|i| i.time) as f32 * 20.0) % 12.0;
+                for lp in loops {
+                    let mut pts: Vec<Pos2> = lp.iter().map(|&d| view.doc_to_screen(d)).collect();
+                    if let Some(&first) = pts.first() {
+                        pts.push(first); // referme la boucle
+                    }
+                    content.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0, Color32::WHITE)));
+                    for s in egui::Shape::dashed_line_with_offset(
+                        &pts,
+                        egui::Stroke::new(1.0, Color32::BLACK),
+                        &[6.0],
+                        &[6.0],
+                        offset,
+                    ) {
+                        content.add(s);
+                    }
+                }
+                if !loops.is_empty() {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(80));
+                }
             }
             self.paint_selection(&painter, &view, moving);
             self.paint_pen(&content, &view, &response);
@@ -3512,9 +3903,10 @@ impl eframe::App for PaintApp {
             self.paint_crop(&painter, &view);
             self.paint_retouch(&painter, &view);
             self.paint_marquee(&painter, &view);
+            self.paint_manual_guides(&painter, &view);
             self.paint_measure(&painter, &view);
             self.paint_cursor(&painter, &response);
-            if self.show_rulers {
+            if self.show_rulers && self.view_angle == 0.0 {
                 self.paint_rulers(&painter, &view);
             }
 
@@ -3616,20 +4008,6 @@ fn ellipse_pixel_mask(w: usize, h: usize, px0: usize, py0: usize, px1: usize, py
     mask
 }
 
-/// Approxime l'ellipse inscrite dans `r` par un polygone à `segments` côtés,
-/// pour le rendu de l'overlay de sélection (Sprint 2.1) — `egui` n'a pas de
-/// primitive ellipse remplie directement utilisable ici.
-fn ellipse_points(r: Rect, segments: usize) -> Vec<Pos2> {
-    let center = r.center();
-    let (rx, ry) = (r.width() * 0.5, r.height() * 0.5);
-    (0..segments)
-        .map(|i| {
-            let a = i as f32 / segments as f32 * std::f32::consts::TAU;
-            Pos2::new(center.x + rx * a.cos(), center.y + ry * a.sin())
-        })
-        .collect()
-}
-
 /// Pas de graduation des règles, en unités document, choisi pour qu'un cran
 /// fasse ~50–120 px à l'écran (séquence 1-2-5 × puissances de 10).
 fn ruler_step(zoom: f32) -> f32 {
@@ -3711,7 +4089,9 @@ fn draw_image(
 ) {
     let tint = Color32::WHITE.gamma_multiply(opacity);
     let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-    if im.rot.abs() < 1e-4 {
+    // Vue tournée (Sprint T, point 93) : toujours passer par le maillage,
+    // un Rect écran ne peut pas tourner.
+    if im.rot.abs() < 1e-4 && view.angle == 0.0 {
         let rect = Rect::from_min_max(
             view.doc_to_screen(im.pos),
             view.doc_to_screen((im.pos.0 + im.size.0, im.pos.1 + im.size.1)),
@@ -3802,6 +4182,41 @@ fn draw_text_arc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Symétrie miroir (Sprint O, point 54) : en mode MirrorH, un trait est
+    /// validé en deux copies — l'original et sa réflexion autour de l'axe
+    /// vertical central — dans une seule commande d'undo.
+    #[test]
+    fn symmetry_mirror_h_commits_the_stroke_and_its_reflection() {
+        let mut app = PaintApp::default();
+        app.symmetry_mode = crate::tools::SymmetryMode::MirrorH;
+        let cx = app.doc.size.0 as f32 / 2.0;
+        let mut s = Stroke::new([255, 0, 0, 255], 2.0, Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (10.0, 20.0), width: 2.0 }];
+
+        app.commit_symmetry_stroke(s);
+
+        let strokes = &app.doc.layers[0].strokes;
+        assert_eq!(strokes.len(), 2);
+        assert_eq!(strokes[0].points[0].pos, (10.0, 20.0));
+        assert_eq!(strokes[1].points[0].pos, (2.0 * cx - 10.0, 20.0), "réflexion autour de l'axe vertical central");
+        app.history.undo(&mut app.doc);
+        assert!(app.doc.layers[0].strokes.is_empty(), "une seule commande d'undo pour les deux copies");
+    }
+
+    /// Retourner l'image (Sprint O, point 66) : commande annulable qui
+    /// renvoie le contenu à l'emplacement miroir.
+    #[test]
+    fn flip_document_is_undoable() {
+        let mut app = PaintApp::default();
+        let w = app.doc.size.0 as f32;
+        add_stroke_at(&mut app, 0, 1, (10.0, 20.0));
+
+        app.flip_document(true);
+        assert_eq!(app.doc.layers[0].strokes[0].points[0].pos, (w - 10.0, 20.0));
+        app.history.undo(&mut app.doc);
+        assert_eq!(app.doc.layers[0].strokes[0].points[0].pos, (10.0, 20.0));
+    }
 
     #[test]
     fn layer_lock_allows_only_non_destructive_tools() {
@@ -4035,6 +4450,39 @@ mod tests {
         }
         app.doc.active_layer = 0;
         app
+    }
+
+    /// Fusion de calques (Sprint P, point 30) : le contenu peint du calque
+    /// actif survit au merge down — il était silencieusement perdu avant.
+    #[test]
+    fn merge_down_keeps_painted_raster_content() {
+        let mut app = app_with_layers(2);
+        app.doc.active_layer = 1;
+        app.doc.layers[1].raster.set_pixel(10, 10, [255, 0, 0, 255]);
+
+        app.merge_down();
+
+        assert_eq!(app.doc.layers.len(), 1);
+        assert_eq!(app.doc.layers[0].raster.get_pixel(10, 10), [255, 0, 0, 255]);
+        app.history.undo(&mut app.doc);
+        assert_eq!(app.doc.layers.len(), 2, "annulable : la pile d'origine revient");
+        assert_eq!(app.doc.layers[1].raster.get_pixel(10, 10)[3], 255);
+    }
+
+    /// Aplatir garde aussi le raster peint de chaque calque, composé de bas
+    /// en haut (le calque du dessus recouvre).
+    #[test]
+    fn flatten_composites_raster_from_all_layers() {
+        let mut app = app_with_layers(3);
+        app.doc.layers[0].raster.set_pixel(5, 5, [0, 0, 255, 255]);
+        app.doc.layers[2].raster.set_pixel(5, 5, [255, 0, 0, 255]);
+        app.doc.layers[1].raster.set_pixel(7, 7, [0, 255, 0, 255]);
+
+        app.flatten();
+
+        assert_eq!(app.doc.layers.len(), 1);
+        assert_eq!(app.doc.layers[0].raster.get_pixel(5, 5), [255, 0, 0, 255], "le calque du dessus recouvre");
+        assert_eq!(app.doc.layers[0].raster.get_pixel(7, 7), [0, 255, 0, 255]);
     }
 
     #[test]

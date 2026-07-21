@@ -241,6 +241,39 @@ impl PaintApp {
     /// mais écrit de vrais opérateurs de dessin PDF au lieu de balises SVG —
     /// contrairement à `request_export(ExportFormat::Pdf)`, qui rastérise
     /// tout le document en une seule image JPEG.
+    /// Impression (Sprint T, point 20) — version « PDF vers Aperçu » : le
+    /// document est rendu en PDF vectoriel dans un fichier temporaire puis
+    /// ouvert dans l'application PDF par défaut (Aperçu), où l'utilisateur
+    /// imprime avec le vrai dialogue macOS. Choix assumé (voir
+    /// sprint_fonctionnalites.md) : couvre l'usage sans dépendance objc2
+    /// supplémentaire ; un `NSPrintOperation` natif reste possible plus
+    /// tard. Note sandbox : `open` fonctionne aussi dans l'App Sandbox
+    /// (LaunchServices), contrairement à un accès disque arbitraire.
+    pub fn print_document(&mut self) {
+        let bg = [self.bg.r(), self.bg.g(), self.bg.b()];
+        match crate::pdf_vector::pdf_bytes(&self.doc, bg, self.jpeg_quality) {
+            Ok(bytes) => {
+                let path = std::env::temp_dir().join("quickpaint-impression.pdf");
+                let opened = std::fs::write(&path, &bytes)
+                    .and_then(|_| std::process::Command::new("open").arg(&path).status());
+                match opened {
+                    Ok(st) if st.success() => self.info(t(
+                        "PDF ouvert dans Aperçu — imprime avec ⌘P depuis Aperçu.",
+                        "PDF opened in Preview — print with ⌘P from Preview.",
+                    )),
+                    _ => self.fail(t(
+                        "Impossible d'ouvrir le PDF d'impression.",
+                        "Couldn't open the print PDF.",
+                    )),
+                }
+            }
+            Err(e) => self.fail(format!(
+                "{} : {e}",
+                t("Échec de préparation de l'impression", "Print preparation failed")
+            )),
+        }
+    }
+
     pub fn export_pdf_vector(&mut self) {
         let bg = [self.bg.r(), self.bg.g(), self.bg.b()];
         match crate::pdf_vector::save_to_desktop(&self.doc, bg, self.jpeg_quality) {

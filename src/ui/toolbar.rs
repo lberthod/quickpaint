@@ -946,10 +946,10 @@ fn selection_mask_dialog_window(ctx: &egui::Context, app: &mut PaintApp) {
 }
 
 /// Panneau « Animation » (Sprint L.6) : liste des frames (une par ligne,
-/// délai réglable), sélection/réordonnancement/suppression, et export en GIF
-/// animé. Chaque frame est un instantané complet de la pile de calques (voir
-/// `app/animation.rs`) — pas de scrubber/onion skinning dans cette première
-/// version, une liste suffit pour l'usage visé (petites boucles simples).
+/// délai réglable), sélection/réordonnancement/suppression, export en GIF
+/// animé, et pelure d'oignon (Sprint U) — frames voisines en fantôme teinté
+/// sous la frame active. Chaque frame est un instantané complet de la pile
+/// de calques (voir `app/animation.rs`).
 fn animation_panel_window(ctx: &egui::Context, app: &mut PaintApp) {
     if !app.show_animation_panel {
         return;
@@ -972,6 +972,12 @@ fn animation_panel_window(ctx: &egui::Context, app: &mut PaintApp) {
                     "{} {} frame(s)",
                     t("Animation :", "Animation:"),
                     app.doc.frames.len()
+                ));
+                // Pelure d'oignon (Sprint U) : précédente en rouge,
+                // suivante en vert, sous la frame active.
+                ui.checkbox(&mut app.onion_skin, t("Pelure d'oignon", "Onion skin")).on_hover_text(t(
+                    "Affiche la frame précédente (rouge) et la suivante (vert) en fantôme",
+                    "Shows the previous frame (red) and the next one (green) as ghosts",
                 ));
             }
             ui.separator();
@@ -1029,6 +1035,16 @@ fn animation_panel_window(ctx: &egui::Context, app: &mut PaintApp) {
                 .clicked()
             {
                 app.export_animated_gif(ctx);
+            }
+            if ui
+                .add_enabled(app.doc.is_animated(), egui::Button::new(t("Exporter en APNG animé…", "Export as animated APNG…")))
+                .on_hover_text(t(
+                    "PNG animé : couleurs 24 bits + transparence, lu par les navigateurs et Aperçu",
+                    "Animated PNG: 24-bit colors + transparency, readable by browsers and Preview",
+                ))
+                .clicked()
+            {
+                app.export_animated_apng(ctx);
             }
             ui.separator();
             if ui.button(t("Fermer", "Close")).clicked() {
@@ -1261,9 +1277,31 @@ fn shortcuts_prefs_window(ctx: &egui::Context, app: &mut PaintApp) {
                 }
             });
             ui.separator();
+            // Commandes ⌘ rebindables (Sprint R, point 97) : la touche est
+            // libre, le modificateur ⌘ reste implicite (⇧ capturé avec).
+            ui.label(t("Commandes (⌘ + touche) :", "Commands (⌘ + key):"));
+            egui::Grid::new("cmd_shortcuts_grid").num_columns(2).striped(true).show(ui, |ui| {
+                for action in crate::keybindings::CommandAction::ALL {
+                    ui.label(action.label());
+                    let capturing = app.capturing_cmd_shortcut == Some(action);
+                    let btn_label = if capturing {
+                        t("Appuyez sur une touche…", "Press a key…").to_string()
+                    } else {
+                        let (key, shift) = app.keybindings.cmd_binding(action);
+                        format!("⌘{}{}", if shift { "⇧" } else { "" }, key.name())
+                    };
+                    if ui.button(btn_label).clicked() {
+                        app.capturing_cmd_shortcut = Some(action);
+                        app.capturing_shortcut = None;
+                    }
+                    ui.end_row();
+                }
+            });
+            ui.separator();
             if ui.button(t("Réinitialiser les valeurs par défaut", "Reset to defaults")).clicked() {
                 app.keybindings.reset_defaults();
                 app.capturing_shortcut = None;
+                app.capturing_cmd_shortcut = None;
             }
             // Bouton de fermeture explicite (UX-5.2), voir style_presets_window.
             ui.separator();
@@ -1450,6 +1488,18 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             });
             if ui.button(t("Exporter en plusieurs tailles…", "Export multiple sizes…")).clicked() {
                 app.show_batch_export = true;
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui
+                .button(t("Imprimer… (⌘P)", "Print… (⌘P)"))
+                .on_hover_text(t(
+                    "Ouvre le document en PDF dans Aperçu, qui gère le dialogue d'impression macOS",
+                    "Opens the document as a PDF in Preview, which handles the macOS print dialog",
+                ))
+                .clicked()
+            {
+                app.print_document();
                 ui.close_menu();
             }
             ui.separator();
@@ -1793,6 +1843,15 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 ui.close_menu();
             }
             ui.separator();
+            if ui.button(t("Retourner horizontalement", "Flip horizontal")).clicked() {
+                app.flip_document(true);
+                ui.close_menu();
+            }
+            if ui.button(t("Retourner verticalement", "Flip vertical")).clicked() {
+                app.flip_document(false);
+                ui.close_menu();
+            }
+            ui.separator();
             ui.menu_button(t("Taille du document", "Document size"), |ui| {
                 for (cat, items) in templates() {
                     ui.menu_button(cat, |ui| {
@@ -1820,6 +1879,40 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 }
                 if ui.button(t("Ajuster", "Fit")).clicked() {
                     app.fit_view();
+                }
+            });
+            ui.separator();
+            // Rotation de la vue (Sprint T, point 93) : affichage seulement.
+            ui.horizontal(|ui| {
+                ui.label(t("Rotation :", "Rotation:"));
+                if ui.button("⟲ 15°").clicked() {
+                    app.set_view_angle(app.view_angle - 15f32.to_radians());
+                }
+                if ui.button("⟳ 15°").clicked() {
+                    app.set_view_angle(app.view_angle + 15f32.to_radians());
+                }
+                let deg = app.view_angle.to_degrees();
+                if ui.button("0°").on_hover_text(t("Remettre la vue droite", "Reset the view upright")).clicked() {
+                    app.set_view_angle(0.0);
+                }
+                ui.label(format!("{deg:.0}°"));
+            });
+            if app.view_angle != 0.0 {
+                ui.label(
+                    egui::RichText::new(t(
+                        "Règles, guides, pot de peinture et détourage inactifs tant que la vue est tournée.",
+                        "Rulers, guides, paint bucket and cutout are inactive while the view is rotated.",
+                    ))
+                    .small(),
+                );
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(t("Thème :", "Theme:"));
+                for th in crate::app::UiTheme::ALL {
+                    if ui.selectable_value(&mut app.ui_theme, th, th.label()).changed() {
+                        app.ui_theme.save();
+                    }
                 }
             });
             ui.separator();
@@ -2216,6 +2309,35 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     }
     if ui.selectable_label(app.text_bold, "𝐆").on_hover_text(t("Gras", "Bold")).clicked() {
         app.text_bold = !app.text_bold;
+        changed = true;
+    }
+    if ui
+        .selectable_label(app.text_italic, "𝐼")
+        .on_hover_text(t(
+            "Italique — effectif avec une police système disposant d'une variante italique",
+            "Italic — effective with a system font that has an italic variant",
+        ))
+        .clicked()
+    {
+        app.text_italic = !app.text_italic;
+        changed = true;
+    }
+
+    ui.separator();
+    ui.label(t("Interligne :", "Line height:"));
+    if ui
+        .add(egui::Slider::new(&mut app.text_line_height, 0.8..=3.0).fixed_decimals(2))
+        .on_hover_text(t("Espacement vertical entre les lignes, en multiple de la taille", "Vertical spacing between lines, as a multiple of the size"))
+        .changed()
+    {
+        changed = true;
+    }
+    ui.label(t("Espacement :", "Tracking:"));
+    if ui
+        .add(egui::Slider::new(&mut app.text_letter_spacing, -2.0..=20.0).fixed_decimals(1))
+        .on_hover_text(t("Espacement additionnel entre caractères (px document)", "Extra spacing between characters (document px)"))
+        .changed()
+    {
         changed = true;
     }
 
@@ -2636,8 +2758,13 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         }
         if app.active_tool == ActiveTool::Symmetry {
             ui.separator();
-            ui.label(t("Axes :", "Axes:"));
-            ui.add(egui::DragValue::new(&mut app.symmetry_axes).range(2..=12));
+            for mode in crate::tools::SymmetryMode::ALL {
+                ui.selectable_value(&mut app.symmetry_mode, mode, mode.label());
+            }
+            if app.symmetry_mode == crate::tools::SymmetryMode::Radial {
+                ui.label(t("Axes :", "Axes:"));
+                ui.add(egui::DragValue::new(&mut app.symmetry_axes).range(2..=12));
+            }
         }
         if app.active_tool == ActiveTool::Gradient {
             ui.separator();

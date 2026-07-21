@@ -112,6 +112,39 @@ impl PaintApp {
         frames
     }
 
+    /// Exporte l'animation en APNG (Sprint T, point 100a) : mêmes rendus par
+    /// frame que le GIF, mais en PNG animé — couleurs 24 bits + alpha, lu par
+    /// tous les navigateurs et Aperçu. Décision produit du 20 juillet 2026 :
+    /// retenu à la place du MP4 (qui exigerait une dépendance système).
+    pub fn export_animated_apng(&mut self, ctx: &egui::Context) {
+        if !self.doc.is_animated() {
+            self.info(t(
+                "Ajoute au moins 2 frames pour exporter une animation.",
+                "Add at least 2 frames to export an animation.",
+            ));
+            return;
+        }
+        let frames_data = self.synced_frames();
+        let bg = self.bg;
+        let mut apng_frames = Vec::with_capacity(frames_data.len());
+        let (mut ow, mut oh) = (0, 0);
+        for f in &frames_data {
+            let mut temp = self.doc.clone();
+            temp.layers = f.layers.clone();
+            let Some((w, h, rgba)) = self.compositor.render_to_rgba(ctx, &temp, bg) else {
+                self.fail(t("Échec du rendu d'une frame.", "Frame render failed."));
+                return;
+            };
+            (ow, oh) = (w, h);
+            apng_frames.push((f.delay_ms.max(20), rgba));
+        }
+        match crate::export::save_animated_apng(&apng_frames, ow, oh) {
+            Ok(p) => self.info(format!("{} : {}", t("APNG animé enregistré", "Animated APNG saved"), p.display())),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => self.info(t("Export annulé.", "Export cancelled.")),
+            Err(e) => self.fail(format!("{} : {e}", t("Échec de l'export APNG", "APNG export failed"))),
+        }
+    }
+
     /// Exporte l'animation en GIF (Sprint L.6) : chaque frame est rendue
     /// séparément via le compositeur (même chemin que l'export statique),
     /// puis encodée avec son propre délai. Refuse s'il y a moins de 2 frames

@@ -97,6 +97,38 @@ pub enum ActiveTool {
     Gradient,
 }
 
+/// Mode de l'outil Miroir/Symétrie (point 54 de l'audit, complété Sprint O) :
+/// la répartition radiale existante (kaléidoscope), ou une vraie réflexion
+/// miroir autour d'un axe passant par le centre du document — le mode
+/// « miroir » classique de Krita/Procreate, que la rotation seule ne
+/// produit pas (une rotation conserve l'orientation, un miroir l'inverse).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SymmetryMode {
+    /// N copies par rotation régulière autour du centre (existant).
+    #[default]
+    Radial,
+    /// Miroir gauche/droite (réflexion autour de l'axe vertical central).
+    MirrorH,
+    /// Miroir haut/bas (réflexion autour de l'axe horizontal central).
+    MirrorV,
+    /// Miroir sur les deux axes à la fois (4 copies).
+    MirrorBoth,
+}
+
+impl SymmetryMode {
+    pub const ALL: [SymmetryMode; 4] =
+        [SymmetryMode::Radial, SymmetryMode::MirrorH, SymmetryMode::MirrorV, SymmetryMode::MirrorBoth];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SymmetryMode::Radial => t("Radial", "Radial"),
+            SymmetryMode::MirrorH => t("Miroir ⇋", "Mirror ⇋"),
+            SymmetryMode::MirrorV => t("Miroir ⇵", "Mirror ⇵"),
+            SymmetryMode::MirrorBoth => t("Miroir ⇋⇵", "Mirror ⇋⇵"),
+        }
+    }
+}
+
 /// Mode de retouche destructive d'image par glissé de rectangle (Sprint 4.3/
 /// 4.4) : recadrage mis à part (`crop_mode`, plus ancien et avec sa propre
 /// contrainte de ratio), ces trois modes partagent le même geste — glisser un
@@ -126,6 +158,10 @@ pub enum SelectMode {
     Ellipse,
     /// Lasso libre : sélectionne les éléments dont le centre est dans le tracé.
     Lasso,
+    /// Lasso polygonal (point 52 de l'audit) : chaque clic pose un sommet,
+    /// double-clic ou clic près du premier sommet referme le polygone —
+    /// même test « centre dans le tracé » que le lasso libre.
+    PolyLasso,
     /// Baguette magique : clic → sélectionne les traits de couleur proche.
     Wand,
 }
@@ -159,13 +195,15 @@ impl SelectionCombine {
 }
 
 impl SelectMode {
-    pub const ALL: [SelectMode; 4] = [SelectMode::Rect, SelectMode::Ellipse, SelectMode::Lasso, SelectMode::Wand];
+    pub const ALL: [SelectMode; 5] =
+        [SelectMode::Rect, SelectMode::Ellipse, SelectMode::Lasso, SelectMode::PolyLasso, SelectMode::Wand];
 
     pub fn label(self) -> &'static str {
         match self {
             SelectMode::Rect => t("Rectangle", "Rectangle"),
             SelectMode::Ellipse => t("Ellipse", "Ellipse"),
             SelectMode::Lasso => t("Lasso", "Lasso"),
+            SelectMode::PolyLasso => t("Lasso polygonal", "Polygon lasso"),
             SelectMode::Wand => t("Baguette", "Wand"),
         }
     }

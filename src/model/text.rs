@@ -68,6 +68,22 @@ pub struct TextItem {
     /// Graisse simulée (faux-bold) — double dépôt décalé au rendu.
     #[serde(default)]
     pub bold: bool,
+    /// Italique (Sprint Q, point 82) : utilise la **vraie fonte italique**
+    /// de la famille système quand elle existe (chargée d'office par
+    /// `FontManager::ensure_loaded` sous une famille egui dédiée) ; si la
+    /// famille n'a pas d'italique — ou pour les polices intégrées Sans/Mono
+    /// — le rendu reste en romain (pas de faux-italique par cisaillement :
+    /// egui ne sait pas incliner un galley, limite documentée).
+    #[serde(default)]
+    pub italic: bool,
+    /// Interligne (Sprint Q, point 83), en multiple de `size` — 1.25 était
+    /// la valeur codée en dur avant d'être réglable.
+    #[serde(default = "default_line_height")]
+    pub line_height: f32,
+    /// Espacement additionnel entre caractères (crénage global, Sprint Q,
+    /// point 83), en unités document. 0 = métriques naturelles de la police.
+    #[serde(default)]
+    pub letter_spacing: f32,
     /// Alignement des lignes (Sprint 3).
     #[serde(default)]
     pub align: TextAlign,
@@ -93,6 +109,10 @@ pub struct TextItem {
 
 fn default_outline_color() -> [u8; 4] {
     [255, 255, 255, 255]
+}
+
+fn default_line_height() -> f32 {
+    1.25
 }
 
 /// Ombre portée d'un texte (Sprint 7.1).
@@ -134,12 +154,14 @@ impl Default for TextArc {
 impl TextArc {
     /// Angle (radians) de chaque caractère de `text`, centré autour de
     /// `start_angle_deg` (le milieu du texte tombe sur l'angle de départ).
-    pub fn char_angles(&self, text: &str, char_size: f32) -> Vec<f32> {
+    /// `extra_advance` : espacement additionnel entre caractères (crénage,
+    /// Sprint Q point 83), en unités document.
+    pub fn char_angles(&self, text: &str, char_size: f32, extra_advance: f32) -> Vec<f32> {
         let n = text.chars().count();
         if n == 0 {
             return Vec::new();
         }
-        let advance = char_size * 0.6;
+        let advance = (char_size * 0.6 + extra_advance).max(0.1);
         let dir = if self.flip { -1.0 } else { 1.0 };
         let total = advance * (n.saturating_sub(1)) as f32;
         let radius = self.radius.max(1.0);
@@ -165,6 +187,9 @@ impl TextItem {
             font: TextFont::default(),
             font_family: None,
             bold: false,
+            italic: false,
+            line_height: default_line_height(),
+            letter_spacing: 0.0,
             align: TextAlign::default(),
             outline_w: 0.0,
             outline_color: default_outline_color(),
@@ -187,8 +212,8 @@ impl TextItem {
         let cols = self.text.lines().map(|l| l.chars().count()).max().unwrap_or(1).max(1) as f32;
         // Le monospace est plus large par caractère.
         let cw = if self.font == TextFont::Monospace { 0.62 } else { 0.55 };
-        let w = cols * self.size * cw;
-        let h = lines * self.size * 1.25;
+        let w = cols * self.size * cw + (cols - 1.0).max(0.0) * self.letter_spacing.max(0.0);
+        let h = lines * self.size * self.line_height.max(0.5);
         let pad = self.outline_w.max(0.0);
         (
             (self.pos.0 - pad, self.pos.1 - pad),
@@ -201,10 +226,24 @@ impl TextItem {
 mod tests {
     use super::*;
 
+    /// Sprint Q (point 83) : l'interligne et l'espacement réglables se
+    /// reflètent dans la boîte englobante approximative (sélection/cadre).
+    #[test]
+    fn approx_bounds_follow_line_height_and_letter_spacing() {
+        let mut t = TextItem::new(1, (0.0, 0.0), 20.0, [0, 0, 0, 255]);
+        t.text = "AB\nCD".to_string();
+        let (_, mx_default) = t.approx_bounds();
+        t.line_height = 2.5;
+        t.letter_spacing = 10.0;
+        let (_, mx_spaced) = t.approx_bounds();
+        assert!(mx_spaced.1 > mx_default.1, "interligne plus grand → boîte plus haute");
+        assert!(mx_spaced.0 > mx_default.0, "espacement plus grand → boîte plus large");
+    }
+
     #[test]
     fn char_angles_centers_the_text_on_the_start_angle() {
         let arc = TextArc { radius: 100.0, start_angle_deg: 0.0, flip: false };
-        let angles = arc.char_angles("ABC", 20.0);
+        let angles = arc.char_angles("ABC", 20.0, 0.0);
         assert_eq!(angles.len(), 3);
         // Nombre impair de caractères : le caractère du milieu tombe pile sur
         // l'angle de départ.
@@ -218,8 +257,8 @@ mod tests {
     fn char_angles_flip_reverses_direction() {
         let normal = TextArc { radius: 100.0, start_angle_deg: 0.0, flip: false };
         let flipped = TextArc { radius: 100.0, start_angle_deg: 0.0, flip: true };
-        let a = normal.char_angles("AB", 20.0);
-        let b = flipped.char_angles("AB", 20.0);
+        let a = normal.char_angles("AB", 20.0, 0.0);
+        let b = flipped.char_angles("AB", 20.0, 0.0);
         assert!(a[0] < a[1]); // sens normal : croissant
         assert!(b[0] > b[1]); // inversé : décroissant
     }
@@ -227,7 +266,7 @@ mod tests {
     #[test]
     fn char_angles_empty_text_is_empty() {
         let arc = TextArc::default();
-        assert!(arc.char_angles("", 20.0).is_empty());
+        assert!(arc.char_angles("", 20.0, 0.0).is_empty());
     }
 
     #[test]

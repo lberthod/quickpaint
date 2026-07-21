@@ -3152,6 +3152,7 @@ dependencies = [
  "geo-types",
  "image",
  "muda",
+ "png 0.17.16",
  "psd",
  "rfd",
  "serde",

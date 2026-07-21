@@ -21,6 +21,13 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Octets du PDF vectoriel sans passage par le disque — utilisé par
+/// l'impression (Sprint T, point 20), qui écrit dans un fichier temporaire
+/// plutôt que sur le Bureau.
+pub fn pdf_bytes(doc: &Document, bg: [u8; 3], jpeg_quality: u8) -> std::io::Result<Vec<u8>> {
+    render(doc, bg, jpeg_quality)
+}
+
 pub fn save_to_desktop(doc: &Document, bg: [u8; 3], jpeg_quality: u8) -> std::io::Result<PathBuf> {
     let bytes = render(doc, bg, jpeg_quality)?;
     let path = desktop_path();

@@ -84,6 +84,25 @@ impl PaintApp {
         // Capture d'un nouveau raccourci en cours (panneau de préférences,
         // Sprint 7.2) : la prochaine touche pressée devient le raccourci de
         // l'action visée, prioritaire sur tout le reste.
+        // Capture d'une commande ⌘ rebindable (Sprint R, point 97) : même
+        // principe que les outils, mais la combinaison enregistrée retient
+        // aussi l'état de ⇧ (⌘E vs ⌘⇧E).
+        if let Some(action) = self.capturing_cmd_shortcut {
+            let captured = ctx.input(|i| i.events.iter().find_map(|e| match e {
+                egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, modifiers.shift)),
+                _ => None,
+            }));
+            if let Some((key, shift)) = captured {
+                if key != egui::Key::Escape && !self.keybindings.set_cmd(action, key, shift) {
+                    self.info(t(
+                        "Touche réservée à une convention macOS (⌘Z/⌘C/⌘V/⌘X/⌘S/⌘O/⌘N/⌘[/⌘]).",
+                        "Key reserved by a macOS convention (⌘Z/⌘C/⌘V/⌘X/⌘S/⌘O/⌘N/⌘[/⌘]).",
+                    ));
+                }
+                self.capturing_cmd_shortcut = None;
+            }
+            return;
+        }
         if let Some(action) = self.capturing_shortcut {
             let captured = ctx.input(|i| i.events.iter().find_map(|e| match e {
                 egui::Event::Key { key, pressed: true, .. } => Some(*key),
@@ -103,6 +122,7 @@ impl PaintApp {
         // Les actions ouvrant une boîte de dialogue native sont exécutées
         // APRÈS la fermeture du verrou d'entrée (évite tout blocage modal).
         let mut want_export = false;
+        let mut want_print = false;
         let mut want_new = false;
         let mut want_open = false;
         let mut want_save = false;
@@ -116,7 +136,7 @@ impl PaintApp {
                     self.undo();
                 }
             }
-            if cmd && i.key_pressed(egui::Key::D) {
+            if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::Duplicate, i) {
                 self.duplicate_selection();
             }
             if cmd && i.modifiers.alt && i.key_pressed(egui::Key::C) {
@@ -133,7 +153,7 @@ impl PaintApp {
             if !typing && (i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
                 self.delete_selection();
             }
-            if cmd && i.modifiers.shift && i.key_pressed(egui::Key::I) {
+            if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::InvertSelection, i) {
                 self.invert_selection();
             }
             // Fichier (conventions macOS) : ⌘N / ⌘O / ⌘S / ⌘E.
@@ -146,8 +166,12 @@ impl PaintApp {
             if cmd && i.key_pressed(egui::Key::S) {
                 want_save = true;
             }
-            if cmd && i.key_pressed(egui::Key::E) {
+            if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::Export, i) {
                 want_export = true;
+            }
+            // Impression (Sprint T, point 20) : ⌘P, convention macOS fixe.
+            if cmd && i.key_pressed(egui::Key::P) {
+                want_print = true;
             }
             if cmd && !i.modifiers.alt && i.key_pressed(egui::Key::V) {
                 want_paste = true;
@@ -159,14 +183,14 @@ impl PaintApp {
             if cmd && i.key_pressed(egui::Key::OpenBracket) {
                 self.reorder(if i.modifiers.shift { ZMove::Back } else { ZMove::Backward });
             }
-            // Zoom clavier (⌘0 = 100 %, ⌘+ / ⌘-).
-            if cmd && i.key_pressed(egui::Key::Num0) {
+            // Zoom clavier (⌘0 = 100 %, ⌘+ / ⌘-), rebindable (Sprint R, point 97).
+            if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::ZoomReset, i) {
                 self.reset_view();
             }
-            if cmd && (i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals)) {
+            if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::ZoomIn, i) {
                 self.zoom_in();
             }
-            if cmd && i.key_pressed(egui::Key::Minus) {
+            if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::ZoomOut, i) {
                 self.zoom_out();
             }
             if !cmd && !typing {
@@ -233,6 +257,9 @@ impl PaintApp {
         }
         if want_export {
             self.request_export(ctx, crate::export::ExportFormat::Png);
+        }
+        if want_print {
+            self.print_document();
         }
     }
 }
