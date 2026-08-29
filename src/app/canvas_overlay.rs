@@ -17,7 +17,7 @@ impl PaintApp {
             return;
         }
         let p = painter.with_clip_rect(doc_rect.intersect(self.last_canvas_rect));
-        let stroke = egui::Stroke::new(1.0, Color32::from_black_alpha(28));
+        let stroke = egui::Stroke::new(1.0_f32, Color32::from_black_alpha(28));
         let (w, h) = (self.doc.size.0 as f32, self.doc.size.1 as f32);
         let mut x = 0.0;
         while x <= w {
@@ -54,10 +54,10 @@ impl PaintApp {
             p.line_segment([a, b], stroke);
         };
         for g in &self.doc.guides {
-            line(g.vertical, g.pos, egui::Stroke::new(1.0, color));
+            line(g.vertical, g.pos, egui::Stroke::new(1.0_f32, color));
         }
         if let Some((vertical, pos)) = self.guide_drag_preview() {
-            line(vertical, pos, egui::Stroke::new(1.5, Color32::from_rgb(0, 170, 230)));
+            line(vertical, pos, egui::Stroke::new(1.5_f32, Color32::from_rgb(0, 170, 230)));
         }
     }
 
@@ -87,7 +87,7 @@ impl PaintApp {
             if sx >= left.max.x && sx <= cr.max.x {
                 painter.line_segment(
                     [egui::pos2(sx, cr.min.y + TH * 0.45), egui::pos2(sx, cr.min.y + TH)],
-                    egui::Stroke::new(1.0, line),
+                    egui::Stroke::new(1.0_f32, line),
                 );
                 painter.text(
                     egui::pos2(sx + 2.0, cr.min.y + 1.0),
@@ -106,7 +106,7 @@ impl PaintApp {
             if sy >= top.max.y && sy <= cr.max.y {
                 painter.line_segment(
                     [egui::pos2(cr.min.x + TH * 0.45, sy), egui::pos2(cr.min.x + TH, sy)],
-                    egui::Stroke::new(1.0, line),
+                    egui::Stroke::new(1.0_f32, line),
                 );
                 painter.text(
                     egui::pos2(cr.min.x + 1.0, sy + 1.0),
@@ -120,8 +120,8 @@ impl PaintApp {
         }
         // Coin + liserés de séparation.
         painter.rect_filled(Rect::from_min_size(cr.min, Vec2::splat(TH)), 0.0, bg);
-        painter.line_segment([egui::pos2(cr.min.x, cr.min.y + TH), egui::pos2(cr.max.x, cr.min.y + TH)], egui::Stroke::new(1.0, line));
-        painter.line_segment([egui::pos2(cr.min.x + TH, cr.min.y), egui::pos2(cr.min.x + TH, cr.max.y)], egui::Stroke::new(1.0, line));
+        painter.line_segment([egui::pos2(cr.min.x, cr.min.y + TH), egui::pos2(cr.max.x, cr.min.y + TH)], egui::Stroke::new(1.0_f32, line));
+        painter.line_segment([egui::pos2(cr.min.x + TH, cr.min.y), egui::pos2(cr.min.x + TH, cr.max.y)], egui::Stroke::new(1.0_f32, line));
     }
 
     /// Aperçu du chemin de plume en cours : courbe + ancres + poignées.
@@ -138,7 +138,7 @@ impl PaintApp {
         let pts = crate::tools::pen::sample(&anchors, false);
         let screen: Vec<egui::Pos2> = pts.iter().map(|p| view.doc_to_screen(*p)).collect();
         if screen.len() >= 2 {
-            painter.add(egui::Shape::line(screen, egui::Stroke::new(1.5, blue)));
+            painter.add(egui::Shape::line(screen, egui::Stroke::new(1.5_f32, blue)));
         }
         // Ancres (carrés) + poignées (lignes + cercles).
         for a in &self.pen {
@@ -147,9 +147,9 @@ impl PaintApp {
             for h in [a.h_in, a.h_out] {
                 if h != a.pos {
                     let hp = view.doc_to_screen(h);
-                    painter.line_segment([c, hp], egui::Stroke::new(1.0, Color32::from_gray(150)));
+                    painter.line_segment([c, hp], egui::Stroke::new(1.0_f32, Color32::from_gray(150)));
                     painter.circle_filled(hp, 3.0, Color32::WHITE);
-                    painter.circle_stroke(hp, 3.0, egui::Stroke::new(1.0, blue));
+                    painter.circle_stroke(hp, 3.0, egui::Stroke::new(1.0_f32, blue));
                 }
             }
         }
@@ -189,7 +189,7 @@ impl PaintApp {
         // En cours de transformation : aperçu de la boîte transformée.
         if let Some(mut poly) = self.xform_preview(view) {
             poly.push(poly[0]);
-            painter.add(egui::Shape::line(poly, egui::Stroke::new(1.5, blue)));
+            painter.add(egui::Shape::line(poly, egui::Stroke::new(1.5_f32, blue)));
             return;
         }
 
@@ -205,19 +205,19 @@ impl PaintApp {
         .into_iter()
         .map(|c| view.doc_to_screen(c))
         .collect();
-        painter.add(egui::Shape::closed_line(frame, egui::Stroke::new(1.5, blue)));
+        painter.add(egui::Shape::closed_line(frame, egui::Stroke::new(1.5_f32, blue)));
 
         // Poignées d'échelle (coins) + rotation (au-dessus) — toute sélection.
         if !moving {
             if let Some((corners, rot)) = self.transform_handles(view) {
                 let top = view.doc_to_screen(((min.0 + max.0) * 0.5, min.1));
-                painter.line_segment([top, rot], egui::Stroke::new(1.0, blue));
+                painter.line_segment([top, rot], egui::Stroke::new(1.0_f32, blue));
                 painter.circle_filled(rot, 5.0, Color32::WHITE);
-                painter.circle_stroke(rot, 5.0, egui::Stroke::new(1.5, blue));
+                painter.circle_stroke(rot, 5.0, egui::Stroke::new(1.5_f32, blue));
                 for c in corners {
                     let hr = Rect::from_center_size(c, Vec2::splat(9.0));
                     painter.rect_filled(hr, 1.0, Color32::WHITE);
-                    painter.rect_stroke(hr, 1.0, egui::Stroke::new(1.5, blue));
+                    painter.rect_stroke(hr, 1.0, egui::Stroke::new(1.5_f32, blue));
                 }
             }
             // Poignées de cisaillement (Sprint M.2) : losanges, pour rester
@@ -229,7 +229,7 @@ impl PaintApp {
                         .into_iter()
                         .map(|(dx, dy)| Pos2::new(h.x + dx, h.y + dy))
                         .collect();
-                    painter.add(egui::Shape::convex_polygon(pts, Color32::WHITE, egui::Stroke::new(1.5, blue)));
+                    painter.add(egui::Shape::convex_polygon(pts, Color32::WHITE, egui::Stroke::new(1.5_f32, blue)));
                 }
             }
         }
@@ -244,7 +244,7 @@ impl PaintApp {
         if let Some((a, b)) = self.crop_rect {
             if self.crop_angle.abs() < 1e-4 {
                 let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
-                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, orange));
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, orange));
             } else {
                 // Redressement d'horizon (Sprint 2.3) : montre la région de
                 // l'image source (encore affichée droite) qui finira droite
@@ -259,12 +259,12 @@ impl PaintApp {
                     view.doc_to_screen((center.0 + rx * cos_a - ry * sin_a, center.1 + rx * sin_a + ry * cos_a))
                 };
                 let corners = [rotate((cx0, cy0)), rotate((cx1, cy0)), rotate((cx1, cy1)), rotate((cx0, cy1))];
-                painter.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(1.5, orange)));
+                painter.add(egui::Shape::closed_line(corners.to_vec(), egui::Stroke::new(1.5_f32, orange)));
             }
         } else if let Some((_, corners)) = self.selected_image_corners() {
             // Avant le glissé : souligne l'image à recadrer.
             let r = Rect::from_two_pos(view.doc_to_screen(corners[0]), view.doc_to_screen(corners[2]));
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, orange));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, orange));
         }
     }
 
@@ -281,10 +281,10 @@ impl PaintApp {
         };
         if let Some((a, b)) = self.retouch_rect {
             let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, color));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, color));
         } else if let Some((_, corners)) = self.selected_image_corners() {
             let r = Rect::from_two_pos(view.doc_to_screen(corners[0]), view.doc_to_screen(corners[2]));
-            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5, color));
+            painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, color));
         }
     }
 
@@ -308,7 +308,7 @@ impl PaintApp {
                 painter.add(egui::Shape::Path(egui::epaint::PathShape::convex_polygon(
                     pts,
                     fill,
-                    egui::Stroke::new(1.0, blue),
+                    egui::Stroke::new(1.0_f32, blue),
                 )));
             } else {
                 let corners: Vec<Pos2> = [(a.0, a.1), (b.0, a.1), (b.0, b.1), (a.0, b.1)]
@@ -318,7 +318,7 @@ impl PaintApp {
                 painter.add(egui::Shape::Path(egui::epaint::PathShape::convex_polygon(
                     corners,
                     fill,
-                    egui::Stroke::new(1.0, blue),
+                    egui::Stroke::new(1.0_f32, blue),
                 )));
             }
         } else if !self.lasso.is_empty() {
@@ -334,9 +334,9 @@ impl PaintApp {
                 }
             }
             if pts.len() >= 2 {
-                painter.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0, blue)));
+                painter.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0_f32, blue)));
                 // Trait de fermeture (du dernier point au premier).
-                painter.line_segment([pts[pts.len() - 1], pts[0]], egui::Stroke::new(1.0, fill));
+                painter.line_segment([pts[pts.len() - 1], pts[0]], egui::Stroke::new(1.0_f32, fill));
             }
         }
     }
@@ -347,7 +347,7 @@ impl PaintApp {
         let Some((a, b)) = self.measure else { return };
         let (sa, sb) = (view.doc_to_screen(a), view.doc_to_screen(b));
         let col = Color32::from_rgb(40, 200, 160);
-        painter.line_segment([sa, sb], egui::Stroke::new(1.5, col));
+        painter.line_segment([sa, sb], egui::Stroke::new(1.5_f32, col));
         painter.circle_filled(sa, 3.0, col);
         painter.circle_filled(sb, 3.0, col);
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -389,7 +389,7 @@ impl PaintApp {
         if radius < 1.0 {
             return;
         }
-        painter.circle_stroke(p, radius, egui::Stroke::new(2.0, Color32::from_white_alpha(200)));
-        painter.circle_stroke(p, radius, egui::Stroke::new(1.0, Color32::from_black_alpha(160)));
+        painter.circle_stroke(p, radius, egui::Stroke::new(2.0_f32, Color32::from_white_alpha(200)));
+        painter.circle_stroke(p, radius, egui::Stroke::new(1.0_f32, Color32::from_black_alpha(160)));
     }
 }

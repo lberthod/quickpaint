@@ -411,7 +411,7 @@ pub struct NamedSelection {
 /// calques, pas un delta ni une référence — plus simple à raisonner, à
 /// sérialiser et à annuler/rétablir qu'un système de keyframes par calque,
 /// au prix d'un fichier projet plus lourd si beaucoup de frames se
-/// ressemblent (compromis assumé, voir sprint_next.md L.6).
+/// ressemblent (compromis assumé, Sprint L.6).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnimationFrame {
     pub layers: Vec<Layer>,

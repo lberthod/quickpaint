@@ -177,18 +177,18 @@ impl PaintApp {
         let pts = path.sample();
         let screen: Vec<egui::Pos2> = pts.iter().map(|p| view.doc_to_screen(*p)).collect();
         if screen.len() >= 2 {
-            painter.add(egui::Shape::line(screen, egui::Stroke::new(1.5, orange)));
+            painter.add(egui::Shape::line(screen, egui::Stroke::new(1.5_f32, orange)));
         }
         for a in &path.anchors {
             let c = view.doc_to_screen(a.pos);
             painter.rect_filled(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, orange);
-            painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, egui::Stroke::new(1.0, Color32::WHITE));
+            painter.rect_stroke(Rect::from_center_size(c, Vec2::splat(7.0)), 1.0, egui::Stroke::new(1.0_f32, Color32::WHITE));
             for h in [a.h_in, a.h_out] {
                 if h != a.pos {
                     let hp = view.doc_to_screen(h);
-                    painter.line_segment([c, hp], egui::Stroke::new(1.0, Color32::from_gray(150)));
+                    painter.line_segment([c, hp], egui::Stroke::new(1.0_f32, Color32::from_gray(150)));
                     painter.circle_filled(hp, 3.5, Color32::WHITE);
-                    painter.circle_stroke(hp, 3.5, egui::Stroke::new(1.0, orange));
+                    painter.circle_stroke(hp, 3.5, egui::Stroke::new(1.0_f32, orange));
                 }
             }
         }

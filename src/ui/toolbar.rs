@@ -314,7 +314,7 @@ fn asset_library_window(ctx: &egui::Context, app: &mut PaintApp) {
                         ui.painter().rect_filled(rect, 6.0, visuals.bg_fill);
                         let inner = rect.shrink(12.0);
                         let col = ui.visuals().text_color();
-                        let stroke = egui::Stroke::new(1.6, col);
+                        let stroke = egui::Stroke::new(1.6_f32, col);
                         let pts: Vec<egui::Pos2> = asset
                             .points()
                             .iter()
@@ -701,7 +701,7 @@ fn paint_histogram(ui: &mut Ui, hist: &[[u32; 256]; 3]) {
             let x0 = rect.left() + x as f32;
             painter.line_segment(
                 [egui::pos2(x0, rect.bottom()), egui::pos2(x0, rect.bottom() - bar_h)],
-                egui::Stroke::new(1.0, *color),
+                egui::Stroke::new(1.0_f32, *color),
             );
         }
     }
@@ -973,11 +973,13 @@ fn animation_panel_window(ctx: &egui::Context, app: &mut PaintApp) {
                     t("Animation :", "Animation:"),
                     app.doc.frames.len()
                 ));
-                // Pelure d'oignon (Sprint U) : précédente en rouge,
-                // suivante en vert, sous la frame active.
+                // Pelure d'oignon (Sprint U) : précédente en orange,
+                // suivante en bleu (couples orange/bleu plutôt que
+                // rouge/vert — lisible en cas de daltonisme rouge-vert,
+                // audit_uix_expert.md critique n°2), sous la frame active.
                 ui.checkbox(&mut app.onion_skin, t("Pelure d'oignon", "Onion skin")).on_hover_text(t(
-                    "Affiche la frame précédente (rouge) et la suivante (vert) en fantôme",
-                    "Shows the previous frame (red) and the next one (green) as ghosts",
+                    "Affiche la frame précédente (orange) et la suivante (bleu) en fantôme",
+                    "Shows the previous frame (orange) and the next one (blue) as ghosts",
                 ));
             }
             ui.separator();
@@ -1916,6 +1918,21 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 }
             });
             ui.separator();
+            // Libellés d'outils (audit_uix_expert.md critique n°1) : un
+            // tooltip au survol ne se déclenche jamais au doigt sur écran
+            // tactile — ce réglage affiche le nom sous chaque icône pour
+            // rester identifiable sans survol.
+            if ui
+                .checkbox(&mut app.show_tool_labels, t("Afficher les noms des outils", "Show tool names"))
+                .on_hover_text(t(
+                    "Utile en usage tactile : les info-bulles au survol ne se déclenchent pas au doigt",
+                    "Useful for touch use: hover tooltips don't trigger with a finger",
+                ))
+                .changed()
+            {
+                crate::i18n::save_show_tool_labels(app.show_tool_labels);
+            }
+            ui.separator();
             ui.checkbox(&mut app.show_grid, t("Grille", "Grid"));
             ui.checkbox(&mut app.show_rulers, t("Règles", "Rulers"));
             ui.checkbox(&mut app.snap_enabled, t("Magnétisme", "Snap"));
@@ -2108,12 +2125,14 @@ fn shape_family_selector(ui: &mut Ui, app: &mut PaintApp, group: &[(ActiveTool, 
     let accent = tool_accent(face_tool);
 
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 30.0), Sense::click());
+    // Même correctif que `tool_button` (audit_uix_expert.md critique n°4) :
+    // couleur neutre au repos, accent réservé au survol/à la sélection.
     let (bg, icon_col) = if selected {
         (accent, Color32::WHITE)
     } else if resp.hovered() {
         (accent.gamma_multiply(0.45), Color32::WHITE)
     } else {
-        (accent.gamma_multiply(0.16), accent)
+        (Color32::TRANSPARENT, ui.visuals().text_color())
     };
     ui.painter().rect_filled(rect.shrink(1.0), 6.0, bg);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tool_glyph(face_tool), fill_font(18.0), icon_col);
@@ -2193,23 +2212,52 @@ fn tool_accent(tool: ActiveTool) -> Color32 {
     }
 }
 
+/// Nom court d'un outil pour l'étiquette sous l'icône (audit_uix_expert.md
+/// critique n°1) : tronque le suffixe raccourci (« Sélection (V) » →
+/// « Sélection ») pour rester lisible sur 52px de large.
+fn short_tool_label(name: &str) -> &str {
+    name.split(" (").next().unwrap_or(name)
+}
+
 fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hint: &str) {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 30.0), Sense::click());
+    // Bouton élargi/rehaussé quand les libellés sont actifs (réglage Vue,
+    // audit_uix_expert.md critique n°1) : un tooltip au survol ne se
+    // déclenche jamais au doigt sur écran tactile, donc les 32 outils sont
+    // indiscoverables sur ce canal sans un nom visible en permanence.
+    let show_label = app.show_tool_labels;
+    let size = if show_label { Vec2::new(52.0, 44.0) } else { Vec2::new(34.0, 30.0) };
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let selected = app.active_tool == tool;
     let accent = tool_accent(tool);
+    // Au repos, icône en couleur neutre du thème plutôt que la couleur
+    // d'accent de l'outil (audit_uix_expert.md critique n°4) : avec 32
+    // outils, peindre les 32 accents en permanence créait du bruit
+    // chromatique qui annulait le regroupement par catégorie de la barre.
+    // L'accent reste réservé au survol/à la sélection, où il sert de
+    // confirmation visuelle immédiate plutôt que de fond permanent.
     let (bg, icon_col) = if selected {
         (accent, Color32::WHITE)
     } else if resp.hovered() {
         (accent.gamma_multiply(0.45), Color32::WHITE)
     } else {
-        (accent.gamma_multiply(0.16), accent)
+        (Color32::TRANSPARENT, ui.visuals().text_color())
     };
     ui.painter().rect_filled(rect.shrink(1.0), 6.0, bg);
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, tool_glyph(tool), fill_font(18.0), icon_col);
+    let icon_center = if show_label { rect.center() - Vec2::new(0.0, 7.0) } else { rect.center() };
+    ui.painter().text(icon_center, egui::Align2::CENTER_CENTER, tool_glyph(tool), fill_font(18.0), icon_col);
+    if show_label {
+        ui.painter().text(
+            rect.center() + Vec2::new(0.0, 14.0),
+            egui::Align2::CENTER_CENTER,
+            short_tool_label(name),
+            egui::FontId::proportional(9.0),
+            icon_col,
+        );
+    }
     // Badge damier en coin : signale les outils « pixel » (peignent le
     // calque raster) par opposition à leurs équivalents vectoriels.
     if matches!(tool, ActiveTool::PixelBrush | ActiveTool::PixelEraser | ActiveTool::Airbrush) {
-        let badge = rect.center() + Vec2::new(9.0, 8.0);
+        let badge = icon_center + Vec2::new(9.0, 8.0);
         ui.painter().text(
             badge,
             egui::Align2::CENTER_CENTER,
@@ -2949,9 +2997,9 @@ fn swatch(ui: &mut Ui, rgb: [u8; 3]) -> egui::Response {
     let rounding = 4.0;
     ui.painter().rect_filled(rect, rounding, color);
     let stroke = if response.hovered() {
-        egui::Stroke::new(2.0, Color32::from_gray(80))
+        egui::Stroke::new(2.0_f32, Color32::from_gray(80))
     } else {
-        egui::Stroke::new(1.0, Color32::from_gray(170))
+        egui::Stroke::new(1.0_f32, Color32::from_gray(170))
     };
     ui.painter().rect_stroke(rect, rounding, stroke);
     response

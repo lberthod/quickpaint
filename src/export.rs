@@ -3,14 +3,15 @@
 //! roadmap ANALYSE.md §12.2) — plus de dépendance à une capture d'écran du
 //! viewport, donc plus de perte de résolution liée au zoom ou à la taille de
 //! la fenêtre. Ce module se contente d'encoder le buffer RGBA reçu au format
-//! choisi : PNG, JPG, WebP, GIF (statique) ou PDF (mono-page).
+//! choisi : PNG, JPG, WebP, GIF (statique ou animé) ou PDF (mono-page).
 //!
-//! GIF (Sprint L.6) : export **statique** uniquement — une palette 256
-//! couleurs (quantification de la crate `image`), pas d'animation. Le GIF
-//! animé demande d'abord une notion de frames/timeline absente du modèle de
-//! document actuel (le document est une image fixe) ; voir `sprint_next.md`
-//! L.6 pour ce que ça impliquerait de concevoir avant de coder l'export
-//! animé lui-même — hors de portée de ce module.
+//! GIF (Sprint L.6) : export statique (palette 256 couleurs, quantification
+//! de la crate `image`) **et** animé (`save_animated_gif`/
+//! `encode_animated_gif`, une frame par `AnimationFrame` du document —
+//! `model::document::AnimationFrame`). L'export animé au format APNG
+//! (`save_animated_apng`, Sprint T.100a) couvre le même besoin sans la
+//! limite de palette 256 couleurs du GIF, au prix d'un support de lecture
+//! moins universel.
 //!
 //! Métadonnées (Sprint L.3, point 17 de l'audit) : aucune n'est jamais
 //! écrite. L'export part toujours d'un buffer RGBA fraîchement rendu par le

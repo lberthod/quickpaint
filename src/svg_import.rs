@@ -10,7 +10,7 @@
 //! groupes et `transform` (déjà résolus par `usvg` en transform absolu par
 //! nœud). `<use>` est également transparent (déjà résolu par `usvg`).
 //!
-//! Hors scope, comme décidé avant de coder (voir `sprint_next.md`, L.5) :
+//! Hors scope, comme décidé avant de coder (Sprint L.5) :
 //! - Dégradés/motifs de remplissage → repli sur une couleur unie (moyenne
 //!   grossière : premier arrêt du dégradé, ou gris moyen pour un motif).
 //! - `clipPath`, masques, filtres SVG → ignorés (le contenu reste visible

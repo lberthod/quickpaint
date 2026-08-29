@@ -60,12 +60,16 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         let remaining = ui.available_width();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &app.status {
             Some(msg) => {
-                let color = if app.status_error {
-                    Color32::from_rgb(200, 60, 55) // échec
+                // Icône en plus de la couleur (audit_uix_expert.md critique
+                // n°2) : rouge/vert seuls sont peu distinguables en cas de
+                // daltonisme rouge-vert — un second canal (forme) garde le
+                // message lisible même sans percevoir la teinte.
+                let (color, icon) = if app.status_error {
+                    (Color32::from_rgb(200, 60, 55), egui_phosphor::regular::WARNING_CIRCLE)
                 } else {
-                    Color32::from_rgb(40, 130, 60) // succès / information
+                    (Color32::from_rgb(40, 130, 60), egui_phosphor::regular::CHECK_CIRCLE)
                 };
-                ui.colored_label(color, msg);
+                ui.colored_label(color, format!("{icon} {msg}"));
             }
             None => {
                 let hint = t(

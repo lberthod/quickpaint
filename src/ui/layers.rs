@@ -989,7 +989,7 @@ fn curves_free_editor(
 
     // Fond, quadrillage aux quarts, diagonale identité.
     painter.rect_filled(rect, 2.0, ui.visuals().extreme_bg_color);
-    let grid = egui::Stroke::new(1.0, ui.visuals().weak_text_color());
+    let grid = egui::Stroke::new(1.0_f32, ui.visuals().weak_text_color());
     for q in 1..4 {
         let f = q as f32 / 4.0;
         painter.line_segment([to_screen(255.0 * f, 0.0), to_screen(255.0 * f, 255.0)], grid);
@@ -1065,11 +1065,11 @@ fn curves_free_editor(
         let x = i as f32 / 64.0 * 255.0;
         to_screen(x, lut[(x.round() as usize).min(255)] as f32)
     }).collect();
-    painter.add(egui::Shape::line(samples, egui::Stroke::new(1.5, curve_color)));
+    painter.add(egui::Shape::line(samples, egui::Stroke::new(1.5_f32, curve_color)));
     for &(x, y) in points.iter() {
         let c = to_screen(x as f32, y as f32);
         painter.circle_filled(c, 3.5, egui::Color32::WHITE);
-        painter.circle_stroke(c, 3.5, egui::Stroke::new(1.5, curve_color));
+        painter.circle_stroke(c, 3.5, egui::Stroke::new(1.5_f32, curve_color));
     }
     ui.label(t(
         "Clic : ajouter · glisser : déplacer · clic droit : retirer",

@@ -1,7 +1,7 @@
 //! Animation (Sprint L.6) : chaque frame est un instantané complet de la
 //! pile de calques (`AnimationFrame`), pas une timeline de keyframes par
-//! calque — le choix le plus simple des deux évoqués dans `sprint_next.md`
-//! L.6, cohérent avec le reste de l'app (pas de nouveau système d'undo dédié
+//! calque — le choix le plus simple des deux options envisagées (Sprint
+//! L.6), cohérent avec le reste de l'app (pas de nouveau système d'undo dédié
 //! : chaque opération de frame passe par `push_doc_snapshot`, donc annulable
 //! comme n'importe quel redimensionnement de document).
 //!

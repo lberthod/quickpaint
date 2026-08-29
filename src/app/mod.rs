@@ -590,6 +590,13 @@ pub struct PaintApp {
     native_edit_menu: Option<crate::native_menu::EditMenuIds>,
     /// Thème d'interface (Sprint R, point 96), persisté dans `settings.json`.
     pub ui_theme: UiTheme,
+    /// Affiche le nom de chaque outil sous son icône dans la barre
+    /// (audit_uix_expert.md critique n°1) : un tooltip au survol ne se
+    /// déclenche jamais au doigt sur écran tactile, ce qui rend les 32
+    /// outils indiscoverables sans essai-erreur sur ce canal — ce réglage,
+    /// désactivé par défaut pour ne pas alourdir l'usage souris/clavier
+    /// habituel, restaure une identification visuelle directe.
+    pub show_tool_labels: bool,
     /// Guide manuel en cours de glissé (Sprint R, point 95) : création
     /// depuis une règle ou déplacement d'un guide existant.
     guide_drag: Option<GuideDrag>,
@@ -747,6 +754,7 @@ impl Default for PaintApp {
             show_recovery_prompt: false,
             native_edit_menu: None,
             ui_theme: UiTheme::load(),
+            show_tool_labels: crate::i18n::load_show_tool_labels(),
             guide_drag: None,
             view_angle: 0.0,
             onion_skin: false,
@@ -3695,13 +3703,18 @@ impl eframe::App for PaintApp {
             painter.add(egui::Shape::convex_polygon(shadow, Color32::from_black_alpha(60), egui::Stroke::NONE));
             painter.add(egui::Shape::convex_polygon(doc_corners.to_vec(), self.bg, egui::Stroke::NONE));
             // Pelure d'oignon (Sprint U) : frames voisines en fantôme teinté
-            // (précédente en rouge, suivante en vert) sous la frame active.
+            // (précédente en orange, suivante en bleu) sous la frame active.
+            // Rouge/vert (couleurs d'origine) sont la paire la moins
+            // distinguable en cas de daltonisme rouge-vert (proto/deutéranopie,
+            // ~8 % des hommes) — orange/bleu reste net dans ce cas
+            // (audit_uix_expert.md critique n°2), en plus d'une opacité
+            // différente entre les deux comme second signal.
             if self.onion_skin && self.doc.is_animated() {
                 let active = self.doc.active_frame;
                 let next = if active + 1 < self.doc.frames.len() { Some(active + 1) } else { None };
                 for (idx, tint) in [
-                    (active.checked_sub(1), Color32::from_rgba_unmultiplied(255, 140, 140, 90)),
-                    (next, Color32::from_rgba_unmultiplied(140, 255, 140, 70)),
+                    (active.checked_sub(1), Color32::from_rgba_unmultiplied(230, 159, 0, 90)),
+                    (next, Color32::from_rgba_unmultiplied(0, 145, 230, 70)),
                 ] {
                     if let Some(i) = idx {
                         if let Some(tex) = self.onion_texture(ctx, i) {
@@ -3834,7 +3847,7 @@ impl eframe::App for PaintApp {
                 // Guides intelligents (roadmap P1 #8) : lignes magenta pleine
                 // largeur/hauteur là où la sélection accroche un bord/centre
                 // d'un autre élément ou du canevas.
-                let guide_stroke = egui::Stroke::new(1.0, Color32::from_rgb(255, 0, 200));
+                let guide_stroke = egui::Stroke::new(1.0_f32, Color32::from_rgb(255, 0, 200));
                 for g in &self.active_guides {
                     match *g {
                         GuideLine::Vertical(x) => {
@@ -3864,7 +3877,7 @@ impl eframe::App for PaintApp {
             }
 
             // Bord du document (sur le plan de travail, non rogné).
-            painter.rect_stroke(doc_rect, 0.0, egui::Stroke::new(1.0, Color32::from_gray(120)));
+            painter.rect_stroke(doc_rect, 0.0, egui::Stroke::new(1.0_f32, Color32::from_gray(120)));
             // Masque de sélection en pixels (Sprint H) : teinte semi-
             // transparente hors sélection, sous les poignées/pointillés de
             // la sélection d'objets classique.
@@ -3882,10 +3895,10 @@ impl eframe::App for PaintApp {
                     if let Some(&first) = pts.first() {
                         pts.push(first); // referme la boucle
                     }
-                    content.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0, Color32::WHITE)));
+                    content.add(egui::Shape::line(pts.clone(), egui::Stroke::new(1.0_f32, Color32::WHITE)));
                     for s in egui::Shape::dashed_line_with_offset(
                         &pts,
-                        egui::Stroke::new(1.0, Color32::BLACK),
+                        egui::Stroke::new(1.0_f32, Color32::BLACK),
                         &[6.0],
                         &[6.0],
                         offset,
@@ -4440,6 +4453,75 @@ mod tests {
             let first = &rgba[0..4];
             assert!(rgba.chunks_exact(4).any(|px| px != first), "rendu non uniforme attendu ({content:?})");
         }
+    }
+
+    /// Perf smoke test (audit_aout.md P1.8 : aucun profilage n'existait avant
+    /// ce test) — pas un vrai benchmark `criterion` (le crate est un seul
+    /// binaire, sans cible `[lib]` séparée pour qu'un fichier `benches/`
+    /// externe puisse le lier), mais une mesure grossière avec seuil large,
+    /// pour détecter une régression catastrophique du compositeur sur un
+    /// document réaliste plutôt que de partir sans aucune donnée chiffrée.
+    /// `#[ignore]` : n'allonge pas `cargo test` par défaut, se lance
+    /// explicitement via `cargo test -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn compose_stays_reasonably_fast_on_a_large_document() {
+        let mut app = app_with_layers(20);
+        app.doc.size = (4000, 3000);
+        for (li, layer) in app.doc.layers.iter_mut().enumerate() {
+            for si in 0..50 {
+                let mut stroke = Stroke::new([(si * 5) as u8, (li * 10) as u8, 120, 255], 6.0, Tool::Brush);
+                stroke.id = (li * 1000 + si) as u64;
+                for p in 0..20 {
+                    stroke.points.push(crate::model::StrokePoint {
+                        pos: ((si * 60 + p * 4) as f32 % 4000.0, (li * 130 + p * 7) as f32 % 3000.0),
+                        width: 6.0,
+                    });
+                }
+                layer.strokes.push(stroke);
+            }
+        }
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = crate::render::compositor::Compositor::new();
+        let start = std::time::Instant::now();
+        let (w, h, _) = c.render_to_rgba(&ctx, &app.doc, Color32::WHITE).expect("render");
+        let elapsed = start.elapsed();
+        eprintln!("compose {w}x{h}, 20 calques x 50 traits : {elapsed:?}");
+        // Seuil volontairement large (régression franche, pas un budget de
+        // perf strict) : ce test n'a pas vocation à remplacer un vrai
+        // benchmark, seulement à attraper un aller-retour O(n²) évident.
+        assert!(elapsed.as_secs() < 5, "composition anormalement lente : {elapsed:?}");
+    }
+
+    /// Voir `compose_stays_reasonably_fast_on_a_large_document` — même
+    /// principe côté undo/redo (audit_aout.md P1.8), sur une session longue
+    /// de traits vectoriels (le chemin `PaintRaster`, par tuile, n'est pas
+    /// couvert ici : il a sa propre garantie de coût par la conception même
+    /// de `Command::PaintRaster`, voir `history.rs`).
+    #[test]
+    #[ignore]
+    fn undo_redo_stays_reasonably_fast_over_a_long_session() {
+        let mut app = app_with_layers(1);
+        let layer = app.doc.layers[0].id;
+        for i in 0..500 {
+            let mut stroke = Stroke::new([10, 20, 30, 255], 4.0, Tool::Brush);
+            stroke.id = i;
+            stroke.points.push(crate::model::StrokePoint { pos: (i as f32 % 800.0, i as f32 % 600.0), width: 4.0 });
+            app.history.push(&mut app.doc, Command::AddStroke { layer, stroke });
+        }
+
+        let start = std::time::Instant::now();
+        for _ in 0..500 {
+            app.history.undo(&mut app.doc);
+        }
+        for _ in 0..500 {
+            app.history.redo(&mut app.doc);
+        }
+        let elapsed = start.elapsed();
+        eprintln!("500 undo + 500 redo sur 500 traits : {elapsed:?}");
+        assert!(elapsed.as_secs() < 5, "undo/redo anormalement lent : {elapsed:?}");
     }
 
     fn app_with_layers(n: usize) -> PaintApp {

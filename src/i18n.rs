@@ -111,6 +111,10 @@ struct Settings {
     /// `"light"` ou `"dark"`. Absent = système.
     #[serde(default)]
     theme: Option<String>,
+    /// Affiche le nom de chaque outil sous son icône dans la barre
+    /// (audit_uix_expert.md critique n°1), pour la découvrabilité tactile.
+    #[serde(default)]
+    show_tool_labels: bool,
 }
 
 /// Groupes de la barre d'outils repliés par défaut (UX-2.1) : les familles
@@ -301,6 +305,18 @@ pub fn load_layers_panel_width() -> f32 {
 pub fn save_layers_panel_width(width: f32) {
     let mut settings = read_settings();
     settings.layers_panel_width = width;
+    write_settings(&settings);
+}
+
+/// Libellés d'outils visibles sous les icônes (audit_uix_expert.md critique
+/// n°1), même fichier local.
+pub fn load_show_tool_labels() -> bool {
+    read_settings().show_tool_labels
+}
+
+pub fn save_show_tool_labels(value: bool) {
+    let mut settings = read_settings();
+    settings.show_tool_labels = value;
     write_settings(&settings);
 }
 
