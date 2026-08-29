@@ -185,7 +185,7 @@ premières colonnes selon la lecture)*
 | ❌ Absent | 1 | ~1 % |
 
 *(Mis à jour après les Sprints G, H, K, I, J, M et L (complet, y compris L.5/L.6/L.7), puis une
-session dédiée aux quatre derniers points optionnels — voir [sprint_next.md](sprint_next.md) : G
+session dédiée aux quatre derniers points optionnels — voir [CHANGELOG.md](CHANGELOG.md) : G
 a réglé 61/64/68 (sélection, opérations d'ensemble) ; H a réglé 62/63 (masque de sélection en
 pixels — feather, dilater/contracter) ; K a réglé 76/80/83/85/86/90/92/93 (filtres & effets) ; I
 a réglé 30/33/37/38 (calques) ; J a réglé 44/50/56 (dessin) ; M a réglé 98/99
@@ -199,19 +199,19 @@ via `image::codecs::gif`). Session suivante : 36 (distribution multi-calque —
 ### Ce qui manque complètement (❌), par ordre d'impact utilisateur probable
 
 **Format & export**
-(tout traité par le Sprint L — voir [sprint_next.md](sprint_next.md), y
+(tout traité par le Sprint L — voir [CHANGELOG.md](CHANGELOG.md), y
 compris l'import SVG vectoriel, le PDF vectoriel et le GIF statique **et**
 animé)
 
 **Sélection**
-(tout traité par les Sprints G et H — voir [sprint_next.md](sprint_next.md) :
+(tout traité par les Sprints G et H — voir [CHANGELOG.md](CHANGELOG.md) :
 opérations d'ensemble, inversion, trim, et désormais feather/dilater/
 contracter via un vrai masque de sélection en pixels)
 
 **Calques**
 (tout traité — Sprint I, puis distribution multi-calque (point 36) et
 verrouillage granulaire (point 28) dans une session dédiée aux quatre
-derniers points optionnels, voir [sprint_next.md](sprint_next.md))
+derniers points optionnels, voir [CHANGELOG.md](CHANGELOG.md))
 
 **Dessin**
 (tout traité — Sprint J, puis l'outil Crayon dédié (point 40) dans la même
@@ -226,7 +226,7 @@ session)
 ### Points d'attention
 
 1. **Sélection : complète, y compris feather/dilater/contracter.** ✅
-   Résolu par les Sprints G et H (voir [sprint_next.md](sprint_next.md)) :
+   Résolu par les Sprints G et H (voir [CHANGELOG.md](CHANGELOG.md)) :
    soustraction/intersection (Alt/Maj+Alt), inversion (⌘⇧I) et trim des
    bords vides (Sprint G) ; contour progressif et dilater/contracter
    (Sprint H) via un vrai masque de sélection en pixels
@@ -245,7 +245,7 @@ session)
    plus net (pinceau pixel), à étendre plus tard si le besoin se confirme.
 
 2. **Filtres & effets : complet.** ✅ Résolu par le Sprint K
-   (voir [sprint_next.md](sprint_next.md)) : pixelisation, halftone,
+   (voir [CHANGELOG.md](CHANGELOG.md)) : pixelisation, halftone,
    vague/sphère/tourbillon, flou radial, vignette autonome, mixeur de
    canaux N&B, auto-correction. La détection de contours Canny (point
    87/K.6) a suivi : `Filter::Canny` (`tools/filter.rs`) — lissage 3×3,
@@ -262,7 +262,7 @@ session)
    **CPU** (`tiny-skia`), un choix architectural documenté, pas un oubli.
 
 4. **Calques : complet.** ✅ Résolu par le Sprint I (voir
-   [sprint_next.md](sprint_next.md)) : calque de remplissage (uni/dégradé),
+   [CHANGELOG.md](CHANGELOG.md)) : calque de remplissage (uni/dégradé),
    code couleur, vignettes de prévisualisation, recherche/filtre, et
    alignement du contenu d'un calque par rapport au document. Distribution
    entre plusieurs calques (point 36) et verrouillage granulaire (point 28)
@@ -277,7 +277,7 @@ session)
    inchangé) et cumulables avec lui.
 
 5. **Dessin : complet.** ✅ Résolu par le Sprint J (voir
-   [sprint_next.md](sprint_next.md)) : aérographe, import de brosse depuis
+   [CHANGELOG.md](CHANGELOG.md)) : aérographe, import de brosse depuis
    une image (tampon en niveaux de gris), prévisualisation du contour de
    brosse étendue au pinceau/gomme pixel et à l'aérographe. L'outil Crayon
    dédié (point 40) a suivi : `ActiveTool::Pencil`, qui dessine exactement
@@ -288,7 +288,7 @@ session)
    préréglage caché dans un menu), pas un second moteur de dessin.
 
 6. **Texte, vectoriel, couleur : complet.** ✅ Résolu par le Sprint M (voir
-   [sprint_next.md](sprint_next.md)) : extraction de palette depuis une
+   [CHANGELOG.md](CHANGELOG.md)) : extraction de palette depuis une
    image (point 98) et cisaillement/skew (point 99, via des poignées
    dédiées sur la boîte de sélection). Pour le skew, seuls les traits sont
    véritablement déformés point par point ; textes/images n'ont pas de champ
@@ -297,7 +297,7 @@ session)
    oubli.
 
 7. **Export : complet, y compris les points qui demandaient une décision.**
-   ✅ Résolu par le Sprint L (voir [sprint_next.md](sprint_next.md)) : export
+   ✅ Résolu par le Sprint L (voir [CHANGELOG.md](CHANGELOG.md)) : export
    d'une zone sélectionnée, aperçu + poids estimé, profils d'export nommés,
    glisser-déposer de fichiers, import SVG vectoriel éditable
    (`svg_import.rs`, via `usvg`), export PDF vectoriel (`pdf_vector.rs`),

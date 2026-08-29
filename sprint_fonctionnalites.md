@@ -4,7 +4,8 @@
 > « concurrent de Paint/GIMP/Canva/Photoshop/Illustrator », croisée avec le
 > code — 81 ✅ / 10 🟡 / 9 ❌. Ce document planifie les 19 items non ✅,
 > regroupés par zone de code (un sprint = une zone = un contexte de travail),
-> ordonnés par rapport impact/effort. Suite de [sprint_next.md](sprint_next.md).
+> ordonnés par rapport impact/effort. Suite des Sprints G-N (voir
+> [CHANGELOG.md](CHANGELOG.md), versions 0.16.0-0.19.0).
 
 Effort : **S** (< ½ jour) · **M** (½–2 jours) · **L** (> 2 jours ou décision
 produit préalable).

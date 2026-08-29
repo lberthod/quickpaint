@@ -26,6 +26,66 @@ Versions alignées sur les sprints. Détail complet : le journal git.
   avant les boutons œil/cadenas/etc. (seule la poignée déclenche le glisser
   désormais).
 
+## 0.18.0 — juillet 2026 (Sprint H : masque de sélection en pixels)
+
+- **Masque de sélection en pixels** (`PaintApp::selection_mask`, en plus du
+  jeu d'ID d'éléments existant) : nécessaire pour les cas où un pixel peut
+  être « à moitié sélectionné », impossible avec le modèle d'ID seul.
+  Nouveau module `tools/selection_mask.rs` — peuplé depuis la géométrie du
+  geste (rectangle/ellipse/lasso pixel-précis, baguette magique par union
+  des boîtes englobantes) ; combine Add/Subtract/Intersect/Replace comme
+  la sélection par ID.
+- Contour progressif (feather), dilater/contracter (filtre morphologique
+  max/min sur un disque) via le menu Édition.
+- Pinceau pixel, Gomme pixel et Aérographe respectent désormais le masque
+  de sélection (pas le pot de peinture, le tampon de clonage ni les autres
+  outils raster — périmètre volontairement limité).
+- 91 ✅ / 10 🟡 / 1 ❌ sur les 102 items de `audit_next.md` — seul le rendu
+  GPU `wgpu` (Sprint N) reste comme décision d'architecture non tranchée.
+
+## 0.17.0 — juillet 2026 (Sprint L.6 : export GIF statique et animé)
+
+- **Export GIF statique** (`ExportFormat::Gif`). Corrige au passage une
+  régression latente : la feature `gif` de la crate `image` n'était pas
+  activée dans `Cargo.toml`, donc l'import GIF (déjà annoncé fonctionnel
+  dans un audit précédent) ne décodait en réalité aucun fichier.
+- **Animation** : nouveau modèle `Document::frames: Vec<AnimationFrame>`,
+  chaque frame un instantané complet de la pile de calques (le choix le
+  plus simple face à une timeline de keyframes par calque). Vide par
+  défaut = comportement historique inchangé.
+- Nouveau sous-module `app/animation.rs` (ajout/suppression/
+  réordonnancement de frames, délai par frame, tout annulable via
+  `Command::SetDoc`) et panneau « Animation » (`ui/toolbar.rs`) avec
+  export en GIF animé (`image::codecs::gif::GifEncoder`).
+- Correctif trouvé en cours de route : la sauvegarde/l'ouverture de projet
+  ne parcourait que la frame active, pas les autres — un projet animé
+  rouvert aurait silencieusement perdu le raster/masque des frames
+  inactives.
+- 89 ✅ / 10 🟡 / 3 ❌ sur 102 items — Sprint L intégralement traité.
+
+## 0.16.0 — juillet 2026 (Sprints G, K, I, J, M, L)
+
+- **Sprint G** (sélection) : soustraction/intersection (Alt/Maj+Alt),
+  inversion (⌘⇧I), rognage des bords vides.
+- **Sprint K** (filtres) : pixelisation, halftone, distorsions vague/
+  sphère/tourbillon, flou radial, vignette autonome, mixeur de canaux N&B,
+  auto-correction (auto-niveaux).
+- **Sprint I** (calques) : calque de remplissage (uni/dégradé), code
+  couleur, vignettes de prévisualisation, recherche/filtre, alignement du
+  contenu d'un calque par rapport au document.
+- **Sprint J** (dessin) : aérographe, import de brosse depuis une image,
+  aperçu de contour étendu au pinceau/gomme pixel.
+- **Sprint M** (couleur/transformations) : extraction de palette
+  dominante depuis une image, cisaillement (skew) via poignées dédiées.
+- **Sprint L** (export/import) : export d'une zone sélectionnée, aperçu +
+  poids estimé, profils d'export nommés, glisser-déposer de fichiers,
+  import SVG vectoriel éditable (nouveau module `svg_import.rs` via
+  `usvg`), export PDF vectoriel (nouveau module `pdf_vector.rs`), export
+  GIF statique — corrige au passage la même régression `gif`/`image`
+  mentionnée en 0.17.0. GIF animé volontairement pas traité ici (nécessite
+  d'abord un modèle de frames, livré séparément — voir 0.17.0).
+- 88 ✅ / 11 🟡 / 3 ❌ sur 102 items.
+
 ## 0.15.0 — juillet 2026 (audit fonctionnel de suivi — Sprints A à F)
 
 Audit et plan de sprints (`audit_newxxx.md`/`audit_sprint_xx.md`) retirés une

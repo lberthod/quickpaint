@@ -17,8 +17,9 @@ Fait suite à l'audit technique du 12 juillet 2026 (v0.19.0).
 
 - **T4.0-T4.1** ✅ Faits : cible 0.34 (pas 0.35 — `egui-phosphor` ne suit pas
   encore), `glow` forcé explicitement (évite la bascule silencieuse vers le
-  backend `wgpu` devenu défaut depuis eframe 0.30+ — cf. décision Sprint N
-  dans [sprint_next.md](sprint_next.md)). `cargo clippy --all-targets` zéro
+  backend `wgpu` devenu défaut depuis eframe 0.30+ — cf. décision Sprint N,
+  volontairement non engagé, dans [audit_aout.md](audit_aout.md) §8).
+  `cargo clippy --all-targets` zéro
   warning, 299 tests verts.
 - **T4.2** ◐ Partiel : menu ⌘ natif macOS, icônes Phosphor, menus
   `toolbar.rs` confirmés visuellement à l'écran. Stylet, presse-papiers,
