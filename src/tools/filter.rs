@@ -199,6 +199,14 @@ pub enum Adjustment {
     /// normalisation forcée : l'utilisateur peut sur/sous-exposer certains
     /// canaux volontairement.
     ChannelMixerBw { r: f32, g: f32, b: f32 },
+    /// Netteté réglable façon Unsharp Mask (audit_100_features.md #68) :
+    /// `Filter::Sharpen` a un noyau 3×3 fixe (rayon 1, quantité fixe), sans
+    /// seuil — amplifie le bruit dans les zones plates. Ici : flou gaussien
+    /// de référence (`radius`), différence source-flou amplifiée par
+    /// `amount` (0 = identité, comme un vrai Unsharp Mask), appliquée
+    /// seulement là où l'écart dépasse `threshold` (0 = partout, comme
+    /// désactivé) pour épargner les zones déjà lisses.
+    UnsharpMask { radius: f32, amount: f32, threshold: f32 },
 }
 
 impl Adjustment {
@@ -228,6 +236,7 @@ impl Adjustment {
             Adjustment::RadialBlur { .. } => t("Flou radial", "Radial blur").to_string(),
             Adjustment::Vignette { .. } => t("Vignette", "Vignette").to_string(),
             Adjustment::ChannelMixerBw { .. } => t("Mixeur de canaux N&B", "Channel mixer B&W").to_string(),
+            Adjustment::UnsharpMask { .. } => t("Netteté (Unsharp Mask)", "Sharpen (Unsharp Mask)").to_string(),
         }
     }
 
@@ -322,6 +331,10 @@ impl Adjustment {
 
     pub fn default_channel_mixer_bw() -> Self {
         Adjustment::ChannelMixerBw { r: 0.299, g: 0.587, b: 0.114 }
+    }
+
+    pub fn default_unsharp_mask() -> Self {
+        Adjustment::UnsharpMask { radius: 1.0, amount: 0.5, threshold: 0.0 }
     }
 
     /// Signature FNV-1a des paramètres, pour l'invalidation du cache de rendu
@@ -449,6 +462,12 @@ impl Adjustment {
                 mix(g.to_bits() as u64);
                 mix(b.to_bits() as u64);
             }
+            Adjustment::UnsharpMask { radius, amount, threshold } => {
+                mix(28);
+                mix(radius.to_bits() as u64);
+                mix(amount.to_bits() as u64);
+                mix(threshold.to_bits() as u64);
+            }
         }
         h
     }
@@ -485,6 +504,9 @@ pub fn apply_adjustment(adj: Adjustment, rgba: &mut Vec<u8>, w: u32, h: u32) {
         Adjustment::RadialBlur { amount } => *rgba = radial_blur(rgba, w as usize, h as usize, amount),
         Adjustment::Vignette { amount } => apply_vignette(rgba, w as usize, h as usize, amount),
         Adjustment::ChannelMixerBw { r, g, b } => channel_mixer_bw(rgba, r, g, b),
+        Adjustment::UnsharpMask { radius, amount, threshold } => {
+            *rgba = unsharp_mask(rgba, w as usize, h as usize, radius, amount, threshold)
+        }
     }
 }
 
@@ -1757,6 +1779,33 @@ fn sharpen(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     out
 }
 
+/// Netteté réglable (audit_100_features.md #68) : Unsharp Mask classique —
+/// `sharpened = src + amount * (src - blurred)`, `blurred` un flou gaussien
+/// de rayon `radius` (référence de basses fréquences à retirer), appliqué
+/// seulement où l'écart dépasse `threshold` (0..=255, en niveaux par canal)
+/// pour épargner les zones déjà lisses/le bruit résiduel. `amount` <= 0 ou
+/// `radius` <= 0 = identité.
+fn unsharp_mask(src: &[u8], w: usize, h: usize, radius: f32, amount: f32, threshold: f32) -> Vec<u8> {
+    if w == 0 || h == 0 || src.len() < w * h * 4 || radius <= 0.0 || amount <= 0.0 {
+        return src.to_vec();
+    }
+    let blurred = gaussian_blur(src, w, h, radius);
+    let mut out = src.to_vec();
+    for i in (0..out.len()).step_by(4) {
+        for c in 0..3 {
+            let s = src[i + c] as f32;
+            let b = blurred[i + c] as f32;
+            let diff = s - b;
+            if diff.abs() < threshold {
+                continue;
+            }
+            out[i + c] = (s + amount * diff).clamp(0.0, 255.0) as u8;
+        }
+        // Alpha (canal 3) non affecté.
+    }
+    out
+}
+
 fn brightness(rgba: &mut [u8], factor: f32) {
     for px in rgba.chunks_exact_mut(4) {
         for c in px.iter_mut().take(3) {
@@ -2079,6 +2128,65 @@ mod tests {
         let mut px = vec![120u8; 3 * 3 * 4];
         apply(Filter::Sharpen, &mut px, 3, 3);
         assert!(px.iter().all(|&v| v == 120));
+    }
+
+    #[test]
+    fn unsharp_mask_is_noop_on_a_flat_region() {
+        // Comme sharpen_preserves_flat_region : pas de hautes fréquences à
+        // amplifier sur une image unie, quelle que soit la quantité.
+        let mut px = vec![120u8; 5 * 5 * 4];
+        apply_adjustment(Adjustment::UnsharpMask { radius: 2.0, amount: 2.0, threshold: 0.0 }, &mut px, 5, 5);
+        assert!(px.iter().all(|&v| v == 120), "aucune texture à renforcer sur du plat");
+    }
+
+    #[test]
+    fn unsharp_mask_zero_amount_is_identity() {
+        let original: Vec<u8> = (0..(4 * 4 * 4)).map(|i| (i * 7 % 256) as u8).collect();
+        let mut px = original.clone();
+        apply_adjustment(Adjustment::UnsharpMask { radius: 2.0, amount: 0.0, threshold: 0.0 }, &mut px, 4, 4);
+        assert_eq!(px, original);
+    }
+
+    #[test]
+    fn unsharp_mask_threshold_spares_small_differences() {
+        // Damier faible contraste (118/122, écart de 4) : un seuil de 10
+        // doit épargner ce détail, pas l'amplifier.
+        let mut px = Vec::new();
+        for y in 0..4 {
+            for x in 0..4 {
+                let v = if (x + y) % 2 == 0 { 118 } else { 122 };
+                px.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let original = px.clone();
+        apply_adjustment(Adjustment::UnsharpMask { radius: 1.0, amount: 2.0, threshold: 10.0 }, &mut px, 4, 4);
+        assert_eq!(px, original, "un écart sous le seuil ne doit pas être renforcé");
+    }
+
+    #[test]
+    fn unsharp_mask_sharpens_a_hard_edge() {
+        // Bord net 2 blocs : un pixel juste après la transition doit
+        // s'éloigner davantage de la valeur voisine (contraste local accru).
+        let (w, h) = (8usize, 1usize);
+        let mut px = vec![0u8; w * h * 4];
+        for x in 0..w {
+            let v: u8 = if x < w / 2 { 50 } else { 200 };
+            px[x * 4] = v;
+            px[x * 4 + 1] = v;
+            px[x * 4 + 2] = v;
+            px[x * 4 + 3] = 255;
+        }
+        let mut sharpened = px.clone();
+        apply_adjustment(Adjustment::UnsharpMask { radius: 1.5, amount: 1.5, threshold: 0.0 }, &mut sharpened, w as u32, h as u32);
+        let edge_x = w / 2;
+        assert!(
+            sharpened[edge_x * 4] > px[edge_x * 4],
+            "le côté clair du bord doit devenir plus clair (dépassement caractéristique de l'Unsharp Mask)"
+        );
+        assert!(
+            sharpened[(edge_x - 1) * 4] < px[(edge_x - 1) * 4],
+            "le côté sombre du bord doit devenir plus sombre"
+        );
     }
 
     #[test]

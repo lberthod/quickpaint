@@ -7,7 +7,7 @@ lecture de code**, puis confrontées au code réel de QuickPaint par lecture
 directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 **✅ Implémenté** · **🟡 Partiel** · **❌ Absent**.
 
-**Score global : 64 ✅ / 10 🟡 / 26 ❌ sur 100 — mis à jour le 30 août 2026 (BMP #1 et soulignement #61 corrigés, initialement 62/12/26).**
+**Score global : 65 ✅ / 9 🟡 / 26 ❌ sur 100 — mis à jour le 30 août 2026 (BMP #1, soulignement #61, Unsharp Mask #68 corrigés ; initialement 62/12/26).**
 
 ---
 
@@ -112,12 +112,12 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 65 | Polices variables / Google Fonts | ❌ | Scan des polices système uniquement, aucune police embarquée |
 | 66 | Vérification orthographique | ❌ | Introuvable |
 
-## 8. Filtres & Effets — 7 ✅ / 2 🟡 / 2 ❌
+## 8. Filtres & Effets — 8 ✅ / 1 🟡 / 2 ❌
 
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
 | 67 | Flou (gaussien/mouvement/radial/bokeh) | ✅ | **5 types distincts** dans [tools/filter.rs](src/tools/filter.rs) |
-| 68 | Netteté (Unsharp Mask) | 🟡 | Noyau fixe, pas de rayon/quantité/seuil réglables |
+| 68 | Netteté (Unsharp Mask) | ✅ *(corrigé le 30 août 2026)* | `Adjustment::UnsharpMask { radius, amount, threshold }` — vrai Unsharp Mask (flou gaussien de référence + différence amplifiée + seuil), en plus du `Filter::Sharpen` à noyau fixe existant |
 | 69 | Détection de contours (Sobel/Canny) | ✅ | `sobel_magnitude`/`canny_edges` |
 | 70 | Pixelisation / Halftone | ✅ | `Adjustment::Pixelate`/`Halftone` |
 | 71 | Distorsions | ✅ | `Wave`/`Sphere`/`Vortex`/`ArcWarp`/`Distortion` |
@@ -262,7 +262,7 @@ marque) et mérite une prudence particulière avant tout développement.
 | 87, 88 | Perspective / redressement d'horizon par manipulation directe | Le calcul (homographie 4 points, redressement) existe déjà, seule l'UI est indirecte (sliders au lieu de poignées glissables sur l'image) — amélioration UI pure, pas un nouvel algorithme |
 | 34 | Sélection par plage de couleurs | Le mode « Global » de la baguette magique fait déjà l'essentiel — l'exposer/le renommer explicitement comme fonctionnalité dédiée serait presque gratuit |
 | 38 | Amélioration des bords de sélection | `refine_edges` existe déjà mais seulement câblé au détourage du pot de peinture — le généraliser à un panneau de sélection réutiliserait le code existant |
-| 68 | Netteté réglable (Unsharp Mask) | Remplacer le noyau fixe par rayon/quantité/seuil paramétrables — technique du domaine public depuis des décennies, aucun souci de PI |
+| 68 | ✅ Netteté réglable (Unsharp Mask) — corrigé (30 août 2026) | Nouvel `Adjustment::UnsharpMask` en complément de `Filter::Sharpen` (conservé, noyau fixe rapide toujours utile). 4 tests (identité à quantité nulle, no-op sur zone plate, seuil qui épargne les faibles écarts, overshoot caractéristique sur un bord net). |
 | 2 | Import PSD (groupes, masques, texte éditable) | L'essentiel (calques/opacité/blend mode) fonctionne déjà ; étendre à ce qui manque est un prolongement de code existant, pas un nouveau module |
 
 ### ✅ Pertinent à intégrer — nouveau, cohérent avec l'identité du produit, sans souci de PI

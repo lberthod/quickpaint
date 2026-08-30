@@ -454,6 +454,11 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                 ui.selectable_value(&mut adj, Adjustment::default_white_balance(), t("Balance des blancs", "White balance"));
                 ui.selectable_value(&mut adj, Adjustment::default_denoise(), t("Réduction de bruit", "Noise reduction"));
                 ui.selectable_value(&mut adj, Adjustment::default_gaussian_blur(), t("Flou gaussien", "Gaussian blur"));
+                ui.selectable_value(
+                    &mut adj,
+                    Adjustment::default_unsharp_mask(),
+                    t("Netteté (Unsharp Mask)", "Sharpen (Unsharp Mask)"),
+                );
                 ui.separator();
                 ui.selectable_value(&mut adj, Adjustment::default_pixelate(), t("Pixelisation", "Pixelate"));
                 ui.selectable_value(&mut adj, Adjustment::default_halftone(), t("Halftone", "Halftone"));
@@ -661,6 +666,20 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
                     ui.add(egui::Slider::new(g, -2.0..=2.0));
                     ui.label(t("Bleu", "Blue"));
                     ui.add(egui::Slider::new(b, -2.0..=2.0));
+                });
+            }
+            Adjustment::UnsharpMask { radius, amount, threshold } => {
+                ui.horizontal(|ui| {
+                    ui.label(t("Rayon", "Radius"));
+                    ui.add(egui::Slider::new(radius, 0.1..=20.0).suffix(" px"));
+                    ui.label(t("Quantité", "Amount"));
+                    ui.add(egui::Slider::new(amount, 0.0..=3.0));
+                    ui.label(t("Seuil", "Threshold"));
+                    ui.add(egui::Slider::new(threshold, 0.0..=64.0))
+                        .on_hover_text(t(
+                            "Écart minimal (par canal) avant renforcement — épargne les zones déjà lisses",
+                            "Minimum per-channel difference before sharpening — spares already-smooth areas",
+                        ));
                 });
             }
             Adjustment::Preset(_) => {}
