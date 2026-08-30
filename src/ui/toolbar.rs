@@ -2378,6 +2378,20 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
         app.text_italic = !app.text_italic;
         changed = true;
     }
+    // Soulignement (audit_100_features.md #61) : seul manquant du trio
+    // gras/italique/souligné, jamais ajouté depuis l'introduction de
+    // TextItem — pas un choix assumé, un oubli.
+    if ui
+        .selectable_label(
+            app.text_underline,
+            egui::RichText::new(egui_phosphor::fill::TEXT_A_UNDERLINE).font(fill_font(16.0)),
+        )
+        .on_hover_text(t("Souligné", "Underline"))
+        .clicked()
+    {
+        app.text_underline = !app.text_underline;
+        changed = true;
+    }
 
     ui.separator();
     ui.label(t("Interligne :", "Line height:"));

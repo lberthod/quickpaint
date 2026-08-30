@@ -393,12 +393,33 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
         mix(t.size.to_bits() as u64);
         mix(t.rot.to_bits() as u64);
         mix(u32::from_le_bytes(t.color) as u64);
-        // Style (Sprint 3) : police, gras, alignement, contour.
+        // Style (Sprint 3 + Q) : police, gras/italique/soulignement,
+        // interligne/espacement, alignement, contour, police système,
+        // ombre — chacun manquant ici invaliderait le cache trop tard
+        // (le rendu resterait périmé jusqu'au prochain changement qui,
+        // lui, touche un champ déjà couvert). Trouvé en ajoutant le
+        // soulignement (audit_100_features.md #61) : italique/interligne/
+        // espacement/police système/ombre en manquaient déjà depuis leur
+        // introduction (Sprint Q).
         mix(t.font as u64);
         mix(t.bold as u64);
+        mix(t.italic as u64);
+        mix(t.underline as u64);
+        mix(t.line_height.to_bits() as u64);
+        mix(t.letter_spacing.to_bits() as u64);
         mix(t.align as u64);
         mix(t.outline_w.to_bits() as u64);
         mix(u32::from_le_bytes(t.outline_color) as u64);
+        if let Some(ff) = &t.font_family {
+            for b in ff.bytes() {
+                mix(b as u64);
+            }
+        }
+        if let Some(sh) = t.shadow {
+            mix(sh.offset.0.to_bits() as u64);
+            mix(sh.offset.1.to_bits() as u64);
+            mix(u32::from_le_bytes(sh.color) as u64);
+        }
         for b in t.text.bytes() {
             mix(b as u64);
         }
@@ -808,14 +829,18 @@ fn raster_text(
             let char_center = (t.pos.0 + ac.offset.0, t.pos.1 + ac.offset.1);
             let (gw, gh) = (galley.rect.width(), galley.rect.height());
             let origin = (char_center.0 - gw * 0.5, char_center.1 - gh * 0.5);
-            raster_text_glyphs(pm, atlas, &galley, origin, char_center, ac.angle, &passes);
+            // Soulignement non géré en texte sur courbe (limite assumée) :
+            // un trait par caractère donnerait des segments disjoints plutôt
+            // qu'un trait continu suivant l'arc.
+            raster_text_glyphs(pm, atlas, &galley, origin, char_center, ac.angle, &passes, None);
         }
         return;
     }
     // Mise en page partagée (police + alignement), en espace document (1 px/doc).
     let galley = crate::render::text::layout(ctx, t, 1.0);
     let passes = crate::render::text::passes(t);
-    raster_text_glyphs(pm, atlas, &galley, t.pos, t.pos, t.rot, &passes);
+    let underline = crate::render::text::underline_stroke(t, 1.0);
+    raster_text_glyphs(pm, atlas, &galley, t.pos, t.pos, t.rot, &passes, underline);
 }
 
 /// Blitte les glyphes de `galley` dans `pm`, teintés par chaque passe.
@@ -825,6 +850,7 @@ fn raster_text(
 /// courbe (Sprint 7.1), où chaque caractère tourne autour de son propre
 /// centre plutôt que du coin haut-gauche du texte entier (texte plat :
 /// `origin == rotation_center == t.pos`, comme avant ce refactor).
+#[allow(clippy::too_many_arguments)]
 fn raster_text_glyphs(
     pm: &mut Pixmap,
     atlas: &egui::epaint::FontImage,
@@ -833,6 +859,7 @@ fn raster_text_glyphs(
     rotation_center: (f32, f32),
     angle: f32,
     passes: &[((f32, f32), [u8; 4])],
+    underline: Option<egui::Stroke>,
 ) {
     let (aw, ah) = (atlas.size[0], atlas.size[1]);
     let (pw, ph) = (pm.width() as usize, pm.height() as usize);
@@ -894,6 +921,49 @@ fn raster_text_glyphs(
                             let cov = sample((lx - ox) / dw, (ly - oy) / dh);
                             blend_pixel(pm, px, py, pw, ph, cov, color);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // Soulignement (audit_100_features.md #61) : un bandeau plein par
+    // rangée, à la base de sa boîte (même repère que le tessellateur egui
+    // pour le chemin painter live — `row_rect.bottom()`), dessiné une fois
+    // après toutes les passes de glyphes plutôt que par passe (sinon un
+    // faux-bold/contour actif le dédoublerait/l'épaissirait).
+    if let Some(stroke) = underline {
+        let color = [stroke.color.r(), stroke.color.g(), stroke.color.b(), stroke.color.a()];
+        for row in &galley.rows {
+            let (x0, x1) = (origin.0 + row.rect.left(), origin.0 + row.rect.right());
+            let y0 = origin.1 + row.rect.bottom();
+            let y1 = y0 + stroke.width;
+            if !rotated {
+                for py in y0.floor() as i32..y1.ceil() as i32 {
+                    for px in x0.floor() as i32..x1.ceil() as i32 {
+                        blend_pixel(pm, px, py, pw, ph, 1.0, color);
+                    }
+                }
+            } else {
+                let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+                let rot = |p: (f32, f32)| {
+                    let (vx, vy) = (p.0 - rotation_center.0, p.1 - rotation_center.1);
+                    (rotation_center.0 + vx * c - vy * s, rotation_center.1 + vx * s + vy * c)
+                };
+                let rc: Vec<(f32, f32)> = corners.iter().map(|p| rot(*p)).collect();
+                let minx = rc.iter().map(|p| p.0).fold(f32::INFINITY, f32::min).floor() as i32;
+                let maxx = rc.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
+                let miny = rc.iter().map(|p| p.1).fold(f32::INFINITY, f32::min).floor() as i32;
+                let maxy = rc.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max).ceil() as i32;
+                for py in miny..=maxy {
+                    for px in minx..=maxx {
+                        let (vx, vy) = (px as f32 + 0.5 - rotation_center.0, py as f32 + 0.5 - rotation_center.1);
+                        let lx = rotation_center.0 + vx * c + vy * s;
+                        let ly = rotation_center.1 - vx * s + vy * c;
+                        if lx < x0 || lx >= x1 || ly < y0 || ly >= y1 {
+                            continue;
+                        }
+                        blend_pixel(pm, px, py, pw, ph, 1.0, color);
                     }
                 }
             }

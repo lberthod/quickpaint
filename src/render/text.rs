@@ -120,6 +120,22 @@ pub fn passes(t: &TextItem) -> Vec<Pass> {
     v
 }
 
+/// Trait de soulignement (audit_100_features.md #61), en unités écran
+/// (`scale` = unités document → pixels). `None` si `t.underline` est
+/// désactivé. Épaisseur proportionnelle à la taille de police, comme le
+/// faux-bold de `passes()`. N'est appliqué qu'à la **dernière** passe (le
+/// remplissage central) par l'appelant — pas aux passes d'ombre/contour/
+/// faux-bold, qui dessineraient sinon un trait dédoublé ou plus épais
+/// qu'attendu.
+pub fn underline_stroke(t: &TextItem, scale: f32) -> Option<egui::Stroke> {
+    if !t.underline {
+        return None;
+    }
+    let width = (t.size * 0.08 * scale).max(1.0);
+    let color = egui::Color32::from_rgba_unmultiplied(t.color[0], t.color[1], t.color[2], t.color[3]);
+    Some(egui::Stroke::new(width, color))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +147,24 @@ mod tests {
         let p = passes(&t);
         assert_eq!(p.len(), 1);
         assert_eq!(p[0], ((0.0, 0.0), [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn underline_stroke_is_none_when_disabled() {
+        let t = TextItem::new(1, (0.0, 0.0), 20.0, [10, 20, 30, 255]);
+        assert!(!t.underline);
+        assert!(underline_stroke(&t, 1.0).is_none());
+    }
+
+    #[test]
+    fn underline_stroke_scales_with_size_and_view_scale() {
+        let mut t = TextItem::new(1, (0.0, 0.0), 20.0, [10, 20, 30, 255]);
+        t.underline = true;
+        let s1 = underline_stroke(&t, 1.0).expect("underline enabled");
+        assert_eq!(s1.color, egui::Color32::from_rgba_unmultiplied(10, 20, 30, 255));
+        assert!(s1.width > 0.0);
+        let s2 = underline_stroke(&t, 2.0).expect("underline enabled");
+        assert!(s2.width > s1.width, "un plus grand facteur d'échelle doit épaissir le trait");
     }
 
     #[test]

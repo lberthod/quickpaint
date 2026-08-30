@@ -226,6 +226,23 @@ mod tests {
         let _ = std::fs::remove_file(&dir);
     }
 
+    /// BMP (audit_100_features.md #1) : listé dans le filtre du dialogue
+    /// d'import depuis toujours, mais la feature `bmp` de la crate `image`
+    /// n'était pas activée dans `Cargo.toml` — le dialogue promettait un
+    /// format qu'il ne savait pas réellement décoder. Même régression que
+    /// le GIF au Sprint L.6 (voir `sprint.md`), même correctif : activer la
+    /// feature, couvrir par un test de régression.
+    #[test]
+    fn opens_a_bmp_image() {
+        let img = image::RgbaImage::from_fn(4, 3, |x, _y| image::Rgba([x as u8 * 10, 50, 100, 255]));
+        let dir = std::env::temp_dir().join("quickpaint-test-import.bmp");
+        img.save(&dir).expect("should encode a bmp");
+        let (w, h, rgba) = load_image_from_path(&dir).expect("should decode the bmp");
+        assert_eq!((w, h), (4, 3));
+        assert_eq!(rgba.len(), (4 * 3 * 4) as usize);
+        let _ = std::fs::remove_file(&dir);
+    }
+
     /// `recovery_path` dérive de `$HOME`, comme `i18n::settings_path` — donc
     /// testé via une valeur de `$HOME` temporaire plutôt que sur le vrai
     /// dossier du poste, pour rester déterministe et ne rien polluer.

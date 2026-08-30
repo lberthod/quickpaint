@@ -178,6 +178,7 @@ struct TextStyleClip {
     font_family: Option<String>,
     bold: bool,
     italic: bool,
+    underline: bool,
     line_height: f32,
     letter_spacing: f32,
     align: crate::model::text::TextAlign,
@@ -457,6 +458,8 @@ pub struct PaintApp {
     /// Italique (Sprint Q, point 82) — effectif pour les polices système
     /// disposant d'une vraie fonte italique (voir `TextItem::italic`).
     pub text_italic: bool,
+    /// Soulignement (audit_100_features.md #61).
+    pub text_underline: bool,
     /// Interligne (Sprint Q, point 83), multiple de la taille.
     pub text_line_height: f32,
     /// Espacement entre caractères (Sprint Q, point 83), unités document.
@@ -701,6 +704,7 @@ impl Default for PaintApp {
             font_manager: crate::fonts::FontManager::new(),
             text_bold: false,
             text_italic: false,
+            text_underline: false,
             text_line_height: 1.25,
             text_letter_spacing: 0.0,
             text_align: crate::model::text::TextAlign::Left,
@@ -1249,6 +1253,7 @@ impl PaintApp {
             t.font_family = self.text_font_family.clone();
             t.bold = self.text_bold;
             t.italic = self.text_italic;
+            t.underline = self.text_underline;
             t.line_height = self.text_line_height;
             t.letter_spacing = self.text_letter_spacing;
             t.align = self.text_align;
@@ -1494,6 +1499,7 @@ impl PaintApp {
             item.font_family = self.text_font_family.clone();
             item.bold = self.text_bold;
             item.italic = self.text_italic;
+            item.underline = self.text_underline;
             item.line_height = self.text_line_height;
             item.letter_spacing = self.text_letter_spacing;
             item.align = self.text_align;
@@ -2539,6 +2545,7 @@ impl PaintApp {
                     font_family: t.font_family.clone(),
                     bold: t.bold,
                     italic: t.italic,
+                    underline: t.underline,
                     line_height: t.line_height,
                     letter_spacing: t.letter_spacing,
                     align: t.align,
@@ -2588,6 +2595,7 @@ impl PaintApp {
                     t.font_family = ts.font_family.clone();
                     t.bold = ts.bold;
                     t.italic = ts.italic;
+                    t.underline = ts.underline;
                     t.line_height = ts.line_height;
                     t.letter_spacing = ts.letter_spacing;
                     t.align = ts.align;
@@ -4144,7 +4152,10 @@ fn draw_text(painter: &egui::Painter, t: &crate::model::TextItem, view: &ViewTra
     let galley = crate::render::text::layout(painter.ctx(), t, view.scale);
     let anchor = view.doc_to_screen(t.pos);
     let (c, s) = (t.rot.cos(), t.rot.sin());
-    for (off, col) in crate::render::text::passes(t) {
+    let underline = crate::render::text::underline_stroke(t, view.scale);
+    let passes = crate::render::text::passes(t);
+    let last = passes.len() - 1;
+    for (i, (off, col)) in passes.into_iter().enumerate() {
         // Décalage de passe (unités document) → écran, tourné comme le texte.
         let (ox, oy) = (off.0 * view.scale, off.1 * view.scale);
         let pos = egui::pos2(anchor.x + ox * c - oy * s, anchor.y + ox * s + oy * c);
@@ -4153,6 +4164,14 @@ fn draw_text(painter: &egui::Painter, t: &crate::model::TextItem, view: &ViewTra
         let mut shape = egui::epaint::TextShape::new(pos, galley.clone(), color);
         shape.override_text_color = Some(color);
         shape.angle = t.rot;
+        // Soulignement uniquement sur le remplissage central (dernière
+        // passe) : voir `render::text::underline_stroke`.
+        if i == last {
+            if let Some(mut u) = underline {
+                u.color = u.color.gamma_multiply(opacity);
+                shape.underline = u;
+            }
+        }
         painter.add(shape);
     }
 }
@@ -4453,6 +4472,34 @@ mod tests {
             let first = &rgba[0..4];
             assert!(rgba.chunks_exact(4).any(|px| px != first), "rendu non uniforme attendu ({content:?})");
         }
+    }
+
+    /// Soulignement de texte (audit_100_features.md #61) : preuve de bout en
+    /// bout que le trait est bien blitté par le compositeur CPU (pas
+    /// seulement que `underline_stroke()` retourne un `Stroke`, déjà couvert
+    /// par des tests unitaires dans `render/text.rs`) — compare le rendu
+    /// avec/sans soulignement et vérifie qu'un pixel juste sous la ligne de
+    /// base change alors que rien au-dessus (le glyphe lui-même) ne bouge.
+    #[test]
+    fn text_underline_draws_a_bar_below_the_baseline() {
+        let mut app = app_with_layers(1);
+        app.doc.size = (200, 100);
+        let mut item = crate::model::TextItem::new(1, (10.0, 10.0), 40.0, [0, 0, 0, 255]);
+        item.text = "A".to_string();
+        item.underline = true;
+        app.doc.layers[0].texts.push(item.clone());
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let mut c = crate::render::compositor::Compositor::new();
+        let (w, h, with_underline) = c.render_to_rgba(&ctx, &app.doc, Color32::WHITE).expect("render");
+
+        app.doc.layers[0].texts[0].underline = false;
+        let mut c2 = crate::render::compositor::Compositor::new();
+        let (_, _, without_underline) = c2.render_to_rgba(&ctx, &app.doc, Color32::WHITE).expect("render");
+
+        assert_eq!(with_underline.len(), without_underline.len());
+        assert_ne!(with_underline, without_underline, "le soulignement doit changer le rendu ({w}x{h})");
     }
 
     /// Perf smoke test (audit_aout.md P1.8 : aucun profilage n'existait avant

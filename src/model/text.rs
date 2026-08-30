@@ -76,6 +76,12 @@ pub struct TextItem {
     /// egui ne sait pas incliner un galley, limite documentée).
     #[serde(default)]
     pub italic: bool,
+    /// Soulignement (audit_100_features.md #61) : un trait sous la dernière
+    /// ligne de base de chaque rangée, dessiné une seule fois sur la passe
+    /// de remplissage principale (pas sur les passes d'ombre/contour/faux-
+    /// bold, pour éviter un trait dédoublé/plus épais qu'attendu).
+    #[serde(default)]
+    pub underline: bool,
     /// Interligne (Sprint Q, point 83), en multiple de `size` — 1.25 était
     /// la valeur codée en dur avant d'être réglable.
     #[serde(default = "default_line_height")]
@@ -188,6 +194,7 @@ impl TextItem {
             font_family: None,
             bold: false,
             italic: false,
+            underline: false,
             line_height: default_line_height(),
             letter_spacing: 0.0,
             align: TextAlign::default(),

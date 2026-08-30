@@ -7,15 +7,15 @@ lecture de code**, puis confrontées au code réel de QuickPaint par lecture
 directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 **✅ Implémenté** · **🟡 Partiel** · **❌ Absent**.
 
-**Score global : 62 ✅ / 12 🟡 / 26 ❌ sur 100.**
+**Score global : 64 ✅ / 10 🟡 / 26 ❌ sur 100 — mis à jour le 30 août 2026 (BMP #1 et soulignement #61 corrigés, initialement 62/12/26).**
 
 ---
 
-## 1. Fichiers & Formats — 6 ✅ / 2 🟡 / 2 ❌
+## 1. Fichiers & Formats — 7 ✅ / 1 🟡 / 2 ❌
 
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
-| 1 | Import PNG/JPEG/TIFF/BMP/GIF/WebP | 🟡 | `image` compilée avec les features `png,jpeg,webp,tiff,gif` — **BMP listé dans le filtre du dialogue mais pas décodable** (feature non activée), [Cargo.toml](Cargo.toml) |
+| 1 | Import PNG/JPEG/TIFF/BMP/GIF/WebP | ✅ *(corrigé le 30 août 2026)* | `image` compilée avec les features `png,jpeg,webp,tiff,gif,bmp` — les 6 formats sont réellement décodables, [Cargo.toml](Cargo.toml) |
 | 2 | Import PSD (calques natifs) | 🟡 | [psd_import.rs:16](src/psd_import.rs:16) reconstruit calques/opacité/visibilité/blend mode, mais aplatit les groupes et ignore masques/texte éditable |
 | 3 | Import AI/EPS | ❌ | Introuvable |
 | 4 | Import SVG éditable | ✅ | [svg_import.rs](src/svg_import.rs) via `usvg`, chemins/cercles/groupes/texte → `Stroke`/`TextItem` |
@@ -99,13 +99,13 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 57 | Déformation de formes (warp) | ✅ | `Adjustment::{ArcWarp,Wave,Sphere,Vortex}` |
 | 58 | Cisaillement (skew) | ✅ | `Command::Shear`, [app/transform.rs:20-155](src/app/transform.rs:20) |
 
-## 7. Texte & Typographie — 4 ✅ / 1 🟡 / 3 ❌
+## 7. Texte & Typographie — 5 ✅ / 0 🟡 / 3 ❌
 
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
 | 59 | Outil Texte, polices système | ✅ | [fonts.rs:24-113](src/fonts.rs:24) via `fontdb` |
 | 60 | Texte sur courbe | ✅ | `TextArc` + `arc_chars` |
-| 61 | Gras/italique/soulignement | 🟡 | Gras (faux, décalage) et italique (vraie fonte) présents, **pas de soulignement** |
+| 61 | Gras/italique/soulignement | ✅ *(corrigé le 30 août 2026)* | Gras (faux, décalage), italique (vraie fonte) et **soulignement** tous les trois présents |
 | 62 | Interlignage et crénage | ✅ | `line_height`/`letter_spacing` |
 | 63 | Contour de texte | ✅ | `outline_w`/`outline_color`, 8 passes |
 | 64 | Texte → tracés vectoriels | ❌ | Introuvable |
@@ -257,8 +257,8 @@ marque) et mérite une prudence particulière avant tout développement.
 
 | # | Fonctionnalité | Ce qu'il reste à faire |
 |---|---|---|
-| 1 | Import BMP | Le dialogue de fichier annonce BMP dans son filtre mais la feature `bmp` de la crate `image` n'est pas activée dans `Cargo.toml` — soit l'activer (1 ligne), soit retirer BMP du filtre pour ne plus promettre un format non lu. **C'est un bug de première ligne, pas juste un manque.** |
-| 61 | Soulignement de texte | Gras et italique existent déjà (`TextItem.bold`/`.italic`) ; seul le soulignement manque — même mécanique de rendu (une ligne sous la boîte de texte), effort faible |
+| 1 | ✅ Import BMP — corrigé (30 août 2026) | Feature `bmp` activée dans `Cargo.toml`, test de régression `opens_a_bmp_image` (`project.rs`). |
+| 61 | ✅ Soulignement de texte — corrigé (30 août 2026) | `TextItem::underline` + rendu (egui `Stroke` sur le remplissage central en live, bandeau blitté manuellement dans le compositeur CPU — tracé une seule fois, pas par passe), bouton dans la barre (icône Phosphor `TEXT_A_UNDERLINE`), presse-papiers de style mis à jour. **Bonus trouvé en implémentant** : le hash d'invalidation du cache de composition (`layer_hash`) oubliait déjà italique/interligne/espacement/police système/ombre depuis le Sprint Q — corrigé au passage (même catégorie de bug, même fonction). 3 tests ajoutés (2 unitaires + 1 bout-en-bout prouvant le blit réel). |
 | 87, 88 | Perspective / redressement d'horizon par manipulation directe | Le calcul (homographie 4 points, redressement) existe déjà, seule l'UI est indirecte (sliders au lieu de poignées glissables sur l'image) — amélioration UI pure, pas un nouvel algorithme |
 | 34 | Sélection par plage de couleurs | Le mode « Global » de la baguette magique fait déjà l'essentiel — l'exposer/le renommer explicitement comme fonctionnalité dédiée serait presque gratuit |
 | 38 | Amélioration des bords de sélection | `refine_edges` existe déjà mais seulement câblé au détourage du pot de peinture — le généraliser à un panneau de sélection réutiliserait le code existant |

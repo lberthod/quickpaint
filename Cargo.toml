@@ -17,7 +17,7 @@ egui = { version = "0.29", features = ["accesskit"] }
 # embarquée, rendu net à toute taille, sans dépendre des emojis du système.
 egui-phosphor = { version = "0.7", features = ["fill"] }
 # Encodage images pour l'export (PNG/JPG/WebP/GIF). default-features off = build léger.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff", "gif"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff", "gif", "bmp"] }
 # Encodage APNG animé (Sprint T, point 100a) : la crate `png` est déjà dans
 # l'arbre via `image`, on l'expose directement pour son API d'animation
 # (set_animated/set_frame_delay), que `image` ne ré-exporte pas.
