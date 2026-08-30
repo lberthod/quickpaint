@@ -137,8 +137,9 @@ système au démarrage, préférence persistée. Arbitrage assumé : optimal pou
 
 Le DMG signé/notarisé est publié via les GitHub Releases.
 
-Piste Mac App Store (démarrée, pas encore soumise) : entitlements App
-Sandbox minimaux dans [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements)
+Piste Mac App Store envisagée puis écartée (30 août 2026 — distribution
+Developer ID/DMG uniquement, voir `audit_aout.md` §2) : les entitlements
+App Sandbox minimaux dans [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements)
 (sandbox + accès fichiers via les panneaux natifs `rfd`, aucune entitlement
 réseau), validés par signature ad-hoc et un diagnostic embarqué
 (`quickpaint --sandbox-selftest`) — détail dans

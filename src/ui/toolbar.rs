@@ -2355,12 +2355,20 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
             changed = true;
         }
     }
-    if ui.selectable_label(app.text_bold, "𝐆").on_hover_text(t("Gras", "Bold")).clicked() {
+    // Icônes Phosphor plutôt que les glyphes Unicode "𝐆"/"𝐼" (bloc
+    // Mathematical Alphanumeric Symbols) : absents de la police par défaut
+    // d'egui, ils s'affichaient en carré vide (même défaut que undo/redo
+    // avant leur migration vers Phosphor, cf. audit_uix_expert.md).
+    if ui
+        .selectable_label(app.text_bold, egui::RichText::new(egui_phosphor::fill::TEXT_B).font(fill_font(16.0)))
+        .on_hover_text(t("Gras", "Bold"))
+        .clicked()
+    {
         app.text_bold = !app.text_bold;
         changed = true;
     }
     if ui
-        .selectable_label(app.text_italic, "𝐼")
+        .selectable_label(app.text_italic, egui::RichText::new(egui_phosphor::fill::TEXT_ITALIC).font(fill_font(16.0)))
         .on_hover_text(t(
             "Italique — effectif avec une police système disposant d'une variante italique",
             "Italic — effective with a system font that has an italic variant",

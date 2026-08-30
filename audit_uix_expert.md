@@ -261,3 +261,61 @@ peut-être pas à l'écran.
 
 **Validation** : `cargo check` et `cargo clippy` propres (0 nouveau
 warning), 325/325 tests toujours verts après ces changements.
+
+---
+
+## Vérification visuelle réelle (30 août 2026)
+
+Permission Enregistrement d'écran obtenue depuis la rédaction ci-dessus —
+première vraie session de capture d'écran de l'app en fonctionnement
+(build release, fenêtre 1500×950pt), pas seulement une lecture de code.
+
+### Confirmé conforme aux correctifs déjà appliqués
+- **Critique n°4 (bruit chromatique)** : confirmé visuellement corrigé —
+  au repos, tous les boutons d'outils sont en gris/blanc neutre ; seul
+  l'outil actif (testé : Pinceau, Texte, Sélection) ressort en couleur
+  pleine (orange, rose/rouge, bleu selon l'outil). Plus de « arc-en-ciel »
+  de 32 couleurs simultanées.
+- **Panneau de calques, état par défaut** : avec un seul calque sans tag
+  couleur ni verrou actif, la ligne reste sobre (poignée, œil, cadenas,
+  nom) — la densité redoutée ne se manifeste que dans les états avancés
+  (tags + verrous multiples), pas par défaut.
+- **Groupes de la barre repliés** : confirmé visuellement — 3 chevrons
+  `>` nus (aucun texte visible), exactement comme prévu par la lecture de
+  code précédente (le nom de catégorie n'existe qu'au survol).
+
+### 🔴 Nouveau bug trouvé et corrigé : icônes Gras/Italique invisibles
+En basculant sur l'outil Texte, les boutons Gras/Italique de la barre
+d'options s'affichaient comme **deux carrés vides** (glyphes manquants,
+« tofu »). Cause : le code utilisait les caractères Unicode "𝐆"/"𝐼" du
+bloc *Mathematical Alphanumeric Symbols* (`ui/toolbar.rs:2358-2363`),
+absents de la police par défaut d'egui — exactement la même famille de
+défaut que celle déjà corrigée une fois pour les icônes undo/redo
+(constat C9 historique). **Corrigé** : remplacés par les icônes Phosphor
+`TEXT_B`/`TEXT_ITALIC` (déjà utilisées ailleurs dans l'app), rendu vérifié
+par une seconde capture — les icônes "B"/"I" s'affichent correctement.
+`cargo test` : 325/325 toujours verts après le correctif.
+
+### 🟡 Nouveau constat : les barres d'options tiennent systématiquement sur 2 lignes
+Vérifié sur l'outil Texte (Taille/Police/Gras/Italique/Interlignage/
+Espacement/Police système/Aligner sur une ligne, puis Couleur/Contour/
+Ombre/Sur courbe sur une seconde) et l'outil Sélection (Mode/Couleur/
+Ordre/Aligner/Rogner/Supprimer sur une ligne, une seconde ligne partiellement
+visible en dessous) : **même à une largeur de fenêtre confortable
+(1500pt), aucune des barres d'options testées ne tient sur une seule
+ligne**. Sur une fenêtre plus étroite (usage réaliste sur un écran plus
+petit ou une tablette), ça grimperait probablement à 3-4 lignes,
+mangeant d'autant l'espace de canevas disponible — un vrai point de
+friction pour un outil qui se veut tactile/rapide, distinct des critiques
+déjà listées plus haut. Pas corrigé (redesign de la densité d'options
+par outil, hors scope d'un correctif ponctuel).
+
+### Note technique : automatisation de fenêtre peu fiable dans cet environnement
+`click at {x,y}` via System Events s'est avéré instable dans cette
+session — plusieurs tentatives ont déclenché des clics sur d'autres
+applications ouvertes sur le bureau (VibeIDE, QuickTime Player) au lieu
+de QuickPaint, sans rapport avec les coordonnées visées. Aucune perte de
+données constatée (juste des changements de focus/fenêtre), mais **à
+éviter pour de futures vérifications visuelles** — se limiter aux
+raccourcis clavier (fiables, testés à plusieurs reprises sans incident)
+et aux captures d'écran plutôt qu'à des clics synthétiques par coordonnées.

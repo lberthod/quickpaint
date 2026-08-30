@@ -95,19 +95,16 @@ une repasse visuelle manuelle sont listés comme préalables dans
 `sprint.md` T4.2). À traiter comme un vrai chantier de rebase, pas comme
 un `git merge` à lancer et corriger au fil de l'eau.
 
-### 2. Décision App Store : avancer ou classer
-[deployappstore.md](deployappstore.md) et [appstore_setup.md](appstore_setup.md)
-documentent un chemin complet mais bloqué sur des étapes **administratives
-hors code** (compte Apple Developer Program 99 $/an, certificats
-"Apple Distribution" + "Mac Installer Distribution", bundle ID, profil de
-provisioning). Le code (sandbox, entitlements, `--sandbox-selftest`) est
-déjà prêt côté technique.
+### 2. ✅ Tranché (30 août 2026) — Pas d'App Store, Developer ID/DMG uniquement
+Décision explicite du porteur de projet : distribution **Developer ID +
+DMG uniquement**, l'App Store n'est plus visé. `appstore_setup.md` et
+`deployappstore.md` retirés du dépôt en conséquence (git history les
+conserve si le sujet revient un jour).
 
-**Action** : si l'objectif reste la distribution App Store, les 4 étapes
-administratives de `appstore_setup.md` §1-2 sont sur le chemin critique et
-ne dépendent pas de l'agent — à faire par le porteur de projet. Si ce
-n'est plus l'objectif, le documenter et retirer ces deux fichiers de la
-racine (bruit sinon, pour quiconque relit le dépôt).
+**Conséquence directe pour la suite** : sans contrainte App Sandbox, la
+voie plugins natifs tiers / scripting (voir `audit_100_features.md`,
+items #97-98) n'est plus bloquée par une incompatibilité de distribution —
+c'était la seule réserve technique identifiée sur ce point.
 
 ### 3. Distribution Developer ID (hors App Store) — vérifier que c'est à jour
 `make-app.sh`/`make-dmg.sh` existent et fonctionnent (le DMG de 5,2 Mo à la
@@ -287,8 +284,9 @@ sommeil.
    utilisateur externe doit installer l'app.
 5. **P2.9** (test VoiceOver réel) — dépend d'un lecteur d'écran actif, à
    planifier avec le porteur de projet.
-6. **P0.2 / P2.12** — décisions produit pures (App Store, écran tactile) :
-   à trancher explicitement, pas à deviner.
+6. **P2.12** — décision produit pure (écran tactile) : à trancher
+   explicitement, pas à deviner. *(P0.2 App Store tranché le 30 août
+   2026 — voir section 2.)*
 7. **P1.7** — refactor de `app/mod.rs`, seulement si un besoin concret
    (régression de lisibilité) apparaît.
 
