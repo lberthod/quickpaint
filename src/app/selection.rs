@@ -308,6 +308,35 @@ impl PaintApp {
         self.info(t("Sélection dilatée.", "Selection dilated."));
     }
 
+    /// Amélioration des bords (audit_100_features.md #38, façon Refine
+    /// Edge/Select and Mask) : affine le bord du masque de sélection selon
+    /// la texture locale de l'image composée — les zones plates gardent un
+    /// dégradé doux, les zones texturées (feuillage, cheveux, herbe…) sont
+    /// durcies vers 0/255 pour coller aux détails fins plutôt que les
+    /// moyenner. Réutilise `bucket::refine_edges`, jusqu'ici câblé
+    /// uniquement au détourage en un clic (`bucket_cutout.rs`) — même
+    /// algorithme, généralisé à n'importe quelle sélection par région.
+    pub fn refine_selection_edges(&mut self, ctx: &egui::Context, radius: i32) {
+        let Some(mask) = &self.selection_mask else {
+            self.info(t(
+                "Aucune sélection par région (rectangle/ellipse/lasso) à affiner.",
+                "No region selection (rectangle/ellipse/lasso) to refine.",
+            ));
+            return;
+        };
+        let (w, h) = self.doc.size;
+        let Some((rw, rh, rgba)) = self.compositor.render_to_rgba(ctx, &self.doc, self.bg) else {
+            return;
+        };
+        if (rw, rh) != (w, h) {
+            return;
+        }
+        let dense = crate::tools::selection_mask::mask_to_dense(mask, w, h);
+        let refined = crate::tools::bucket::refine_edges(&rgba, w as usize, h as usize, &dense, radius);
+        self.selection_mask = Some(crate::tools::selection_mask::dense_to_mask(&refined, w, h));
+        self.info(t("Bords de la sélection affinés.", "Selection edges refined."));
+    }
+
     /// Contracte (rétrécit) la sélection en pixels de `amount` pixels.
     pub fn contract_selection(&mut self, amount: i32) {
         let Some(mask) = &self.selection_mask else {

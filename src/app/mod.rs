@@ -259,6 +259,10 @@ pub enum SelectionMaskAction {
     Feather,
     Dilate,
     Contract,
+    /// Amélioration des bords (audit_100_features.md #38) : généralise
+    /// `bucket::refine_edges`, jusque-là câblé seulement au détourage en un
+    /// clic, à n'importe quelle sélection par région.
+    RefineEdges,
 }
 
 pub struct PaintApp {
@@ -4889,6 +4893,55 @@ mod tests {
         assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(21, 30)[3], 255);
         app.contract_selection(3);
         assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(21, 30)[3], 0, "contracter devrait ronger le bord de la sélection");
+    }
+
+    /// Amélioration des bords (audit_100_features.md #38) : bout-en-bout à
+    /// travers l'API `PaintApp` (le mécanisme lui-même — durcir plus dans
+    /// les zones texturées — est déjà couvert au niveau pur par
+    /// `refine_edges_sharpens_boundary_more_in_textured_zones` dans
+    /// `tools/bucket.rs`). Nécessite un bord déjà adouci (feather) : sur un
+    /// masque net 0/255 comme `select_in_rect` seul le produit, l'affinage
+    /// n'a par construction aucun effet (voir la doc de `refine_edges`).
+    #[test]
+    fn refine_selection_edges_sharpens_more_over_textured_content() {
+        let mut app = app_with_layers(1);
+        app.doc.size = (20, 6);
+        // Moitié gauche unie, moitié droite en damier haute fréquence.
+        // Sélection d'une bande centrale (x=5..15) : son bord gauche (x=5)
+        // tombe en zone plate, son bord droit (x=15) en zone texturée —
+        // même geste de feather des deux côtés, pour isoler l'effet de la
+        // texture plutôt qu'un bord différent.
+        for y in 0..6 {
+            for x in 0..20 {
+                let v: u8 = if x < 10 { 128 } else if (x + y) % 2 == 0 { 0 } else { 255 };
+                app.doc.layers[0].raster.set_pixel(x, y, [v, v, v, 255]);
+            }
+        }
+        app.select_in_rect((5.0, 0.0), (15.0, 6.0), SelectionCombine::Replace);
+        app.feather_selection(3.0);
+        let before = app.selection_mask.clone().unwrap();
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        app.refine_selection_edges(&ctx, 2);
+        let after = app.selection_mask.as_ref().unwrap();
+
+        let flat_shift = (after.get_pixel(5, 3)[3] as i32 - before.get_pixel(5, 3)[3] as i32).abs();
+        let textured_shift = (after.get_pixel(15, 3)[3] as i32 - before.get_pixel(15, 3)[3] as i32).abs();
+        assert!(
+            textured_shift > flat_shift,
+            "le bord côté texturé doit bouger davantage que le bord côté plat : {textured_shift} vs {flat_shift}"
+        );
+    }
+
+    #[test]
+    fn refine_selection_edges_is_a_noop_without_a_region_selection() {
+        let mut app = app_with_layers(1);
+        assert!(app.selection_mask.is_none());
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        app.refine_selection_edges(&ctx, 2);
+        assert!(app.selection_mask.is_none(), "sans sélection par région, rien à affiner");
     }
 
     #[test]

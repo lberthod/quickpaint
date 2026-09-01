@@ -909,7 +909,13 @@ fn selection_mask_dialog_window(ctx: &egui::Context, app: &mut PaintApp) {
         crate::app::SelectionMaskAction::Feather => t("Contour progressif", "Feather"),
         crate::app::SelectionMaskAction::Dilate => t("Dilater la sélection", "Dilate selection"),
         crate::app::SelectionMaskAction::Contract => t("Contracter la sélection", "Contract selection"),
+        crate::app::SelectionMaskAction::RefineEdges => t("Améliorer les bords", "Refine edges"),
     };
+    // Portée du rayon différente pour l'amélioration des bords : c'est une
+    // fenêtre d'échantillonnage de texture locale (`local_luma_variance`),
+    // pas un nombre de pixels de dilatation/contour — une grande valeur y
+    // est coûteuse et peu utile, contrairement à Feather/Dilate/Contract.
+    let range = if action == crate::app::SelectionMaskAction::RefineEdges { 1.0..=8.0 } else { 1.0..=60.0 };
     egui::Window::new(title)
         .open(&mut open)
         .collapsible(false)
@@ -917,9 +923,15 @@ fn selection_mask_dialog_window(ctx: &egui::Context, app: &mut PaintApp) {
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             ui.set_min_width(260.0);
+            if action == crate::app::SelectionMaskAction::RefineEdges {
+                ui.label(t(
+                    "Durcit le bord dans les zones texturées (feuillage, cheveux…), le laisse doux dans les zones plates.",
+                    "Hardens the edge in textured areas (foliage, hair…), leaves it soft in flat areas.",
+                ));
+            }
             ui.horizontal(|ui| {
                 ui.label(t("Rayon (px) :", "Radius (px):"));
-                ui.add(egui::Slider::new(&mut radius, 1.0..=60.0));
+                ui.add(egui::Slider::new(&mut radius, range));
             });
             ui.separator();
             ui.horizontal(|ui| {
@@ -936,6 +948,7 @@ fn selection_mask_dialog_window(ctx: &egui::Context, app: &mut PaintApp) {
             crate::app::SelectionMaskAction::Feather => app.feather_selection(radius),
             crate::app::SelectionMaskAction::Dilate => app.dilate_selection(radius.round() as i32),
             crate::app::SelectionMaskAction::Contract => app.contract_selection(radius.round() as i32),
+            crate::app::SelectionMaskAction::RefineEdges => app.refine_selection_edges(ctx, radius.round() as i32),
         }
         app.selection_mask_dialog = None;
     } else if cancel || !open {
@@ -1571,6 +1584,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                     }
                     if ui.button(t("Contracter…", "Contract…")).clicked() {
                         app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::Contract, 4.0));
+                        ui.close_menu();
+                    }
+                    if ui.button(t("Améliorer les bords…", "Refine edges…")).clicked() {
+                        app.selection_mask_dialog = Some((crate::app::SelectionMaskAction::RefineEdges, 2.0));
                         ui.close_menu();
                     }
                 });

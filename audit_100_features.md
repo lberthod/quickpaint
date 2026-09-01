@@ -7,7 +7,7 @@ lecture de code**, puis confrontées au code réel de QuickPaint par lecture
 directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 **✅ Implémenté** · **🟡 Partiel** · **❌ Absent**.
 
-**Score global : 65 ✅ / 9 🟡 / 26 ❌ sur 100 — mis à jour le 30 août 2026 (BMP #1, soulignement #61, Unsharp Mask #68 corrigés ; initialement 62/12/26).**
+**Score global : 66 ✅ / 8 🟡 / 26 ❌ sur 100 — mis à jour le 1er septembre 2026 (BMP #1, soulignement #61, Unsharp Mask #68, Refine Edge #38 corrigés ; initialement 62/12/26).**
 
 ---
 
@@ -56,7 +56,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 29 | Alignement/répartition de calques | ✅ | [app/layers_ops.rs:20,116](src/app/layers_ops.rs:20) |
 | 30 | Fusion/aplatissement de calques | ✅ | `flatten()`/`merge_down()`, annulables |
 
-## 4. Sélection — 5 ✅ / 2 🟡 / 1 ❌
+## 4. Sélection — 6 ✅ / 1 🟡 / 1 ❌
 
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
@@ -67,7 +67,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 35 | Opérations d'ensemble (add/subtract/intersect) | ✅ | `enum SelectionCombine` |
 | 36 | Masque de sélection en pixels | ✅ | `feather`/`dilate`/`erode`, [tools/selection_mask.rs:116-154](src/tools/selection_mask.rs:116) |
 | 37 | Détourage automatique par IA | ❌ | Le détourage existant est un flood-fill classique, pas un modèle IA |
-| 38 | Amélioration des bords (Refine Edge) | 🟡 | `refine_edges` câblé seulement au détourage du pot de peinture, pas un panneau générique |
+| 38 | Amélioration des bords (Refine Edge) | ✅ *(corrigé le 1er septembre 2026)* | `bucket::refine_edges` généralisé via `PaintApp::refine_selection_edges`, menu Édition ▸ Masque de sélection ▸ Améliorer les bords… |
 
 ## 5. Peinture & Dessin — 9 ✅ / 1 🟡 / 0 ❌
 
@@ -261,7 +261,7 @@ marque) et mérite une prudence particulière avant tout développement.
 | 61 | ✅ Soulignement de texte — corrigé (30 août 2026) | `TextItem::underline` + rendu (egui `Stroke` sur le remplissage central en live, bandeau blitté manuellement dans le compositeur CPU — tracé une seule fois, pas par passe), bouton dans la barre (icône Phosphor `TEXT_A_UNDERLINE`), presse-papiers de style mis à jour. **Bonus trouvé en implémentant** : le hash d'invalidation du cache de composition (`layer_hash`) oubliait déjà italique/interligne/espacement/police système/ombre depuis le Sprint Q — corrigé au passage (même catégorie de bug, même fonction). 3 tests ajoutés (2 unitaires + 1 bout-en-bout prouvant le blit réel). |
 | 87, 88 | Perspective / redressement d'horizon par manipulation directe | Le calcul (homographie 4 points, redressement) existe déjà, seule l'UI est indirecte (sliders au lieu de poignées glissables sur l'image) — amélioration UI pure, pas un nouvel algorithme |
 | 34 | Sélection par plage de couleurs | Le mode « Global » de la baguette magique fait déjà l'essentiel — l'exposer/le renommer explicitement comme fonctionnalité dédiée serait presque gratuit |
-| 38 | Amélioration des bords de sélection | `refine_edges` existe déjà mais seulement câblé au détourage du pot de peinture — le généraliser à un panneau de sélection réutiliserait le code existant |
+| 38 | ✅ Amélioration des bords de sélection — corrigé (1er septembre 2026) | Nouvelle méthode `PaintApp::refine_selection_edges` (rend le document composé, applique `bucket::refine_edges` au masque de sélection), intégrée au dialogue partagé feather/dilater/contracter (4e action `SelectionMaskAction::RefineEdges`) avec une portée de rayon dédiée (fenêtre de texture, pas un nombre de pixels). 2 tests (durcit plus le bord côté texturé que côté plat ; no-op sans sélection par région). |
 | 68 | ✅ Netteté réglable (Unsharp Mask) — corrigé (30 août 2026) | Nouvel `Adjustment::UnsharpMask` en complément de `Filter::Sharpen` (conservé, noyau fixe rapide toujours utile). 4 tests (identité à quantité nulle, no-op sur zone plate, seuil qui épargne les faibles écarts, overshoot caractéristique sur un bord net). |
 | 2 | Import PSD (groupes, masques, texte éditable) | L'essentiel (calques/opacité/blend mode) fonctionne déjà ; étendre à ce qui manque est un prolongement de code existant, pas un nouveau module |
 
