@@ -21,3 +21,19 @@ jobs:
         run: cargo clippy --release -- -D warnings
       - name: Tests
         run: cargo test --release
+
+  # `continue-on-error` : deux advisories réelles (ttf-parser/rustybuzz,
+  # RUSTSEC-2026-0192/0206) sont connues, non corrigibles en amont, et
+  # volontairement laissées visibles ici plutôt que masquées dans
+  # .cargo/audit.toml — décision de visibilité sécurité qui revient au
+  # porteur de projet, pas à retirer silencieusement (audit_septembre.md
+  # P1.10). Ce job ne doit donc jamais faire échouer la CI, seulement
+  # remonter l'état à chaque run.
+  audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
