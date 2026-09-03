@@ -129,8 +129,6 @@ window needed — the model, tools and history layers are UI-independent).
   a technical/robustness audit, a UI/UX expert review, and a 100-feature
   comparison against Canva/Photoshop/Illustrator/GIMP (what's implemented,
   partial, or absent, with code references).
-- [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md) — Mac App Store
-  sandbox validation notes.
 - In-app: **About ▸ Tool documentation** — a reference window covering every
   tool and the project's design philosophy, in French.
 

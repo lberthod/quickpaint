@@ -138,12 +138,13 @@ système au démarrage, préférence persistée. Arbitrage assumé : optimal pou
 Le DMG signé/notarisé est publié via les GitHub Releases.
 
 Piste Mac App Store envisagée puis écartée (30 août 2026 — distribution
-Developer ID/DMG uniquement, voir `previous_audit.md` §2) : les entitlements
-App Sandbox minimaux dans [packaging/QuickPaint.entitlements](packaging/QuickPaint.entitlements)
-(sandbox + accès fichiers via les panneaux natifs `rfd`, aucune entitlement
-réseau), validés par signature ad-hoc et un diagnostic embarqué
-(`quickpaint --sandbox-selftest`) — détail dans
-[packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md).
+Developer ID/DMG uniquement, voir `previous_audit.md` §2). Les entitlements
+App Sandbox correspondants ont été retirés du bundle début septembre
+(audit_septembre.md P0.5) : l'App Sandbox cassait *Ouvrir récent* (les
+chemins persistés dans `settings.json` ne sont pas des security-scoped
+bookmarks, seule forme d'accès qui survit d'une session à l'autre sous
+sandbox) et n'apportait rien hors App Store. Signature Developer ID avec
+hardened runtime (`--options runtime`) uniquement, sans `--entitlements`.
 
 ## 9. Contraintes produit (non négociables)
 

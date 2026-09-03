@@ -55,13 +55,17 @@ PLIST
 #   PUIS le bundle (Apple déconseille --deep).
 # Sinon : signature ad-hoc, suffisante en local (Gatekeeper exigera quand même
 #   « clic droit → Ouvrir » sur une autre machine).
+#
+# Pas d'--entitlements : distribution Developer ID uniquement (décision du
+# 30 août 2026, plus d'App Store visé — audit_septembre.md P0.5). L'App
+# Sandbox cassait « Ouvrir récent » (settings.json garde des chemins bruts,
+# jamais de security-scoped bookmark) — pas nécessaire hors App Store, et le
+# hardened runtime (--options runtime) suffit pour la notarisation.
 if [[ -n "${SIGN_IDENTITY:-}" ]]; then
   echo "▸ Signature Developer ID : $SIGN_IDENTITY"
   codesign --force --options runtime --timestamp \
-    --entitlements packaging/QuickPaint.entitlements \
     --sign "$SIGN_IDENTITY" "$APP/Contents/MacOS/$BIN"
   codesign --force --options runtime --timestamp \
-    --entitlements packaging/QuickPaint.entitlements \
     --sign "$SIGN_IDENTITY" "$APP"
   codesign --verify --strict --verbose=2 "$APP"
 else
