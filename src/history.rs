@@ -195,6 +195,31 @@ impl Command {
             Command::PaintRaster { op: RasterOp::Smudge, .. } => t("Estompe", "Smudge"),
         }
     }
+
+    /// Octets approximatifs retenus par cette commande — seules les
+    /// variantes qui gardent des pixels comptent (les deltas vectoriels
+    /// sont négligeables) ; sert au plafond mémoire de l'historique
+    /// (`History::evict`, plan_implementation.md étape 6).
+    fn approx_bytes(&self) -> usize {
+        match self {
+            Command::SetDoc { before, after, .. } => before.approx_bytes() + after.approx_bytes(),
+            Command::Clear { previous_raster, .. } => previous_raster.approx_bytes(),
+            Command::PaintRaster { tiles, .. } => tiles
+                .iter()
+                .map(|(_, before, after)| {
+                    before.as_ref().map_or(0, |t| t.px.len()) + after.as_ref().map_or(0, |t| t.px.len())
+                })
+                .sum(),
+            Command::SetLayers { before, after, .. } => {
+                before.iter().map(Layer::approx_bytes).sum::<usize>() + after.iter().map(Layer::approx_bytes).sum::<usize>()
+            }
+            Command::AddLayer { layer, .. } | Command::RemoveLayer { layer, .. } => layer.approx_bytes(),
+            Command::AddImage { image, .. } => image.rgba.len(),
+            Command::DeleteImage { removed, .. } => removed.iter().map(|(_, im)| im.rgba.len()).sum(),
+            Command::ReplaceImage { before, after, .. } => before.rgba.len() + after.rgba.len(),
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -206,6 +231,13 @@ pub struct History {
 }
 
 impl History {
+    /// Budget mémoire approximatif de la pile `undo` (voir `evict`).
+    const MAX_BYTES: usize = 768 * 1024 * 1024;
+    /// Nombre maximal de commandes conservées, indépendamment de leur poids
+    /// (une longue session de petits traits vectoriels ne doit pas non plus
+    /// grossir indéfiniment).
+    const MAX_LEN: usize = 500;
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -235,6 +267,14 @@ impl History {
         self.undo.len()
     }
 
+    /// Octets approximatifs actuellement retenus par `undo` — pour vérifier
+    /// le plafond mémoire (`evict`) depuis les tests, pas un indicateur
+    /// destiné à l'UI.
+    #[cfg(test)]
+    fn approx_bytes_used(&self) -> usize {
+        self.undo.iter().map(Command::approx_bytes).sum()
+    }
+
     /// Va à un état précis de la frise (undo/redo répétés).
     pub fn goto(&mut self, doc: &mut Document, target: usize) {
         while self.undo.len() > target {
@@ -258,7 +298,28 @@ impl History {
         self.undo.push(cmd);
         self.redo.clear();
         self.rev = self.rev.wrapping_add(1);
+        self.evict();
         moved
+    }
+
+    /// Plafond mémoire de l'historique : au-delà, les commandes les plus
+    /// anciennes sont oubliées (plus annulables) — sans ça, un `SetDoc`
+    /// (redimensionner l'image/le canevas, retourner, redresser) boxe deux
+    /// clones complets du document à chaque appel, et rien ne borne le
+    /// nombre de commandes accumulées sur une longue session
+    /// (audit_septembre.md P1.7). Garde toujours au moins une commande, pour
+    /// ne jamais empêcher un undo unique même si elle dépasse seule le
+    /// budget.
+    fn evict(&mut self) {
+        let mut total: usize = self.undo.iter().map(Command::approx_bytes).sum();
+        let mut drop = 0;
+        while self.undo.len() - drop > 1 && (self.undo.len() - drop > Self::MAX_LEN || total > Self::MAX_BYTES) {
+            total -= self.undo[drop].approx_bytes();
+            drop += 1;
+        }
+        if drop > 0 {
+            self.undo.drain(..drop);
+        }
     }
 
     /// Renvoie `true` si l'opération a modifié de la géométrie existante.
@@ -959,5 +1020,49 @@ mod tests {
         let mut h = History::new();
         h.push(&mut doc, Command::AddStroke { layer: 999, stroke: s() });
         assert_eq!(doc.layers[0].strokes.len(), 0);
+    }
+
+    #[test]
+    fn history_len_is_capped() {
+        let mut doc = Document::new((100, 100));
+        let id = doc.active_id();
+        let mut h = History::new();
+        for _ in 0..(History::MAX_LEN + 50) {
+            h.push(&mut doc, Command::AddStroke { layer: id, stroke: s() });
+        }
+        assert_eq!(h.position(), History::MAX_LEN);
+    }
+
+    /// Document synthétique avec `n` tuiles peintes (~`n × 256 Ko`), pour
+    /// dépasser le budget mémoire de l'historique sans peindre pour de vrai.
+    fn document_with_tiles(n: usize) -> Document {
+        let mut doc = Document::new((10, 10));
+        let sz = (crate::model::raster::TILE * crate::model::raster::TILE * 4) as usize;
+        let tiles = (0..n as i32).map(|i| ((i, 0), crate::model::raster::Tile { px: vec![0u8; sz].into_boxed_slice() })).collect();
+        doc.layers[0].raster = crate::model::raster::RasterLayer { tiles };
+        doc
+    }
+
+    /// Coûteux (alloue environ 1 Go au total) — `#[ignore]`, comme les
+    /// autres tests de performance/mémoire du crate (voir
+    /// `cargo test --release -- --ignored`).
+    #[test]
+    #[ignore]
+    fn set_doc_snapshots_are_evicted_by_byte_budget() {
+        let mut doc = Document::new((10, 10));
+        let mut h = History::new();
+        // ~800 tuiles × 256 Ko ≈ 200 Mo par commande (before seul ; after
+        // reste un document vide, le point testé est l'éviction, pas un
+        // redimensionnement réaliste).
+        for _ in 0..5 {
+            let before = Box::new(document_with_tiles(800));
+            h.push(&mut doc, Command::SetDoc { before, after: Box::new(Document::new((10, 10))), label: "Test" });
+        }
+        assert!(
+            h.approx_bytes_used() <= History::MAX_BYTES,
+            "budget dépassé : {} octets retenus",
+            h.approx_bytes_used()
+        );
+        assert!(h.can_undo(), "la commande la plus récente doit rester annulable");
     }
 }

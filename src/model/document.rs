@@ -284,6 +284,18 @@ impl Layer {
             t.z = z;
         }
     }
+
+    /// Octets approximatifs retenus par le contenu décodé du calque (tuiles
+    /// peintes, masque peint, pixels d'image, points de trait) — sert au
+    /// plafond mémoire de l'historique (`history.rs`,
+    /// plan_implementation.md étape 6).
+    pub fn approx_bytes(&self) -> usize {
+        self.raster.approx_bytes()
+            + self.mask.as_ref().map(crate::model::raster::RasterLayer::approx_bytes).unwrap_or(0)
+            + self.images.iter().map(|im| im.rgba.len()).sum::<usize>()
+            + self.strokes.iter().map(|s| s.points.len() * std::mem::size_of::<crate::model::stroke::StrokePoint>()).sum::<usize>()
+            + self.texts.iter().map(|t| t.text.len()).sum::<usize>()
+    }
 }
 
 impl Layer {
@@ -483,6 +495,16 @@ impl Document {
     /// `true` si le document a plus d'une frame d'animation.
     pub fn is_animated(&self) -> bool {
         self.frames.len() > 1
+    }
+
+    /// Octets approximatifs retenus par tout le contenu décodé du document —
+    /// `layers` (frame active) ET `frames` (les autres frames d'animation,
+    /// sinon un document animé multi-Go passerait inaperçu). Sert au
+    /// plafond mémoire de l'historique (`history.rs`,
+    /// plan_implementation.md étape 6).
+    pub fn approx_bytes(&self) -> usize {
+        self.layers.iter().map(Layer::approx_bytes).sum::<usize>()
+            + self.frames.iter().flat_map(|f| f.layers.iter()).map(Layer::approx_bytes).sum::<usize>()
     }
 
     /// Id du calque actif.

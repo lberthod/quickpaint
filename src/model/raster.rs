@@ -71,6 +71,13 @@ impl RasterLayer {
         self.tiles.is_empty()
     }
 
+    /// Octets approximatifs occupés par les tuiles décodées — sert au
+    /// plafond mémoire de l'historique (`history.rs`, plan_implementation.md
+    /// étape 6), pas une mesure exacte (ignore le surcoût de `HashMap`).
+    pub fn approx_bytes(&self) -> usize {
+        self.tiles.len() * (TILE as usize) * (TILE as usize) * 4
+    }
+
     fn tile_of(x: i32, y: i32) -> TileKey {
         (x.div_euclid(TILE), y.div_euclid(TILE))
     }
