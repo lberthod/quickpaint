@@ -11,7 +11,7 @@ use egui::Color32;
 
 impl PaintApp {
     /// Rendu du document à sa résolution native pour l'export (roadmap
-    /// ANALYSE.md §12.2) — via le compositeur, jamais via une capture d'écran
+    /// previous_audit.md (ex-ANALYSE) §12.2) — via le compositeur, jamais via une capture d'écran
     /// du viewport : la résolution exportée est toujours `doc.size`, quels
     /// que soient le zoom et la taille de la fenêtre à l'écran.
     fn render_for_export(&mut self, ctx: &egui::Context) -> Option<(u32, u32, Vec<u8>)> {

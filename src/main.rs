@@ -52,7 +52,7 @@ fn main() -> eframe::Result<()> {
         // winit installe par défaut son propre menu ⌘ minimal (À propos/
         // Masquer/Quitter, nom de process brut) sur `applicationDidFinishLaunching`
         // — *après* `PaintApp::new`, donc il écrase silencieusement le nôtre
-        // (`native_menu::install`, UIX_ANALYSE.md U1) si on ne le désactive pas ici.
+        // (`native_menu::install`, previous_audit.md (ex-UIX_ANALYSE) U1) si on ne le désactive pas ici.
         #[cfg(target_os = "macos")]
         event_loop_builder: Some(Box::new(|builder| {
             use winit::platform::macos::EventLoopBuilderExtMacOS;

@@ -60,7 +60,7 @@ pub fn save_to_path(doc: &Document, path: &std::path::Path) -> Result<(), String
 /// `None` : dialogue annulé par l'utilisateur (pas une erreur).
 /// `Some((path, Err(message)))` : fichier illisible, JSON invalide, version
 /// de format trop récente, ou dimensions hors bornes — message localisé prêt
-/// à afficher (ANALYSE.md §8.2 : plus d'échec silencieux au chargement).
+/// à afficher (previous_audit.md (ex-ANALYSE) §8.2 : plus d'échec silencieux au chargement).
 /// `Some((path, Ok(doc)))` : succès. Le chemin est toujours renvoyé (succès
 /// ou échec) pour que l'appelant puisse alimenter/nettoyer les fichiers
 /// récents (UX-4.3).
@@ -105,7 +105,7 @@ type ImagePixels = (u32, u32, Vec<u8>);
 /// Sélecteur d'image ; renvoie `(largeur, hauteur, pixels RGBA)`.
 ///
 /// Mêmes conventions que [`open_dialog`] : `None` = annulé, `Some(Err(_))` =
-/// fichier invalide ou dimensions hors bornes (ANALYSE.md §8.2), `Some(Ok(_))`
+/// fichier invalide ou dimensions hors bornes (previous_audit.md (ex-ANALYSE) §8.2), `Some(Ok(_))`
 /// = succès.
 pub fn import_image_dialog() -> Option<Result<ImagePixels, String>> {
     let path = rfd::FileDialog::new()

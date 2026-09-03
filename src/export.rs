@@ -1,6 +1,6 @@
 //! Export bitmap. Le document est rendu à sa résolution **native** via le
 //! compositeur tiny-skia ([`render::compositor::Compositor::render_to_rgba`],
-//! roadmap ANALYSE.md §12.2) — plus de dépendance à une capture d'écran du
+//! roadmap previous_audit.md (ex-ANALYSE) §12.2) — plus de dépendance à une capture d'écran du
 //! viewport, donc plus de perte de résolution liée au zoom ou à la taille de
 //! la fenêtre. Ce module se contente d'encoder le buffer RGBA reçu au format
 //! choisi : PNG, JPG, WebP, GIF (statique ou animé) ou PDF (mono-page).

@@ -1,6 +1,6 @@
 //! Transformation interactive de la sélection (échelle / rotation par les
 //! poignées de la boîte englobante), extraite de `app` en sous-module
-//! (SPRINTS.md 13.8, suite du découpage commencé en ANALYSE.md §12.5) : un
+//! (journal git (ex-SPRINTS.md) 13.8, suite du découpage commencé en previous_audit.md (ex-ANALYSE) §12.5) : un
 //! sous-système autonome (poignées, glissé, aperçu, undo) qui ne partage que
 //! `Document`/`Command::Scale`/`Command::Rotate` avec le reste de l'application.
 //!

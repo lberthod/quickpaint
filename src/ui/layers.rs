@@ -179,7 +179,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         // pourrait dater d'une frame précédente) et une zone de dépôt ; un
         // dépôt sur la ligne du calque `layer_id` l'y déplace. Avant, seuls
         // les boutons ▲ Monter / ▼ Descendre existaient (un clic par
-        // position à franchir, constat C5, UX_SPRINTS.md).
+        // position à franchir, constat C5, journal git (ex-UX_SPRINTS.md)).
         let layer_id = layer.id;
         let row_id = egui::Id::new("layer_row").with(layer_id);
         let frame = egui::Frame::default().inner_margin(2.0);
@@ -813,7 +813,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
     // vivaient ici avant UX-3.4 — déplacées dans la barre d'options de
     // l'outil Sélection (`toolbar::options_row`), qui n'apparaît que
     // pertinent : ce panneau ne porte plus que des actions sur des calques
-    // (constat C6, UX_SPRINTS.md).
+    // (constat C6, journal git (ex-UX_SPRINTS.md)).
 
     // --- Liste des éléments du calque actif (voir / sélectionner) -----------
     ui.separator();

@@ -609,7 +609,7 @@ fn style_presets_window(ctx: &egui::Context, app: &mut PaintApp) {
             // Bouton de fermeture explicite (UX-5.2) : cohérence avec les
             // autres fenêtres modales du projet, qui offrent toutes croix
             // *et* bouton plutôt qu'un mélange des deux (constat relevé en
-            // auditant les 5 fenêtres, UX_SPRINTS.md).
+            // auditant les 5 fenêtres, journal git (ex-UX_SPRINTS.md)).
             ui.separator();
             if ui.button(t("Fermer", "Close")).clicked() {
                 app.show_style_presets = false;
@@ -1482,7 +1482,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             // Fichiers récents (UX-4.3) : avant, rouvrir le projet d'hier
             // repartait toujours d'un dialogue de fichiers vide (constat C10,
-            // UX_SPRINTS.md), alors que settings.json persiste déjà d'autres
+            // journal git (ex-UX_SPRINTS.md)), alors que settings.json persiste déjà d'autres
             // préférences locales de la même façon.
             let recent = crate::i18n::load_recent_projects();
             ui.add_enabled_ui(!recent.is_empty(), |ui| {
@@ -1800,7 +1800,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             // racine (UX-5.3) : ces actions portent sur la sélection, comme
             // « Disposition » juste au-dessus — les regrouper réduit le
             // nombre de menus de premier niveau (9 → 8) plutôt que de les
-            // laisser dispersés (décision documentée dans UX_SPRINTS.md,
+            // laisser dispersés (décision documentée dans journal git (ex-UX_SPRINTS.md),
             // item UX-5.3 : fusion dans Édition retenue plutôt qu'un
             // troisième menu « Objet »).
             ui.menu_button(t("Aligner", "Align"), |ui| {
@@ -2070,7 +2070,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             // Couleur de fond du document (UX-4.2) : propriété du document,
             // pas de l'outil actif — vivait avant dans la barre d'options,
             // invisible dès qu'un outil autre que peinture était actif
-            // (constat C8, UX_SPRINTS.md).
+            // (constat C8, journal git (ex-UX_SPRINTS.md)).
             ui.horizontal(|ui| {
                 ui.label(t("Fond du document :", "Document background:"));
                 let mut bg = [app.bg.r(), app.bg.g(), app.bg.b()];
@@ -2200,7 +2200,7 @@ fn tool_group_label(gi: usize) -> &'static str {
 
 /// Barre d'outils regroupée par catégorie, repliable (UX-2.1) : avant, 29
 /// outils s'affichaient toujours à plat et débordaient sur une deuxième
-/// rangée quasi vide (constat C3, UX_SPRINTS.md). Navigation/Dessin/Plume &
+/// rangée quasi vide (constat C3, journal git (ex-UX_SPRINTS.md)). Navigation/Dessin/Plume &
 /// Texte restent toujours visibles ; Retouche photo/Effets locaux/
 /// Composition démarrent repliés (état persisté). La famille Formes utilise
 /// un sélecteur secondaire dédié (`shape_family_selector`, UX-2.2) plutôt
@@ -2683,7 +2683,7 @@ fn font_family_picker(ui: &mut Ui, app: &mut PaintApp) -> bool {
 /// Actions sur les éléments sélectionnés — ordre (z-order), alignement des
 /// images, recadrage — dans la barre d'options de l'outil Sélection (UX-3.4).
 /// Vivaient avant dans le panneau des calques, qui n'a désormais plus que
-/// des actions sur des calques (constat C6, UX_SPRINTS.md).
+/// des actions sur des calques (constat C6, journal git (ex-UX_SPRINTS.md)).
 fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
     use crate::app::ZMove;
     ui.separator();

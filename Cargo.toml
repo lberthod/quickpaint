@@ -21,9 +21,12 @@ egui = { version = "0.29", features = ["accesskit"] }
 egui-phosphor = { version = "0.7", features = ["fill"] }
 # Encodage images pour l'export (PNG/JPG/WebP/GIF). default-features off = build léger.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff", "gif", "bmp"] }
-# Encodage APNG animé (Sprint T, point 100a) : la crate `png` est déjà dans
-# l'arbre via `image`, on l'expose directement pour son API d'animation
-# (set_animated/set_frame_delay), que `image` ne ré-exporte pas.
+# Encodage APNG animé (Sprint T, point 100a) : exposée directement pour son
+# API d'animation (set_animated/set_frame_delay), que `image` ne ré-exporte
+# pas. `image` 0.25.10 tire `png` 0.18 de son côté, mais `tiny-skia` reste
+# sur cette branche 0.17 — les deux versions sont donc compilées en
+# parallèle (voir `cargo tree -i png@0.18.1`) ; à réaligner quand
+# `tiny-skia` suivra.
 png = "0.17"
 # Sauvegarde / ouverture de projet vectoriel (.json, étape 7).
 serde = { version = "1", features = ["derive"] }
@@ -50,7 +53,7 @@ muda = "0.19"
 # le même type d'`EventLoopBuilder`.
 winit = { version = "0.30", default-features = false }
 usvg = "0.47.0"
-# Extraction de contours de glyphes pour « Texte → tracés » (audit_100_features.md
+# Extraction de contours de glyphes pour « Texte → tracés » (previous_audit.md
 # #64) — déjà dans l'arbre transitivement via usvg/fontdb, ici en dépendance
 # directe pour pouvoir l'utiliser depuis notre propre code. Version alignée
 # sur celle déjà verrouillée par la chaîne usvg pour ne pas dupliquer.

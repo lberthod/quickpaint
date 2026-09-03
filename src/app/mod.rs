@@ -25,7 +25,7 @@ mod bucket_cutout;
 // T3.1-T3.9) : un seul point d'entrée pour l'interaction souris/trackpad.
 mod canvas_input;
 // Édition de nœuds Bézier après coup (roadmap P2 #12) — extrait en sous-module
-// (ANALYSE.md §12.5) : sous-système autonome (état + geste + rendu) qui ne
+// (previous_audit.md (ex-ANALYSE) §12.5) : sous-système autonome (état + geste + rendu) qui ne
 // partage que `Document`/`Stroke` avec le reste de `app`.
 // Import de fichiers (image/PSD/SVG/tampon de brosse), presse-papiers, et
 // persistance de projet (sauvegarde/ouverture/récents) — extrait en
@@ -59,7 +59,7 @@ mod raster_paint;
 // d'évènements qui route vers des actions déjà définies ailleurs.
 mod shortcuts;
 // Transformation interactive de la sélection (échelle/rotation) — extrait en
-// sous-module (SPRINTS.md 13.8, suite d'ANALYSE.md §12.5) pour la même raison
+// sous-module (journal git (ex-SPRINTS.md) 13.8, suite de previous_audit.md (ex-ANALYSE) §12.5) pour la même raison
 // que `pen_edit` : état + geste + rendu autonomes, undo dédié.
 mod transform;
 
@@ -77,7 +77,7 @@ use std::collections::HashSet;
 use transform::TransformDrag;
 
 /// Borne des dimensions de document à `model::image::MAX_IMAGE_SIDE`
-/// (ANALYSE.md §8.2) — nouveau document, redimensionnement d'image ou de
+/// (previous_audit.md (ex-ANALYSE) §8.2) — nouveau document, redimensionnement d'image ou de
 /// canevas : aucune de ces entrées utilisateur ne doit pouvoir déclencher une
 /// allocation sans limite.
 fn clamp_doc_dims(w: u32, h: u32) -> (u32, u32) {
@@ -370,7 +370,7 @@ pub struct PaintApp {
     pub collapsed_toolbar_groups: HashSet<String>,
     /// Largeur du panneau des calques (UX-3.2), persistée localement. Avant,
     /// le panneau était figé à 170px (`resizable(false)`) — un nom de calque
-    /// long était tronqué sans recours (constat C5, UX_SPRINTS.md).
+    /// long était tronqué sans recours (constat C5, journal git (ex-UX_SPRINTS.md)).
     pub layers_panel_width: f32,
     /// Panneau des presets de style ouvert ?
     pub show_style_presets: bool,
@@ -660,7 +660,7 @@ pub struct PaintApp {
     /// Un fichier de récupération d'une session précédente a été détecté au
     /// démarrage : propose à l'utilisateur de le restaurer ou de l'ignorer.
     pub show_recovery_prompt: bool,
-    /// Identifiants du menu ⌘ natif (UIX_ANALYSE.md U1) installés par
+    /// Identifiants du menu ⌘ natif (previous_audit.md (ex-UIX_ANALYSE) U1) installés par
     /// `PaintApp::new` — absent des instances de test (`Default`), qui ne
     /// tournent pas dans un vrai processus AppKit.
     native_edit_menu: Option<crate::native_menu::EditMenuIds>,
@@ -2499,7 +2499,7 @@ impl PaintApp {
     // Seuls points d'écriture de `status`/`status_error` — un message
     // d'échec (fichier corrompu, dimensions refusées, export impossible…)
     // s'affiche désormais en rouge dans le footer au lieu du même vert
-    // qu'un succès (constat C2, UX_SPRINTS.md).
+    // qu'un succès (constat C2, journal git (ex-UX_SPRINTS.md)).
 
     /// Message neutre/succès (vert dans le footer).
     pub fn info(&mut self, msg: impl Into<String>) {
@@ -3816,7 +3816,7 @@ impl PaintApp {
     /// Menu contextuel (clic droit) sur le canevas (UX-3.5) : avant, aucune
     /// des actions ci-dessous n'était accessible autrement qu'en mémorisant
     /// un raccourci clavier ou en ouvrant le menu du haut (constat C7,
-    /// UX_SPRINTS.md), alors qu'elles existent déjà comme fonctions. Un clic
+    /// journal git (ex-UX_SPRINTS.md)), alors qu'elles existent déjà comme fonctions. Un clic
     /// droit sur un élément non sélectionné le sélectionne d'abord (comme le
     /// clic gauche), pour que le menu porte toujours sur ce qu'on vient de
     /// désigner plutôt que sur une sélection potentiellement obsolète.

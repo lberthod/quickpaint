@@ -1,11 +1,11 @@
-//! Barre de menu macOS native (`NSMenu`) — UIX_ANALYSE.md §2 C1 / Épic U1.
+//! Barre de menu macOS native (`NSMenu`) — previous_audit.md (ex-UIX_ANALYSE) §2 C1 / Épic U1.
 //!
 //! `ui/toolbar.rs` garde ses `egui::menu_button` (Fichier/Calque/Sélection/
 //! Vue/Aide) : ce module ajoute en parallèle ce qu'un utilisateur macOS
 //! s'attend à trouver au même endroit que dans toute autre app AppKit — le
 //! menu ⌘ à gauche du Dock (À propos, Services, Quitter) et un menu Édition
 //! basique — sans réécrire le chrome existant (cf. risque documenté dans
-//! UIX_ANALYSE.md §8).
+//! previous_audit.md (ex-UIX_ANALYSE) §8).
 //!
 //! Annuler/Rétablir/Couper/Copier/Coller sont volontairement des `MenuItem`
 //! ordinaires, pas les `PredefinedMenuItem` correspondants : ces derniers

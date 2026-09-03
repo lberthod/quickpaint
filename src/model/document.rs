@@ -394,7 +394,7 @@ impl Layer {
     }
 }
 
-/// Version du format de fichier `.json` (ANALYSE.md §8.2/§9). Stampée à
+/// Version du format de fichier `.json` (previous_audit.md (ex-ANALYSE) §8.2/§9). Stampée à
 /// `CURRENT_FORMAT_VERSION` à **chaque sauvegarde** (pas seulement à la
 /// création) : un projet rouvert puis resauvegardé reflète toujours la
 /// version du binaire qui l'a écrit. Un projet dont la version dépasse celle

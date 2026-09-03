@@ -807,7 +807,7 @@ pub fn decode(enc: &RasterEncoded) -> RasterLayer {
     let Ok(img) = image::load_from_memory(&bytes) else { return RasterLayer::default() };
     let img = img.to_rgba8();
     let (w, h) = (img.width(), img.height());
-    // Plafond de sécurité (ANALYSE.md §8.2) : un fichier projet corrompu ou
+    // Plafond de sécurité (previous_audit.md (ex-ANALYSE) §8.2) : un fichier projet corrompu ou
     // malveillant peut déclarer des dimensions énormes (decompression bomb) —
     // même garde-fou que `model::image::check_dims` côté import.
     if crate::model::image::check_dims(w, h).is_err() {
@@ -1060,7 +1060,7 @@ mod tests {
         assert_eq!(r2.get_pixel(20, 20), [7, 8, 9, 200]);
     }
 
-    /// Régression sécurité (ANALYSE.md §8.2), même garde-fou que
+    /// Régression sécurité (previous_audit.md (ex-ANALYSE) §8.2), même garde-fou que
     /// `model::image::decode_png_b64` : un calque raster encodé avec une
     /// dimension au-delà de `MAX_IMAGE_SIDE` (fichier projet corrompu ou
     /// malveillant) doit être rejeté plutôt qu'allouer sans plafond.

@@ -1,6 +1,6 @@
 //! Sélection d'éléments (marquee/lasso/baguette) et masque de sélection en
 //! pixels (Sprint H) — extrait de `app` en sous-module (sprint.md T3.1,
-//! suite du découpage commencé en ANALYSE.md §12.5) : les méthodes ne
+//! suite du découpage commencé en previous_audit.md (ex-ANALYSE) §12.5) : les méthodes ne
 //! partagent avec le reste de `app` que `Document`/`ElemGeom`/`SelectionCombine`
 //! et les fonctions libres `hit::*`/`in_bounds`.
 //!

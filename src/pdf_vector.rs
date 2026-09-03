@@ -2,7 +2,7 @@
 //! (`svg.rs`) — traits → chemins PDF, formes pleines → chemin rempli, textes
 //! → objets texte, images → XObject Image (JPEG) — mais en écrivant de vrais
 //! opérateurs de dessin PDF plutôt que des balises SVG. Contrairement à
-//! `export::write_pdf` (roadmap ANALYSE.md §12.2), qui rastérise tout le
+//! `export::write_pdf` (roadmap previous_audit.md (ex-ANALYSE) §12.2), qui rastérise tout le
 //! document en une seule image JPEG, ce module garde le texte et les formes
 //! nets à n'importe quelle résolution d'impression/zoom.
 //!

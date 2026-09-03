@@ -66,7 +66,7 @@ pub enum ActiveTool {
     Pan,
     /// Détourage en un clic (Sprint 9.1) : clic sur le fond à retirer →
     /// flood-fill + adoucissement des bords, écrit dans le masque de calque
-    /// peint (100 % local, sans modèle ni réseau — voir aussi SPRINTS.md 9.2).
+    /// peint (100 % local, sans modèle ni réseau — voir aussi journal git (ex-SPRINTS.md) 9.2).
     Cutout,
     /// Densité - (Sprint 11) : pinceau qui éclaircit progressivement les
     /// pixels de la couche raster sous le curseur.

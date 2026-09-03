@@ -108,7 +108,7 @@ pub(crate) fn encode_png_b64(w: u32, h: u32, rgba: &[u8]) -> Option<String> {
 }
 
 /// Côté maximal accepté pour une image ou un document (projet ouvert, import,
-/// collage, redimensionnement) — audit sécurité (ANALYSE.md §8.2) : sans
+/// collage, redimensionnement) — audit sécurité (previous_audit.md (ex-ANALYSE) §8.2) : sans
 /// plafond, un fichier corrompu ou malveillant peut déclarer des dimensions
 /// énormes (decompression bomb PNG) et faire allouer `w*h*4` octets sans
 /// limite, jusqu'à épuiser la mémoire. 16 384 px de côté couvre tout usage
@@ -163,7 +163,7 @@ fn decode_png_b64(b64: &str) -> Option<(u32, u32, Vec<u8>)> {
 mod tests {
     use super::*;
 
-    /// Régression sécurité (ANALYSE.md §8.2) : une image dont une dimension
+    /// Régression sécurité (previous_audit.md (ex-ANALYSE) §8.2) : une image dont une dimension
     /// dépasse `MAX_IMAGE_SIDE` doit être rejetée plutôt que d'allouer
     /// `w*h*4` octets sans plafond (protection contre une decompression bomb
     /// PNG dans un fichier projet corrompu ou malveillant).

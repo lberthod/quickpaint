@@ -116,7 +116,7 @@ Gatekeeper warning.
 cargo run --release
 ```
 
-Requires a recent stable Rust toolchain. Tests: `cargo test` (211 tests, no
+Requires a recent stable Rust toolchain. Tests: `cargo test` (365 tests, no
 window needed — the model, tools and history layers are UI-independent).
 
 ## Documentation

@@ -92,7 +92,7 @@ impl PaintApp {
         match arboard::Clipboard::new().and_then(|mut c| c.get_image()) {
             Ok(img) => {
                 let (w, h) = (img.width as u32, img.height as u32);
-                // Bornage (ANALYSE.md §8.2) : le presse-papiers est une entrée
+                // Bornage (previous_audit.md (ex-ANALYSE) §8.2) : le presse-papiers est une entrée
                 // externe comme un fichier, à ne pas allouer sans limite.
                 if let Err(e) = crate::model::image::check_dims(w, h) {
                     self.fail(format!("{} : {e}", t("Image du presse-papiers refusée", "Clipboard image rejected")));

@@ -12,6 +12,42 @@ Fait suite à l'audit technique du 12 juillet 2026 (v0.19.0).
 | T2 | `cargo update`, `.cargo/audit.toml` (advisories Linux-only ignorées avec justification) | ✅ Fait |
 | T3 | Découpage de `app/mod.rs` (T3.1-T3.10 : `selection.rs`/`layers_ops.rs`/`io.rs`/`shortcuts.rs`/`raster_paint.rs`/`export_ops.rs`/`canvas_overlay.rs`/`bucket_cutout.rs`/`canvas_input.rs`) + passe `unwrap` | ✅ Fait — 6278 → 4531 lignes. Le seuil initial de < 3000 lignes n'est pas atteint, mais tous les domaines extractibles sans fragmentation artificielle de l'état central (`PaintApp`) l'ont été ; le reste (struct/`Default`/`update()`/`on_exit()`) est le cœur de l'app, pas de la dette. |
 | T4 | Migration egui/eframe 0.29 → 0.34 (branche `egui-upgrade`, non fusionnée) | ◐ Voir ci-dessous |
+| T5 | Livrabilité (audit_septembre.md / plan_implementation.md) | ✅ Fait — voir ci-dessous |
+
+## T5 — état détaillé (audit du 3 septembre 2026)
+
+CI rouge depuis le 20 juillet (38 lints clippy sur rustc 1.98), sauvegarde
+qui perdait le travail non enregistré en silence, bundle encore sandboxé
+malgré la décision du 30 août : détail complet et pointeurs de code dans
+[audit_septembre.md](audit_septembre.md) et
+[plan_implementation.md](plan_implementation.md) (fusionnés dans
+[previous_audit.md](previous_audit.md) une fois la release publiée — voir
+la section « Ce qui n'a PAS besoin d'action » de ce dernier).
+
+- ✅ CI verte (34 `chunks_exact`→`as_chunks`, 2 alias de type, 1 bloc `?`,
+  1 `while let` — mécanique, 0 régression).
+- ✅ Écriture atomique (projet/autosave/settings) + erreur d'enregistrement
+  affichée au lieu d'être confondue avec une annulation.
+- ✅ ⌘S écrit dans le fichier courant, ⌘⇧S = Enregistrer sous, titre de
+  fenêtre reflète le document et son état modifié.
+- ✅ Modale de confirmation avant de perdre un document modifié (fermeture,
+  ⌘Q, menu ⌘, Nouveau, Ouvrir, import PSD/SVG, glisser un fichier).
+- ✅ App Sandbox retirée du bundle Developer ID (cassait *Ouvrir récent*).
+- ✅ Historique plafonné (768 Mo / 500 commandes).
+- ✅ `cargo audit` : 1 vraie vulnérabilité corrigée (`webbrowser`), job CI
+  ajouté (`continue-on-error`, `ttf-parser`/`rustybuzz` restent visibles).
+
+**Non fait, reste ouvert** (voir « Décisions à prendre par le porteur de
+projet » dans plan_implementation.md) :
+- Rebaser/fermer `egui-upgrade` — à faire *après* T5, `app/mod.rs` ayant
+  encore bougé.
+- Test VoiceOver réel (toujours non fait, nécessite un lecteur d'écran actif).
+- Décision produit sur l'écran tactile natif.
+- Décision de visibilité sur `ttf-parser`/`rustybuzz` (`.cargo/audit.toml`).
+- `Command::SwitchFrame` dédié : `switch_animation_frame` reste le
+  `SetDoc` le plus fréquent (à chaque clic sur une frame), clonant tout le
+  document deux fois à chaque fois — viable aujourd'hui (plafond
+  mémoire T5), mais un vrai delta serait plus propre sur un gros document.
 
 ## T4 — état détaillé (branche `egui-upgrade`)
 

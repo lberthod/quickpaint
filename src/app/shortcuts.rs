@@ -7,7 +7,7 @@
 use super::{t, PaintApp, PendingDocAction, ZMove};
 
 impl PaintApp {
-    /// Dépouille les clics du menu Édition natif (UIX_ANALYSE.md U1) et les
+    /// Dépouille les clics du menu Édition natif (previous_audit.md (ex-UIX_ANALYSE) U1) et les
     /// route vers les mêmes méthodes que les raccourcis clavier
     /// (`handle_shortcuts`) — le menu ⌘ macOS n'est qu'une autre entrée vers
     /// les actions déjà existantes, pas un chemin d'exécution séparé.

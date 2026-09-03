@@ -1,7 +1,7 @@
 //! Édition de nœuds Bézier après coup (roadmap P2 #12, F2) : double-clic sur
 //! un trait de plume déjà posé pour rouvrir ses ancres/poignées, les glisser,
 //! puis refermer — avec undo/redo dédié. Extrait de `app` en sous-module
-//! (ANALYSE.md §12.5) : un sous-système autonome (état + geste + rendu) qui
+//! (previous_audit.md (ex-ANALYSE) §12.5) : un sous-système autonome (état + geste + rendu) qui
 //! ne partage que `Document`/`Stroke` avec le reste de l'application.
 //!
 //! Les méthodes sont `pub(super)` : appelées depuis `app` (le module parent),

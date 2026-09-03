@@ -40,7 +40,7 @@
 
 Principe directeur : **le modèle ne sait pas qu'il est affiché**. `model/`,
 `tools/`, `history` et `input/` se testent sans fenêtre — c'est là que vivent
-les ~96 tests unitaires.
+la plupart des quelque 365 tests unitaires du projet (`cargo test`).
 
 ## 2. Modèle de document (hybride vectoriel + raster)
 

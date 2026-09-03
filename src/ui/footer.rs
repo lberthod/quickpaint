@@ -56,7 +56,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         // sinon l'aide raccourcis. Repliée en icône ⓘ si la fenêtre est trop
         // étroite pour afficher le pavé d'aide en entier : les deux blocs se
         // chevauchaient et devenaient illisibles avant ce correctif (constat
-        // C1, UX_SPRINTS.md).
+        // C1, journal git (ex-UX_SPRINTS.md)).
         let remaining = ui.available_width();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &app.status {
             Some(msg) => {
@@ -94,7 +94,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
 /// (remet à 100 %) / `+`, plus un bouton « Ajuster ». Avant, le zoom n'était
 /// réglable qu'en ouvrant le menu Vue (2 clics) ou au clavier — friction
 /// disproportionnée pour un geste aussi fréquent, notamment sur l'origine
-/// tactile du projet (constat C4, UX_SPRINTS.md). Le menu Vue garde les
+/// tactile du projet (constat C4, journal git (ex-UX_SPRINTS.md)). Le menu Vue garde les
 /// mêmes actions (`zoom_in`/`zoom_out`/`reset_view`/`fit_view`) : aucune
 /// régression, juste un deuxième accès plus rapide.
 fn zoom_controls(ui: &mut Ui, app: &mut PaintApp) {

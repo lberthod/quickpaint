@@ -23,7 +23,7 @@ use tiny_skia::{
     PathBuilder, Pixmap, PixmapPaint, Point, RadialGradient, Shader, SpreadMode, Transform,
 };
 
-/// Cache incrémental du contenu peint d'un calque (roadmap ANALYSE.md §12.1) :
+/// Cache incrémental du contenu peint d'un calque (roadmap previous_audit.md (ex-ANALYSE) §12.1) :
 /// un `Pixmap` **persistant** entre les appels, retouché tuile par tuile au
 /// lieu d'être reconstruit en entier à chaque dab. Voir `blit_raster_tiles`.
 struct RasterTileCache {
@@ -115,7 +115,7 @@ impl Compositor {
     }
 
     /// Rendu du document à sa résolution **native** (`doc.size`), pour
-    /// l'export (roadmap ANALYSE.md §12.2). Réutilise le même chemin de
+    /// l'export (roadmap previous_audit.md (ex-ANALYSE) §12.2). Réutilise le même chemin de
     /// composition que l'affichage (calques, modes de fusion, masques,
     /// ajustements, texte) au lieu de dépendre d'une capture d'écran du
     /// viewport — la résolution exportée ne dépend donc plus de la taille de
@@ -1050,7 +1050,7 @@ fn apply_adjustment(
 /// Patch tuile par tuile le cache persistant `cache.pm` pour qu'il reflète
 /// l'état actuel de `raster` — coût proportionnel au nombre de tuiles
 /// **modifiées** depuis le dernier appel, pas à la surface totale peinte.
-/// Roadmap ANALYSE.md §12.1 : remplace l'ancien `raster_content`, qui
+/// Roadmap previous_audit.md (ex-ANALYSE) §12.1 : remplace l'ancien `raster_content`, qui
 /// ré-aplatissait (`RasterLayer::flatten`) puis reconvertissait en
 /// prémultiplié **toute** la boîte englobante peinte à chaque appel — donc à
 /// chaque dab d'un coup de pinceau, même sur un document déjà bien rempli.
@@ -1317,7 +1317,7 @@ mod tests {
         }
     }
 
-    /// Roadmap ANALYSE.md §12.2 : l'export doit rendre le document à sa
+    /// Roadmap previous_audit.md (ex-ANALYSE) §12.2 : l'export doit rendre le document à sa
     /// résolution **native**, jamais celle d'un viewport à l'écran — vérifié
     /// ici en dehors de toute fenêtre (`egui::Context::default()`, pas de
     /// zoom/scale_factor en jeu).
@@ -1423,7 +1423,7 @@ mod tests {
         assert!(rgba.chunks_exact(4).any(|px| px != [255, 255, 255, 255]), "le texte sur courbe devrait marquer des pixels");
     }
 
-    // --- Cache incrémental par tuile (roadmap ANALYSE.md §12.1) -------------
+    // --- Cache incrémental par tuile (roadmap previous_audit.md (ex-ANALYSE) §12.1) -------------
 
     #[test]
     fn blit_raster_tiles_reflects_painted_pixels() {
@@ -1469,7 +1469,7 @@ mod tests {
         assert!(cache.tiles.is_empty());
     }
 
-    /// Mesure de performance (roadmap ANALYSE.md §12.1) — pas une assertion
+    /// Mesure de performance (roadmap previous_audit.md (ex-ANALYSE) §12.1) — pas une assertion
     /// de correction : compare le coût de l'ancien chemin (aplatir +
     /// reconvertir toute la boîte englobante peinte à chaque dab) à celui du
     /// nouveau cache incrémental (ne retoucher que les tuiles modifiées).
