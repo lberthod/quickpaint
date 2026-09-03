@@ -271,7 +271,9 @@ impl Compositor {
 
         let pixels = base
             .data()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|c| Color32::from_rgba_premultiplied(c[0], c[1], c[2], c[3]))
             .collect();
         Some(ColorImage { size: [w as usize, h as usize], pixels })
@@ -497,7 +499,7 @@ fn raster_stroke(pm: &mut Pixmap, stroke: &Stroke) {
         return;
     }
     let mut pb = PathBuilder::new();
-    for tri in mesh.indices.chunks_exact(3) {
+    for tri in mesh.indices.as_chunks::<3>().0 {
         let a = mesh.vertices[tri[0] as usize].pos;
         let b = mesh.vertices[tri[1] as usize].pos;
         let c = mesh.vertices[tri[2] as usize].pos;
@@ -1092,7 +1094,7 @@ fn tile_content_hash(px: &[u8]) -> u64 {
 /// mélanger par-dessus l'ancien contenu du cache.
 fn blit_tile(pm: &mut Pixmap, key: TileKey, tile: &Tile) {
     let mut premul = Vec::with_capacity(tile.px.len());
-    for c in tile.px.chunks_exact(4) {
+    for c in tile.px.as_chunks::<4>().0 {
         let a = c[3] as u16;
         premul.push((c[0] as u16 * a / 255) as u8);
         premul.push((c[1] as u16 * a / 255) as u8);
@@ -1131,7 +1133,7 @@ fn raster_image(pm: &mut Pixmap, im: &ImageItem) {
     }
     // tiny-skia attend du RGBA prémultiplié.
     let mut premul = Vec::with_capacity(im.rgba.len());
-    for c in im.rgba.chunks_exact(4) {
+    for c in im.rgba.as_chunks::<4>().0 {
         let a = c[3] as u16;
         premul.push((c[0] as u16 * a / 255) as u8);
         premul.push((c[1] as u16 * a / 255) as u8);

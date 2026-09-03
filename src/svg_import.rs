@@ -131,12 +131,11 @@ fn path_to_stroke(p: &usvg::Path, opacity: f32, id: u64) -> Option<Stroke> {
         let [r, g, b] = paint_to_rgb(fill.paint());
         let a = (fill.opacity().get() * opacity * 255.0).round().clamp(0.0, 255.0) as u8;
         ([r, g, b, a], 1.0, true)
-    } else if let Some(stroke) = p.stroke() {
+    } else {
+        let stroke = p.stroke()?;
         let [r, g, b] = paint_to_rgb(stroke.paint());
         let a = (stroke.opacity().get() * opacity * 255.0).round().clamp(0.0, 255.0) as u8;
         ([r, g, b, a], stroke.width().get(), false)
-    } else {
-        return None;
     };
     let mut s = Stroke::new(color, base_width.max(0.5), Tool::Brush);
     s.id = id;

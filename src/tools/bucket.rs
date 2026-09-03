@@ -60,7 +60,9 @@ pub fn flood_global(rgba: &[u8], w: usize, h: usize, sx: usize, sy: usize, tol: 
     let i = (sy * w + sx) * 4;
     let target = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
     let d = |a: u8, b: u8| (a as i32 - b as i32).abs();
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| d(c[0], target[0]) <= tol && d(c[1], target[1]) <= tol && d(c[2], target[2]) <= tol && d(c[3], target[3]) <= tol)
         .collect()
 }
@@ -82,7 +84,7 @@ pub fn soft_edge(rgba: &[u8], w: usize, h: usize, sx: usize, sy: usize, tol: i32
     let target = [rgba[i0], rgba[i0 + 1], rgba[i0 + 2], rgba[i0 + 3]];
     let tol_f = (tol.max(1)) as f32;
     let mut out = vec![0u8; w * h];
-    for (idx, px) in rgba.chunks_exact(4).enumerate() {
+    for (idx, px) in rgba.as_chunks::<4>().0.iter().enumerate() {
         if flooded[idx] {
             out[idx] = 255;
             continue;

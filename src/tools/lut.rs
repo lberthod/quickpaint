@@ -78,7 +78,7 @@ impl Lut3D {
 /// (0 = inchangé, 1 = LUT pleine). Alpha non modifié.
 pub fn apply_lut(rgba: &mut [u8], lut: &Lut3D, intensity: f32) {
     let intensity = intensity.clamp(0.0, 1.0);
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let (r, g, b) = (px[0] as f32 / 255.0, px[1] as f32 / 255.0, px[2] as f32 / 255.0);
         let out = lut.sample(r, g, b);
         for c in 0..3 {

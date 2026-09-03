@@ -34,7 +34,9 @@ impl BrushStamp {
     /// Construit un tampon depuis un buffer RGBA8 (import d'image, Sprint J.2).
     pub fn from_rgba(w: u32, h: u32, rgba: &[u8]) -> Self {
         let coverage = rgba
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|px| {
                 let luma = px[0] as f32 * 0.299 + px[1] as f32 * 0.587 + px[2] as f32 * 0.114;
                 (luma * (px[3] as f32 / 255.0)).round().clamp(0.0, 255.0) as u8

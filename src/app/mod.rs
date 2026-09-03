@@ -265,6 +265,14 @@ pub enum SelectionMaskAction {
     RefineEdges,
 }
 
+/// Cache des « fourmis en marche » du masque de sélection : hash de contenu
+/// (invalidation) + boucles de contour en coordonnées document.
+type SelectionAntsCache = (u64, Vec<Vec<(f32, f32)>>);
+
+/// Transformation point à point (coordonnées document) utilisée par la
+/// symétrie miroir/radiale pour dupliquer un trait capturé.
+type PointTransform = Box<dyn Fn((f32, f32)) -> (f32, f32)>;
+
 pub struct PaintApp {
     pub doc: Document,
     pub history: History,
@@ -410,7 +418,7 @@ pub struct PaintApp {
     /// Contours du masque de sélection (Sprint O, point 60 : « fourmis en
     /// marche ») en coordonnées document — même cache par hash de contenu
     /// que la texture de teinte, recalculé au changement du masque seulement.
-    selection_ants: Option<(u64, Vec<Vec<(f32, f32)>>)>,
+    selection_ants: Option<SelectionAntsCache>,
     move_origin: Option<(f32, f32)>,
     move_delta: (f32, f32),
     /// Guides actifs pendant le déplacement en cours (roadmap P1 #8) : lignes
@@ -3789,7 +3797,7 @@ impl PaintApp {
         }
         let center = (self.doc.size.0 as f32 / 2.0, self.doc.size.1 as f32 / 2.0);
         // Chaque copie = une transformation point à point du trait capturé.
-        let transforms: Vec<Box<dyn Fn((f32, f32)) -> (f32, f32)>> = match self.symmetry_mode {
+        let transforms: Vec<PointTransform> = match self.symmetry_mode {
             SymmetryMode::Radial => {
                 let axes = self.symmetry_axes.max(1);
                 (0..axes)
@@ -3799,7 +3807,7 @@ impl PaintApp {
                         Box::new(move |(x, y): (f32, f32)| {
                             let (dx, dy) = (x - center.0, y - center.1);
                             (center.0 + dx * ca - dy * sa, center.1 + dx * sa + dy * ca)
-                        }) as Box<dyn Fn((f32, f32)) -> (f32, f32)>
+                        }) as PointTransform
                     })
                     .collect()
             }
@@ -3818,7 +3826,7 @@ impl PaintApp {
                                 if fx { 2.0 * center.0 - x } else { x },
                                 if fy { 2.0 * center.1 - y } else { y },
                             )
-                        }) as Box<dyn Fn((f32, f32)) -> (f32, f32)>
+                        }) as PointTransform
                     })
                     .collect()
             }

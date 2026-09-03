@@ -2,6 +2,9 @@
 name = "quickpaint"
 version = "0.20.0"
 edition = "2021"
+# slice::as_chunks/as_chunks_mut (tools/filter.rs, render/compositor.rs, etc.),
+# stable depuis 1.88 — voir plan_implementation.md étape 1.
+rust-version = "1.88"
 description = "QuickPaint — éditeur de dessin tactile macOS en Rust (egui)"
 authors = ["Loïc Berthod <https://github.com/lberthod>"]
 homepage = "https://github.com/lberthod/quickpaint"

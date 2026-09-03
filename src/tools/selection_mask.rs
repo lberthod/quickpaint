@@ -223,8 +223,7 @@ pub fn contours(dense: &[u8], w: usize, h: usize) -> Vec<Vec<(f32, f32)>> {
     while let Some((&start, _)) = edges.iter().next() {
         let mut path = vec![(start.0 as f32, start.1 as f32)];
         let mut cur = start;
-        loop {
-            let Some(nexts) = edges.get_mut(&cur) else { break };
+        while let Some(nexts) = edges.get_mut(&cur) {
             let Some(next) = nexts.pop() else { break };
             if nexts.is_empty() {
                 edges.remove(&cur);

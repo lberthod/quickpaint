@@ -517,7 +517,7 @@ fn exposure(rgba: &mut [u8], ev: f32) {
         return;
     }
     let gain = 2f32.powf(ev);
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in px.iter_mut().take(3) {
             *c = (*c as f32 * gain).clamp(0.0, 255.0) as u8;
         }
@@ -532,7 +532,7 @@ fn vibrance(rgba: &mut [u8], amount: f32) {
     if amount.abs() < 1e-4 {
         return;
     }
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let (_, s, _) = rgb_to_hsl(px[0], px[1], px[2]);
         let factor = 1.0 + amount * (1.0 - s);
         let g = luma(px);
@@ -554,7 +554,7 @@ fn white_balance(rgba: &mut [u8], temp: f32, tint: f32) {
     }
     let (dr, db) = (temp * 40.0, -temp * 40.0);
     let (dg, drb) = (tint * 40.0, -tint * 20.0);
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         px[0] = (px[0] as f32 + dr + drb).clamp(0.0, 255.0) as u8;
         px[1] = (px[1] as f32 + dg).clamp(0.0, 255.0) as u8;
         px[2] = (px[2] as f32 + db + drb).clamp(0.0, 255.0) as u8;
@@ -850,7 +850,7 @@ fn radial_blur(src: &[u8], w: usize, h: usize, amount: f32) -> Vec<u8> {
 /// `luma()` (0.299/0.587/0.114) par des poids réglables par canal, façon
 /// « N&B personnalisé » Lightroom. Pas de normalisation forcée des poids.
 fn channel_mixer_bw(rgba: &mut [u8], r: f32, g: f32, b: f32) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let v = (px[0] as f32 * r + px[1] as f32 * g + px[2] as f32 * b).clamp(0.0, 255.0) as u8;
         px[0] = v;
         px[1] = v;
@@ -860,7 +860,7 @@ fn channel_mixer_bw(rgba: &mut [u8], r: f32, g: f32, b: f32) {
 
 /// Duotone (Sprint 5.2) : luminance → interpolation entre `shadow`/`highlight`.
 fn duotone(rgba: &mut [u8], shadow: [u8; 3], highlight: [u8; 3]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let l = luma(px) / 255.0;
         for c in 0..3 {
             px[c] = (shadow[c] as f32 + (highlight[c] as f32 - shadow[c] as f32) * l).round().clamp(0.0, 255.0) as u8;
@@ -873,7 +873,7 @@ fn levels(rgba: &mut [u8], black: u8, white: u8, gamma: f32) {
     let b = black as f32;
     let w = (white.max(black.saturating_add(1))) as f32;
     let inv_gamma = 1.0 / gamma.max(0.01);
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in px.iter_mut().take(3) {
             let v = ((*c as f32 - b) / (w - b)).clamp(0.0, 1.0);
             *c = (v.powf(inv_gamma) * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -898,7 +898,7 @@ fn curve_lut(shadow: u8, mid: u8, highlight: u8) -> [u8; 256] {
 fn curves_free(rgba: &mut [u8], master: &[(u8, u8)], r: &[(u8, u8)], g: &[(u8, u8)], b: &[(u8, u8)]) {
     let ml = points_lut(master);
     let luts = [points_lut(r), points_lut(g), points_lut(b)];
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in 0..3 {
             px[c] = luts[c][ml[px[c] as usize] as usize];
         }
@@ -970,7 +970,7 @@ pub fn points_lut(points: &[(u8, u8)]) -> [u8; 256] {
 
 fn curves(rgba: &mut [u8], shadow: u8, mid: u8, highlight: u8) {
     let lut = curve_lut(shadow, mid, highlight);
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in px.iter_mut().take(3) {
             *c = lut[*c as usize];
         }
@@ -979,7 +979,7 @@ fn curves(rgba: &mut [u8], shadow: u8, mid: u8, highlight: u8) {
 
 /// Teinte/saturation/luminosité via un aller-retour RVB↔HSL par pixel.
 fn hue_saturation(rgba: &mut [u8], hue_deg: f32, sat: f32, light: f32) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let (h0, s0, l0) = rgb_to_hsl(px[0], px[1], px[2]);
         let h = (h0 + hue_deg / 360.0).rem_euclid(1.0);
         let s = (s0 * (1.0 + sat)).clamp(0.0, 1.0);
@@ -1115,7 +1115,7 @@ pub fn reduce_red_eye(rgba: &mut [u8], w: usize, h: usize, mask: &[bool]) {
     if mask.len() != w * h || rgba.len() < w * h * 4 {
         return;
     }
-    for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+    for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         if !mask[i] {
             continue;
         }
@@ -1273,7 +1273,7 @@ fn bokeh_blur(src: &[u8], w: usize, h: usize, radius: f32, boost: f32) -> Vec<u8
 /// `ui::toolbar`.
 pub fn histogram_rgb(rgba: &[u8]) -> [[u32; 256]; 3] {
     let mut hist = [[0u32; 256]; 3];
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         for c in 0..3 {
             hist[c][px[c] as usize] += 1;
         }
@@ -1356,7 +1356,7 @@ fn auto_levels(rgba: &mut [u8]) {
         let hi = percentile(&hist[c], 0.99);
         if lo < hi { (lo, hi) } else { (0, 255) }
     });
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in 0..3 {
             let (lo, hi) = bounds[c];
             let stretched = (px[c] as f32 - lo as f32) * 255.0 / (hi as f32 - lo as f32);
@@ -1523,7 +1523,7 @@ fn canny_filter(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     let gray = luma_buffer(src, w, h);
     let edges = canny_edges(&gray, w, h, 200.0, 500.0);
     let mut out = src.to_vec();
-    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+    for (i, px) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let v = if edges[i] { 0u8 } else { 255u8 };
         px[0] = v;
         px[1] = v;
@@ -1541,7 +1541,7 @@ fn sketch(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     let gray = luma_buffer(src, w, h);
     let edges = sobel_magnitude(&gray, w, h);
     let mut out = src.to_vec();
-    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+    for (i, px) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let v = (255.0 - edges[i]).clamp(0.0, 255.0) as u8;
         px[0] = v;
         px[1] = v;
@@ -1560,7 +1560,7 @@ fn comic(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     let edges = sobel_magnitude(&gray, w, h);
     let levels = 5.0;
     let mut out = src.to_vec();
-    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+    for (i, px) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         if edges[i] > 220.0 {
             px[0] = 0;
             px[1] = 0;
@@ -1639,7 +1639,7 @@ fn watercolor(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     saturate(&mut out, 1.15);
     let gray = luma_buffer(&out, w, h);
     let edges = sobel_magnitude(&gray, w, h);
-    for (i, px) in out.chunks_exact_mut(4).enumerate() {
+    for (i, px) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         if edges[i] > 80.0 {
             let darken = 1.0 - (edges[i] / 1400.0).min(0.35);
             for c in px.iter_mut().take(3) {
@@ -1670,7 +1670,7 @@ fn film_grain(rgba: &mut [u8], w: usize, h: usize) {
     if w == 0 || h == 0 {
         return;
     }
-    for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+    for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let l = luma(px) / 255.0;
         let envelope = 1.0 - (l - 0.5).abs() * 2.0; // 1 au milieu, 0 aux extrêmes
         let n = pixel_noise(i) * 18.0 * envelope;
@@ -1687,7 +1687,7 @@ fn vintage(rgba: &mut [u8], w: usize, h: usize) {
         return;
     }
     saturate(rgba, 0.85);
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         px[0] = (px[0] as f32 * 1.08).clamp(0.0, 255.0) as u8; // virage chaud : + rouge
         px[2] = (px[2] as f32 * 0.9).clamp(0.0, 255.0) as u8; // − bleu
     }
@@ -1706,7 +1706,7 @@ fn apply_vignette(rgba: &mut [u8], w: usize, h: usize, amount: f32) {
     let amount = amount.min(1.0);
     let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
     let max_dist = (cx * cx + cy * cy).sqrt().max(1.0);
-    for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+    for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let (x, y) = (i % w, i / w);
         let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
         let dist = (dx * dx + dy * dy).sqrt() / max_dist;
@@ -1724,7 +1724,7 @@ fn luma(px: &[u8]) -> f32 {
 
 /// Contraste autour du point pivot 128 : `out = (in - 128) * factor + 128`.
 fn contrast(rgba: &mut [u8], factor: f32) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in px.iter_mut().take(3) {
             *c = ((*c as f32 - 128.0) * factor + 128.0).clamp(0.0, 255.0) as u8;
         }
@@ -1734,7 +1734,7 @@ fn contrast(rgba: &mut [u8], factor: f32) {
 /// Saturation : interpole chaque canal entre le gris (luma) et sa valeur.
 /// `factor` > 1 sature, < 1 désature, 0 = noir & blanc.
 fn saturate(rgba: &mut [u8], factor: f32) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let g = luma(px);
         for c in px.iter_mut().take(3) {
             *c = (g + (*c as f32 - g) * factor).clamp(0.0, 255.0) as u8;
@@ -1744,7 +1744,7 @@ fn saturate(rgba: &mut [u8], factor: f32) {
 
 /// Négatif : inverse les canaux RVB (alpha conservé).
 fn invert(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in px.iter_mut().take(3) {
             *c = 255 - *c;
         }
@@ -1807,7 +1807,7 @@ fn unsharp_mask(src: &[u8], w: usize, h: usize, radius: f32, amount: f32, thresh
 }
 
 fn brightness(rgba: &mut [u8], factor: f32) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         for c in px.iter_mut().take(3) {
             *c = (*c as f32 * factor).clamp(0.0, 255.0) as u8;
         }
@@ -1815,7 +1815,7 @@ fn brightness(rgba: &mut [u8], factor: f32) {
 }
 
 fn grayscale(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let g = luma(px) as u8;
         px[0] = g;
         px[1] = g;

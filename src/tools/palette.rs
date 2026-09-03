@@ -26,7 +26,7 @@ pub fn extract_palette(rgba: &[u8], k: usize) -> Vec<[u8; 3]> {
     const SHIFT: u32 = 3; // 8 bits → 5 bits par canal (32 niveaux)
     type BucketSum = (u64, u64, u64, u64); // (somme r, somme g, somme b, nombre de pixels)
     let mut buckets: std::collections::HashMap<(u8, u8, u8), BucketSum> = std::collections::HashMap::new();
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         if px[3] == 0 {
             continue;
         }
