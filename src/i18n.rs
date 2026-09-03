@@ -115,6 +115,9 @@ struct Settings {
     /// (audit_uix_expert.md critique n°1), pour la découvrabilité tactile.
     #[serde(default)]
     show_tool_labels: bool,
+    /// Kits de marque nommés (audit_100_features.md #92), même fichier local.
+    #[serde(default)]
+    brand_kits: Vec<crate::model::BrandKit>,
 }
 
 /// Groupes de la barre d'outils repliés par défaut (UX-2.1) : les familles
@@ -317,6 +320,17 @@ pub fn load_show_tool_labels() -> bool {
 pub fn save_show_tool_labels(value: bool) {
     let mut settings = read_settings();
     settings.show_tool_labels = value;
+    write_settings(&settings);
+}
+
+/// Kits de marque (audit_100_features.md #92), même fichier local.
+pub fn load_brand_kits() -> Vec<crate::model::BrandKit> {
+    read_settings().brand_kits
+}
+
+pub fn save_brand_kits(kits: &[crate::model::BrandKit]) {
+    let mut settings = read_settings();
+    settings.brand_kits = kits.to_vec();
     write_settings(&settings);
 }
 

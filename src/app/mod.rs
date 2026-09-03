@@ -298,6 +298,14 @@ pub struct PaintApp {
     /// persistés localement. Les préréglages fournis (`BrushPreset::builtins`)
     /// s'affichent en plus, jamais dans cette liste.
     pub brush_presets: Vec<crate::model::BrushPreset>,
+    /// Kits de marque nommés (audit_100_features.md #92), persistés
+    /// localement — extension du même mécanisme que `style_presets`/
+    /// `brush_presets`.
+    pub brand_kits: Vec<crate::model::BrandKit>,
+    /// Panneau des kits de marque ouvert ?
+    pub show_brand_kits: bool,
+    /// Nom en cours de saisie pour enregistrer le kit de marque actuel.
+    pub brand_kit_name: String,
     /// Panneau de la bibliothèque de brosses ouvert ?
     pub show_brush_library: bool,
     /// Panneau d'histogramme ouvert (Sprint 4.1) ?
@@ -662,6 +670,9 @@ impl Default for PaintApp {
             keybindings: crate::keybindings::KeyBindings::load(),
             style_presets: crate::i18n::load_style_presets(),
             brush_presets: crate::i18n::load_brush_presets(),
+            brand_kits: crate::i18n::load_brand_kits(),
+            show_brand_kits: false,
+            brand_kit_name: String::new(),
             show_brush_library: false,
             brush_preset_name: String::new(),
             show_histogram: false,
@@ -1594,6 +1605,77 @@ impl PaintApp {
             self.selection.clear();
             self.selection.insert(id);
         }
+    }
+
+    /// Texte → tracés vectoriels (audit_100_features.md #64) : remplace le
+    /// texte sélectionné par un `Stroke` non rempli par contour de glyphe
+    /// (extraction via `tools::text_outline`, sur les octets réels de la
+    /// police système). Snapshot avant/après du document entier
+    /// (`Command::SetDoc`) plutôt qu'une commande dédiée : remplacement
+    /// structurel (un texte devient N traits), pas une simple édition de
+    /// champ — même choix que `resize_document`/`merge_selection_to_image`
+    /// pour ce type de changement irrégulier.
+    ///
+    /// Limites assumées, documentées dans `tools::text_outline` : police
+    /// intégrée Sans/Mono non convertible (pas dans `fontdb`, message
+    /// d'erreur explicite) ; pas de crénage de paires (avance simple par
+    /// glyphe) ; un contour rempli individuellement ne recrée pas
+    /// correctement le trou d'une lettre comme « O » si l'utilisateur active
+    /// « Rempli » après coup — seul le résultat non rempli (par défaut) est
+    /// garanti visuellement correct.
+    pub fn convert_text_to_outlines(&mut self) {
+        let active = self.doc.active_layer;
+        let Some(id) = self.single_text_idx() else {
+            self.info(t("Sélectionne un texte (outil Sélection).", "Select a text (Select tool)."));
+            return;
+        };
+        let text = self.doc.layers[active].texts[id].clone();
+        let Some(family) = &text.font_family else {
+            self.info(t(
+                "Police système requise (pas Sans/Mono intégrées) pour convertir en tracés.",
+                "A system font is required (not built-in Sans/Mono) to convert to paths.",
+            ));
+            return;
+        };
+        let Some(bytes) = self.font_manager.font_bytes(family, text.bold, text.italic) else {
+            self.info(t("Police introuvable.", "Font not found."));
+            return;
+        };
+        let Some(contours) = crate::tools::text_outline::glyph_contours(&bytes, &text.text, text.size) else {
+            self.info(t("Police invalide.", "Invalid font."));
+            return;
+        };
+        if contours.is_empty() {
+            self.info(t("Rien à convertir (texte vide).", "Nothing to convert (empty text)."));
+            return;
+        }
+
+        let before = Box::new(self.doc.clone());
+        let mut after = self.doc.clone();
+        let layer = &mut after.layers[active];
+        layer.texts.retain(|t2| t2.id != text.id);
+        for contour in contours {
+            let mut s = crate::model::Stroke::new(text.color, 1.0, crate::model::Tool::Brush);
+            s.id = self.next_id;
+            self.next_id += 1;
+            s.smooth = false;
+            s.z = text.z;
+            s.points = contour.into_iter().map(|(x, y)| crate::model::StrokePoint { pos: (text.pos.0 + x, text.pos.1 + y), width: 1.0 }).collect();
+            layer.strokes.push(s);
+        }
+        self.selection.clear();
+        self.history.push(&mut self.doc, Command::SetDoc { before, after: Box::new(after), label: "Texte → tracés" });
+        self.info(t("Texte converti en tracés.", "Text converted to paths."));
+    }
+
+    /// Index du texte dans le calque actif si c'est le seul élément
+    /// sélectionné (même schéma que `single_image_idx`).
+    fn single_text_idx(&self) -> Option<usize> {
+        if self.selection.len() != 1 {
+            return None;
+        }
+        let id = *self.selection.iter().next()?;
+        self.doc.layers[self.doc.active_layer].texts.iter().position(|t| t.id == id)
     }
 
     // --- Image (roadmap #7) -------------------------------------------------
@@ -2575,6 +2657,66 @@ impl PaintApp {
         self.stroke_stabilization = preset.stabilization;
         self.capture_pressure_strength = preset.pressure_strength;
         self.info(format!("{} « {} ».", t("Pinceau appliqué", "Brush applied"), preset.name));
+    }
+
+    // --- Kit de marque (audit_100_features.md #92) --------------------------
+
+    /// Enregistre la palette personnalisée et la police système courantes
+    /// sous `name` — écrase un kit existant du même nom (mêmes règles que
+    /// les autres presets). Le logo se règle séparément (`set_brand_kit_logo`),
+    /// jamais écrasé par cet appel.
+    pub fn save_brand_kit(&mut self, name: String) {
+        if name.trim().is_empty() {
+            return;
+        }
+        let logo = self.brand_kits.iter().find(|k| k.name == name).and_then(|k| k.logo_png_b64.clone());
+        self.brand_kits.retain(|k| k.name != name);
+        let fonts = self.text_font_family.clone().into_iter().collect();
+        self.brand_kits.push(crate::model::BrandKit { name: name.clone(), colors: self.custom_palette.clone(), fonts, logo_png_b64: logo });
+        crate::i18n::save_brand_kits(&self.brand_kits);
+        self.info(format!("{} « {name} ».", t("Kit de marque enregistré", "Brand kit saved")));
+    }
+
+    pub fn delete_brand_kit(&mut self, name: &str) {
+        self.brand_kits.retain(|k| k.name != name);
+        crate::i18n::save_brand_kits(&self.brand_kits);
+    }
+
+    /// Applique un kit : remplace la palette personnalisée, règle la police
+    /// système du texte courant sur la première du kit s'il y en a une.
+    /// Le logo n'est **pas** posé automatiquement (poser une image est un
+    /// geste voulu, pas un effet de bord d'un clic « appliquer ») — voir
+    /// `place_brand_kit_logo`.
+    pub fn apply_brand_kit(&mut self, kit: &crate::model::BrandKit) {
+        self.custom_palette = kit.colors.clone();
+        crate::i18n::save_custom_palette(&self.custom_palette);
+        if let Some(font) = kit.fonts.first() {
+            self.text_font_family = Some(font.clone());
+            self.sync_text_style();
+        }
+        self.info(format!("{} « {} ».", t("Kit de marque appliqué", "Brand kit applied"), kit.name));
+    }
+
+    /// Choisit un fichier image comme logo du kit `name` (remplace le
+    /// précédent s'il y en avait un).
+    pub fn set_brand_kit_logo(&mut self, name: &str) {
+        let Some(Ok((w, h, rgba))) = crate::project::import_image_dialog() else { return };
+        let Some(kit) = self.brand_kits.iter_mut().find(|k| k.name == name) else { return };
+        kit.set_logo(w, h, &rgba);
+        crate::i18n::save_brand_kits(&self.brand_kits);
+        self.info(t("Logo enregistré.", "Logo saved."));
+    }
+
+    /// Pose le logo du kit `name` comme nouvelle image sur le canevas
+    /// (même mécanisme que `import_image`), geste explicite plutôt qu'un
+    /// effet de bord d'`apply_brand_kit`.
+    pub fn place_brand_kit_logo(&mut self, name: &str) {
+        let Some(kit) = self.brand_kits.iter().find(|k| k.name == name) else { return };
+        let Some((w, h, rgba)) = kit.decode_logo() else {
+            self.info(t("Ce kit n'a pas de logo.", "This kit has no logo."));
+            return;
+        };
+        self.place_image(w, h, rgba);
     }
 
     /// Importe un ou plusieurs préréglages depuis un fichier `.json` (un objet
@@ -4713,6 +4855,53 @@ mod tests {
         assert!(elapsed.as_secs() < 5, "undo/redo anormalement lent : {elapsed:?}");
     }
 
+    /// Texte → tracés (audit_100_features.md #64) : le texte sélectionné
+    /// disparaît, remplacé par au moins un trait non rempli par contour de
+    /// glyphe visible, et l'opération s'annule en un coup (`Command::SetDoc`).
+    #[test]
+    fn convert_text_to_outlines_replaces_text_with_unfilled_strokes() {
+        let mut app = app_with_layers(1);
+        // Une police au hasard peut ne pas couvrir 'l' (police à icônes,
+        // symboles…) — même repli que `tools::text_outline::tests`.
+        let family = ["Helvetica", ".AppleSystemUIFont"]
+            .into_iter()
+            .find(|f| app.font_manager.font_bytes(f, false, false).is_some())
+            .map(str::to_string)
+            .or_else(|| app.font_manager.family_names().into_iter().find(|f| app.font_manager.font_bytes(f, false, false).is_some()))
+            .expect("au moins une police système exploitable");
+        let mut item = crate::model::TextItem::new(1, (10.0, 20.0), 60.0, [255, 0, 0, 255]);
+        item.text = "l".to_string(); // lettre sans trou : résultat toujours correct même rempli
+        item.font_family = Some(family);
+        app.doc.layers[0].texts.push(item);
+        app.selection = [1].into_iter().collect();
+        let strokes_before = app.doc.layers[0].strokes.len();
+
+        app.convert_text_to_outlines();
+
+        assert!(app.doc.layers[0].texts.is_empty(), "le texte doit avoir disparu");
+        assert!(app.doc.layers[0].strokes.len() > strokes_before, "au moins un trait de contour ajouté");
+        assert!(app.doc.layers[0].strokes.iter().all(|s| !s.fill), "les contours de glyphe ne sont pas remplis par défaut");
+        assert!(app.history.can_undo());
+        app.history.undo(&mut app.doc);
+        assert_eq!(app.doc.layers[0].strokes.len(), strokes_before, "annulable : le texte doit revenir, pas les traits");
+        assert_eq!(app.doc.layers[0].texts.len(), 1);
+    }
+
+    #[test]
+    fn convert_text_to_outlines_refuses_the_builtin_sans_font() {
+        let mut app = app_with_layers(1);
+        let mut item = crate::model::TextItem::new(1, (0.0, 0.0), 40.0, [0, 0, 0, 255]);
+        item.text = "a".to_string();
+        // `font_family: None` = police intégrée Sans/Mono (pas dans fontdb).
+        app.doc.layers[0].texts.push(item);
+        app.selection = [1].into_iter().collect();
+
+        app.convert_text_to_outlines();
+
+        assert_eq!(app.doc.layers[0].texts.len(), 1, "police intégrée : rien à convertir, le texte reste");
+        assert!(app.doc.layers[0].strokes.is_empty());
+    }
+
     fn app_with_layers(n: usize) -> PaintApp {
         let mut app = PaintApp::default();
         app.doc.layers.clear();
@@ -5392,6 +5581,50 @@ mod tests {
             assert_eq!(app.pixel_hardness, 0.4);
             assert_eq!(app.stroke_stabilization, 0.7);
             assert_eq!(app.capture_pressure_strength, 0.2);
+        });
+    }
+
+    /// Kit de marque (audit_100_features.md #92) : enregistrer capture la
+    /// palette + la police système courantes, appliquer les restaure sur un
+    /// état différent — même round-trip que les autres presets.
+    #[test]
+    fn save_and_apply_brand_kit_round_trips_palette_and_font() {
+        with_temp_home(|| {
+            let mut app = PaintApp::default();
+            app.custom_palette = vec![[255, 0, 0], [0, 255, 0]];
+            app.text_font_family = Some("Helvetica".to_string());
+            app.save_brand_kit("Acme".into());
+            assert_eq!(app.brand_kits.len(), 1);
+            assert_eq!(app.brand_kits[0].colors, vec![[255, 0, 0], [0, 255, 0]]);
+            assert_eq!(app.brand_kits[0].fonts, vec!["Helvetica".to_string()]);
+
+            app.custom_palette.clear();
+            app.text_font_family = None;
+            let kit = app.brand_kits[0].clone();
+            app.apply_brand_kit(&kit);
+            assert_eq!(app.custom_palette, vec![[255, 0, 0], [0, 255, 0]]);
+            assert_eq!(app.text_font_family, Some("Helvetica".to_string()));
+        });
+    }
+
+    /// Ré-enregistrer sous le même nom écrase le kit (même règle que les
+    /// autres presets) mais garde le logo déjà associé — le logo se règle
+    /// séparément, il ne doit pas disparaître à chaque sauvegarde de palette.
+    #[test]
+    fn saving_a_brand_kit_again_keeps_its_previously_set_logo() {
+        with_temp_home(|| {
+            let mut app = PaintApp::default();
+            app.custom_palette = vec![[10, 10, 10]];
+            app.save_brand_kit("Acme".into());
+            app.brand_kits[0].set_logo(2, 2, &[255u8; 2 * 2 * 4]);
+            crate::i18n::save_brand_kits(&app.brand_kits);
+            assert!(app.brand_kits[0].logo_png_b64.is_some());
+
+            app.custom_palette = vec![[20, 20, 20]];
+            app.save_brand_kit("Acme".into());
+            assert_eq!(app.brand_kits.len(), 1, "toujours un seul kit « Acme », pas un doublon");
+            assert_eq!(app.brand_kits[0].colors, vec![[20, 20, 20]], "la palette a bien été mise à jour");
+            assert!(app.brand_kits[0].logo_png_b64.is_some(), "le logo ne doit pas disparaître");
         });
     }
 

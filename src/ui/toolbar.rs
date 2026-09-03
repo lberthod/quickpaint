@@ -283,6 +283,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
     style_presets_window(ctx, app);
     asset_library_window(ctx, app);
     brush_library_window(ctx, app);
+    brand_kits_window(ctx, app);
     histogram_window(ctx, app);
     lut_window(ctx, app);
     perspective_window(ctx, app);
@@ -883,6 +884,88 @@ fn brush_library_window(ctx: &egui::Context, app: &mut PaintApp) {
         });
     if !open {
         app.show_brush_library = false;
+    }
+}
+
+/// Kits de marque (audit_100_features.md #92) : même schéma que la
+/// bibliothèque de brosses ci-dessus (nom + Enregistrer, liste avec
+/// Appliquer/Supprimer) — extension du mécanisme de presets déjà là plutôt
+/// qu'une UI ad hoc.
+fn brand_kits_window(ctx: &egui::Context, app: &mut PaintApp) {
+    if !app.show_brand_kits {
+        return;
+    }
+    let mut open = true;
+    egui::Window::new(t("🎨 Kits de marque", "🎨 Brand kits"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.set_min_width(340.0);
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut app.brand_kit_name).hint_text(t("Nom du kit", "Kit name")));
+                if ui.button(t("Enregistrer", "Save")).clicked() {
+                    let name = std::mem::take(&mut app.brand_kit_name);
+                    app.save_brand_kit(name);
+                }
+            })
+            .response
+            .on_hover_text(t(
+                "Enregistre la palette personnalisée et la police système courantes",
+                "Saves the current custom palette and system font",
+            ));
+            ui.separator();
+            if app.brand_kits.is_empty() {
+                ui.label(t("Aucun kit enregistré pour l'instant.", "No kit saved yet."));
+            }
+            let mut to_apply: Option<crate::model::BrandKit> = None;
+            let mut to_delete: Option<String> = None;
+            let mut to_set_logo: Option<String> = None;
+            let mut to_place_logo: Option<String> = None;
+            for kit in app.brand_kits.clone() {
+                ui.horizontal(|ui| {
+                    ui.label(&kit.name);
+                    ui.label(format!("({} {})", kit.colors.len(), t("couleurs", "colors")));
+                    if ui.button(t("Appliquer", "Apply")).clicked() {
+                        to_apply = Some(kit.clone());
+                    }
+                    if ui
+                        .button(if kit.logo_png_b64.is_some() { "🖼" } else { t("+ logo", "+ logo") })
+                        .on_hover_text(t("Choisir/remplacer le logo", "Choose/replace the logo"))
+                        .clicked()
+                    {
+                        to_set_logo = Some(kit.name.clone());
+                    }
+                    if kit.logo_png_b64.is_some()
+                        && ui.button(t("Poser le logo", "Place logo")).on_hover_text(t("Ajoute le logo comme image sur le canevas", "Adds the logo as an image on the canvas")).clicked()
+                    {
+                        to_place_logo = Some(kit.name.clone());
+                    }
+                    if ui.button("🗑").on_hover_text(t("Supprimer", "Delete")).clicked() {
+                        to_delete = Some(kit.name.clone());
+                    }
+                });
+            }
+            if let Some(kit) = to_apply {
+                app.apply_brand_kit(&kit);
+            }
+            if let Some(name) = to_delete {
+                app.delete_brand_kit(&name);
+            }
+            if let Some(name) = to_set_logo {
+                app.set_brand_kit_logo(&name);
+            }
+            if let Some(name) = to_place_logo {
+                app.place_brand_kit_logo(&name);
+            }
+            ui.separator();
+            if ui.button(t("Fermer", "Close")).clicked() {
+                app.show_brand_kits = false;
+            }
+        });
+    if !open {
+        app.show_brand_kits = false;
     }
 }
 
@@ -1653,6 +1736,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             }
             if ui.button(t("🖌 Bibliothèque de brosses…", "🖌 Brush library…")).clicked() {
                 app.show_brush_library = true;
+                ui.close_menu();
+            }
+            if ui.button(t("🎨 Kits de marque…", "🎨 Brand kits…")).clicked() {
+                app.show_brand_kits = true;
                 ui.close_menu();
             }
             ui.separator();
@@ -2532,6 +2619,21 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
 
     if changed {
         app.sync_text_style();
+    }
+
+    // Texte → tracés (audit_100_features.md #64) : action ponctuelle, pas
+    // un réglage de style — remplace le texte sélectionné, ne s'applique
+    // pas à `changed`/`sync_text_style` comme le reste de cette barre.
+    ui.separator();
+    if ui
+        .button(t("Convertir en tracés", "Convert to paths"))
+        .on_hover_text(t(
+            "Remplace le texte par ses contours vectoriels (police système requise, pas Sans/Mono)",
+            "Replaces the text with its vector outlines (system font required, not built-in Sans/Mono)",
+        ))
+        .clicked()
+    {
+        app.convert_text_to_outlines();
     }
 }
 

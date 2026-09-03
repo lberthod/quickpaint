@@ -111,6 +111,23 @@ impl FontManager {
         self.loaded.insert(family.to_string());
         true
     }
+
+    /// Octets bruts de la police système `family` (audit_100_features.md
+    /// #64, extraction de contours de glyphes via `ttf-parser`) — au plus
+    /// proche du style demandé (gras/italique), avec repli sur la variante
+    /// normale si la famille n'a pas exactement ce style. `None` si la
+    /// famille est introuvable dans la base système (polices intégrées
+    /// Sans/Mono : pas dans `fontdb`, pas de conversion possible pour elles).
+    pub fn font_bytes(&self, family: &str, bold: bool, italic: bool) -> Option<Vec<u8>> {
+        let weight = if bold { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL };
+        let style = if italic { fontdb::Style::Italic } else { fontdb::Style::Normal };
+        let query = fontdb::Query { families: &[fontdb::Family::Name(family)], weight, style, ..Default::default() };
+        let id = self.db.query(&query).or_else(|| {
+            // Repli : la famille existe mais pas dans ce style exact.
+            self.db.query(&fontdb::Query { families: &[fontdb::Family::Name(family)], ..Default::default() })
+        })?;
+        self.db.with_face_data(id, |data, _face_index| data.to_vec())
+    }
 }
 
 impl Default for FontManager {

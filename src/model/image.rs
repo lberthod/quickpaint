@@ -95,7 +95,10 @@ impl ImageItem {
     }
 }
 
-fn encode_png_b64(w: u32, h: u32, rgba: &[u8]) -> Option<String> {
+/// Réutilisé par `BrandKit::set_logo` (audit_100_features.md #92) : même
+/// encodage PNG base64 que le raster/masque de calque, pas de raison d'en
+/// avoir un second.
+pub(crate) fn encode_png_b64(w: u32, h: u32, rgba: &[u8]) -> Option<String> {
     use image::ImageEncoder;
     let mut buf = Vec::new();
     image::codecs::png::PngEncoder::new(&mut buf)

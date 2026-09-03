@@ -14,6 +14,7 @@ pub mod palette;
 pub mod pen;
 pub mod selection_mask;
 pub mod shape;
+pub mod text_outline;
 
 pub use brush::Brush;
 pub use eraser::Eraser;

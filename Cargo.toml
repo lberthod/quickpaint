@@ -47,6 +47,11 @@ muda = "0.19"
 # le même type d'`EventLoopBuilder`.
 winit = { version = "0.30", default-features = false }
 usvg = "0.47.0"
+# Extraction de contours de glyphes pour « Texte → tracés » (audit_100_features.md
+# #64) — déjà dans l'arbre transitivement via usvg/fontdb, ici en dépendance
+# directe pour pouvoir l'utiliser depuis notre propre code. Version alignée
+# sur celle déjà verrouillée par la chaîne usvg pour ne pas dupliquer.
+ttf-parser = "0.25"
 
 [profile.release]
 opt-level = 3

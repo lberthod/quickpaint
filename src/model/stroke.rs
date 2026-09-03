@@ -76,6 +76,45 @@ pub struct StylePreset {
     pub gradient: Option<Gradient>,
 }
 
+/// Kit de marque (audit_100_features.md #92) : palette de couleurs, polices
+/// et logo réutilisables d'un projet à l'autre, sous un même nom — extension
+/// du mécanisme de presets déjà là (`StylePreset`/`BrushPreset`) plutôt
+/// qu'un nouveau système. Persisté localement comme les autres presets,
+/// jamais synchronisé (cohérent avec le fonctionnement 100 % local du
+/// produit).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct BrandKit {
+    pub name: String,
+    pub colors: Vec<[u8; 3]>,
+    /// Noms de familles de police système (`fontdb`), pas de police
+    /// embarquée — cohérent avec `fonts.rs`.
+    pub fonts: Vec<String>,
+    /// Logo, PNG encodé en base64 — même mécanisme que `ImageItem`/le
+    /// raster de calque (`model::image::encode_png_b64`), pas un second
+    /// format de stockage d'image dans le projet.
+    #[serde(default)]
+    pub logo_png_b64: Option<String>,
+}
+
+impl BrandKit {
+    /// Encode `rgba` en logo du kit. `None` silencieux si l'encodage PNG
+    /// échoue (buffer corrompu) — même comportement que le reste du modèle
+    /// vis-à-vis d'un encodage PNG raté (jamais de panique sur des pixels).
+    pub fn set_logo(&mut self, w: u32, h: u32, rgba: &[u8]) {
+        self.logo_png_b64 = crate::model::image::encode_png_b64(w, h, rgba);
+    }
+
+    /// Décode le logo en pixels RGBA, prêt à être posé comme une image sur
+    /// le canevas (`PaintApp::place_image`).
+    pub fn decode_logo(&self) -> Option<(u32, u32, Vec<u8>)> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let bytes = STANDARD.decode(self.logo_png_b64.as_ref()?).ok()?;
+        let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+        let (w, h) = img.dimensions();
+        Some((w, h, img.into_raw()))
+    }
+}
+
 /// Préréglage de pinceau (Sprint 3.4) : regroupe les réglages du geste de
 /// dessin (épaisseur, dureté du pinceau pixel, stabilisation du tracé,
 /// intensité de la pression simulée) sous un nom, au même titre qu'un
