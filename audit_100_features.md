@@ -63,7 +63,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 31 | Sélection rectangle/ellipse/lasso | ✅ | `SelectMode::{Rect,Ellipse,Lasso}` |
 | 32 | Lasso polygonal | ✅ | `SelectMode::PolyLasso` |
 | 33 | Baguette magique | ✅ | [app/selection.rs:167](src/app/selection.rs:167), tolérance réglable |
-| 34 | Sélection par plage de couleurs (image entière) | 🟡 | Le mode « Global » de la baguette s'en approche, pas de fonctionnalité "Color Range" dédiée |
+| 34 | Sélection par plage de couleurs (image entière) | ✅ *(corrigé le 1er septembre 2026)* | Entrée « Plage de couleurs… » dans le menu Édition (active baguette + portée Global explicitement) |
 | 35 | Opérations d'ensemble (add/subtract/intersect) | ✅ | `enum SelectionCombine` |
 | 36 | Masque de sélection en pixels | ✅ | `feather`/`dilate`/`erode`, [tools/selection_mask.rs:116-154](src/tools/selection_mask.rs:116) |
 | 37 | Détourage automatique par IA | ❌ | Le détourage existant est un flood-fill classique, pas un modèle IA |
@@ -94,7 +94,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 52 | Opérations booléennes de formes | ✅ | Clipper, [tools/boolean.rs:15-52](src/tools/boolean.rs:15) |
 | 53 | Dégradés sur formes | ✅ | `GradientKind::{Linear,Radial,Conic}` |
 | 54 | Motifs de remplissage (patterns) | ❌ | Introuvable |
-| 55 | Trait personnalisable (pointillés, épaisseur variable) | ❌ | Introuvable (hors animation de sélection) |
+| 55 | Trait personnalisable (pointillés) | ✅ *(corrigé le 1er septembre 2026)* | `Stroke::dash`, géré au niveau du ruban (`render::ribbon::build_dashed`) — rendu identique écran/export. Case « Pointillés » pour les outils Forme. Épaisseur variable le long du tracé : toujours absent (portée non couverte) |
 | 56 | Gradient mesh | ❌ | Introuvable |
 | 57 | Déformation de formes (warp) | ✅ | `Adjustment::{ArcWarp,Wave,Sphere,Vortex}` |
 | 58 | Cisaillement (skew) | ✅ | `Command::Shear`, [app/transform.rs:20-155](src/app/transform.rs:20) |
@@ -149,7 +149,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 87 | Perspective / distorsion libre | ✅ *(corrigé le 1er septembre 2026)* | Les 4 coins se glissent directement sur le canevas (poignées orange, aperçu du quadrilatère en direct), sliders retirés — `PaintApp::perspective_handles`/`start_perspective_drag_if_handle`/`update_perspective_drag` |
 | 88 | Redressement d'horizon | ✅ *(corrigé le 1er septembre 2026)* | Bouton « 📐 Tracer l'horizon » : glisser une ligne cyan sur le canevas calcule l'angle de redressement (`commit_straighten_line`), en plus du curseur d'angle conservé |
 | 89 | Alignement automatique / panorama | ❌ | Introuvable |
-| 90 | Recadrage avec grille des tiers | ❌ | Ratios/redressement présents, pas de grille des tiers superposée |
+| 90 | Recadrage avec grille des tiers | ✅ *(corrigé le 1er septembre 2026)* | Grille superposée sur le rectangle de recadrage non tourné, `canvas_overlay.rs::paint_crop` |
 
 ## 11. Collaboration, Cloud & Templates — 0 ✅ / 1 🟡 / 4 ❌
 

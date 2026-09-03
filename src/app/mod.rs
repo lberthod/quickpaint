@@ -279,6 +279,10 @@ pub struct PaintApp {
     pub stroke_stabilization: f32,
     /// Remplir les formes fermées au lieu du contour.
     pub fill_shapes: bool,
+    /// Trait en pointillés pour les outils Forme (audit_100_features.md
+    /// #55) — motif fixe relatif à l'épaisseur du trait plutôt que deux
+    /// champs numériques de plus dans une barre déjà dense.
+    pub dashed_stroke: bool,
     /// Nombre de côtés des polygones / branches des étoiles.
     pub poly_sides: usize,
     /// Dernières couleurs utilisées (accès rapide, palette tactile).
@@ -646,6 +650,7 @@ impl Default for PaintApp {
             capture_pressure_strength: 0.8,
             stroke_stabilization: 0.5,
             fill_shapes: false,
+            dashed_stroke: false,
             poly_sides: 6,
             recent_colors: Vec::new(),
             custom_palette: crate::i18n::load_custom_palette(),
@@ -3676,6 +3681,14 @@ impl PaintApp {
         self.history.push(&mut self.doc, Command::AddMany { layer, strokes });
     }
 
+    /// Motif de pointillés courant (audit_100_features.md #55), ou `None`
+    /// pour un trait plein. Relatif à l'épaisseur du trait plutôt que deux
+    /// champs numériques séparés — un rapport plein/trou fixe (3:2) qui
+    /// reste lisible à toute échelle sans exposer plus de réglages.
+    fn dash_pattern(&self) -> Option<(f32, f32)> {
+        self.dashed_stroke.then_some((self.brush.width * 3.0, self.brush.width * 2.0))
+    }
+
     fn handle_draw(&mut self, ctx: &egui::Context, response: &egui::Response, view: &ViewTransform) {
         let now = ctx.input(|i| i.time);
         if response.drag_started() {
@@ -3684,9 +3697,9 @@ impl PaintApp {
                 if let Some(sh) = self.active_tool.as_shape() {
                     let d = self.snap(d); // magnétisme grille pour les formes
                     self.shape_start = Some(d);
-                    self.shape_preview = Some(shape::build(
-                        sh, d, d, self.brush.color, self.brush.width, self.fill_shapes, self.poly_sides,
-                    ));
+                    let mut preview = shape::build(sh, d, d, self.brush.color, self.brush.width, self.fill_shapes, self.poly_sides);
+                    preview.dash = self.dash_pattern();
+                    self.shape_preview = Some(preview);
                 } else {
                     self.capture.set_pressure_strength(self.capture_pressure_strength);
                     self.capture.set_stabilization(self.stroke_stabilization);
@@ -3703,9 +3716,9 @@ impl PaintApp {
                     (Some(sh), Some(start)) => {
                         let shift = ctx.input(|i| i.modifiers.shift);
                         let d = constrain_shape(sh, start, self.snap(d), shift);
-                        self.shape_preview = Some(shape::build(
-                            sh, start, d, self.brush.color, self.brush.width, self.fill_shapes, self.poly_sides,
-                        ));
+                        let mut preview = shape::build(sh, start, d, self.brush.color, self.brush.width, self.fill_shapes, self.poly_sides);
+                        preview.dash = self.dash_pattern();
+                        self.shape_preview = Some(preview);
                     }
                     _ => self.capture.extend(d, now, real_pressure(ctx)),
                 }

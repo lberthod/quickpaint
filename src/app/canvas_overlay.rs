@@ -254,6 +254,18 @@ impl PaintApp {
             if self.crop_angle.abs() < 1e-4 {
                 let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
                 painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, orange));
+                // Grille des tiers (audit_100_features.md #90) : aide de
+                // composition, aucun effet sur le recadrage réel — seulement
+                // dans le cas non tourné, une grille sur un rectangle
+                // pivoté (redressement en cours) ajouterait de la
+                // complexité pour un cas d'usage marginal.
+                let thin = egui::Stroke::new(1.0_f32, Color32::from_white_alpha(140));
+                for i in 1..3 {
+                    let fx = r.min.x + r.width() * (i as f32 / 3.0);
+                    painter.line_segment([Pos2::new(fx, r.min.y), Pos2::new(fx, r.max.y)], thin);
+                    let fy = r.min.y + r.height() * (i as f32 / 3.0);
+                    painter.line_segment([Pos2::new(r.min.x, fy), Pos2::new(r.max.x, fy)], thin);
+                }
             } else {
                 // Redressement d'horizon (Sprint 2.3) : montre la région de
                 // l'image source (encore affichée droite) qui finira droite

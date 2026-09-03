@@ -1560,6 +1560,25 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.invert_selection();
                 ui.close_menu();
             }
+            // Plage de couleurs (audit_100_features.md #34) : la baguette
+            // magique en portée « Global » fait déjà exactement ça (toute
+            // couleur proche sur le calque, pas seulement la région
+            // connexe) — cette entrée l'active explicitement plutôt que de
+            // compter sur l'utilisateur pour deviner qu'il faut choisir
+            // l'outil Baguette puis remarquer le réglage de portée.
+            if ui
+                .button(t("Plage de couleurs…", "Color Range…"))
+                .on_hover_text(t(
+                    "Sélectionne toute couleur proche de celle cliquée, partout dans le calque",
+                    "Selects any color similar to the one clicked, anywhere on the layer",
+                ))
+                .clicked()
+            {
+                app.active_tool = ActiveTool::Select;
+                app.select_mode = SelectMode::Wand;
+                app.wand_global = true;
+                ui.close_menu();
+            }
             ui.menu_button(t("Masque de sélection", "Selection mask"), |ui| {
                 let has_mask = app.selection_mask.is_some();
                 ui.add_enabled_ui(has_mask, |ui| {
@@ -2766,7 +2785,10 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
                 ui.selectable_value(&mut app.wand_global, false, t("Contigu", "Contiguous"))
                     .on_hover_text(t("Seulement la région connexe autour du clic", "Only the connected region around the click"));
                 ui.selectable_value(&mut app.wand_global, true, t("Global", "Global"))
-                    .on_hover_text(t("Toute couleur proche sur le calque", "Any similar color on the layer"));
+                    .on_hover_text(t(
+                        "Toute couleur proche sur le calque (plage de couleurs)",
+                        "Any similar color on the layer (color range)",
+                    ));
             }
             ui.separator();
             ui.label(t("Couleur :", "Color:"));
@@ -2801,6 +2823,10 @@ fn options_row(ui: &mut Ui, app: &mut PaintApp) {
         ui.add(egui::Slider::new(size, range));
         if app.active_tool.as_shape().map(|s| s.closed()).unwrap_or(false) {
             ui.checkbox(&mut app.fill_shapes, t("Rempli", "Filled"));
+        }
+        if app.active_tool.as_shape().is_some() {
+            ui.checkbox(&mut app.dashed_stroke, t("Pointillés", "Dashed"))
+                .on_hover_text(t("Motif fixe, relatif à l'épaisseur du trait", "Fixed pattern, relative to stroke width"));
         }
         if app.active_tool == ActiveTool::Eraser {
             ui.separator();

@@ -163,6 +163,12 @@ pub struct Stroke {
     /// à l'outil Forme ressortait avec des coins arrondis).
     #[serde(default = "default_smooth")]
     pub smooth: bool,
+    /// Pointillés (audit_100_features.md #55), `(longueur pleine, longueur
+    /// de trou)` en unités document. `None` = trait plein (comportement
+    /// historique). Géré au niveau du ruban (`render::ribbon`), donc rendu
+    /// identique à l'écran et à l'export — pas une astuce d'overlay.
+    #[serde(default)]
+    pub dash: Option<(f32, f32)>,
 }
 
 fn default_smooth() -> bool {
@@ -182,6 +188,7 @@ impl Stroke {
             gradient: None,
             anchors: None,
             smooth: true,
+            dash: None,
         }
     }
 

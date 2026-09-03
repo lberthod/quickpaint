@@ -86,11 +86,47 @@ pub fn build(stroke: &Stroke) -> Mesh {
     }
     let translucent = stroke.color[3] < 255;
     let samples = if stroke.smooth { resample(&stroke.points) } else { raw_samples(&stroke.points) };
-    if translucent {
-        build_strip(&samples)
-    } else {
-        build_solid(&samples)
+    match stroke.dash {
+        Some((on, off)) if on > 0.0 && off > 0.0 => build_dashed(&samples, on, off, translucent),
+        _ if translucent => build_strip(&samples),
+        _ => build_solid(&samples),
     }
+}
+
+/// Pointillés (audit_100_features.md #55) : découpe `samples` en sous-runs
+/// selon la longueur d'arc cumulée (période `on + off`), puis construit
+/// chaque run séparément avec le ruban habituel (solide ou bande selon
+/// l'opacité) — les jointures/bouts ronds existants restent inchangés,
+/// seuls les segments dans un « trou » sont omis. Résolution des coupures
+/// bornée par `RESAMPLE_SPACING` (segments déjà rééchantillonnés), pas du
+/// pixel près — suffisant pour un motif visuel, pas un besoin d'impression
+/// de précision.
+fn build_dashed(samples: &[Sample], on: f32, off: f32, translucent: bool) -> Mesh {
+    let build_run = |run: &[Sample]| if translucent { build_strip(run) } else { build_solid(run) };
+    let mut mesh = Mesh::default();
+    if samples.len() < 2 {
+        return build_run(samples);
+    }
+    let period = on + off;
+    let mut run: Vec<Sample> = vec![samples[0]];
+    let mut dist = 0.0f32;
+    for w in samples.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let seg_len = ((b.pos.0 - a.pos.0).powi(2) + (b.pos.1 - a.pos.1).powi(2)).sqrt();
+        if dist.rem_euclid(period) < on {
+            run.push(b);
+        } else {
+            if run.len() >= 2 {
+                append(&mut mesh, &build_run(&run));
+            }
+            run = vec![b];
+        }
+        dist += seg_len;
+    }
+    if run.len() >= 2 {
+        append(&mut mesh, &build_run(&run));
+    }
+    mesh
 }
 
 /// Géométrie opaque d'un sous-ensemble de points (sans fill ni alpha). Utilisée
@@ -301,6 +337,34 @@ mod tests {
         let s = stroke_of(&[((5.0, 5.0), 8.0)]);
         let m = build(&s);
         assert_eq!(m.indices.len(), DISC_SIDES * 3);
+    }
+
+    #[test]
+    fn dashed_stroke_has_less_geometry_than_solid_over_the_same_path() {
+        // ≥3 points collinéaires : `resample` ne rééchantillonne un segment
+        // par sa longueur d'arc qu'à partir de 3 points (`n <= 2` renvoie les
+        // points bruts tels quels, voir `resample`) — indispensable ici pour
+        // que `build_dashed` ait plusieurs segments où carver des trous.
+        let mut s = stroke_of(&[((0.0, 0.0), 4.0), ((50.0, 0.0), 4.0), ((100.0, 0.0), 4.0)]);
+        let solid_tris = build(&s).indices.len();
+        s.dash = Some((6.0, 6.0));
+        let dashed = build(&s);
+        assert!(!dashed.indices.is_empty(), "toujours de la géométrie, pas juste des trous");
+        assert!(
+            dashed.indices.len() < solid_tris,
+            "les segments dans les trous ne doivent pas être rendus : {} vs plein {solid_tris}",
+            dashed.indices.len()
+        );
+    }
+
+    #[test]
+    fn dash_with_zero_gap_is_equivalent_to_solid() {
+        // `off = 0` (ou `on`/`off` non renseignés) ne doit pas produire un
+        // trait fantomatique troué par erreur d'arrondi.
+        let mut s = stroke_of(&[((0.0, 0.0), 4.0), ((50.0, 0.0), 4.0)]);
+        let solid = build(&s).indices.len();
+        s.dash = Some((6.0, 0.0));
+        assert_eq!(build(&s).indices.len(), solid, "off=0 doit retomber sur un trait plein");
     }
 
     #[test]
