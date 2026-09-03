@@ -93,6 +93,26 @@ impl PaintApp {
                 }
                 // Mode recadrage : le glissé définit la zone à conserver.
                 if self.crop_mode {
+                    // Tracé de la ligne d'horizon (audit_100_features.md #88),
+                    // prioritaire sur le glissé normal du rectangle tant que
+                    // le geste est armé — un seul glissé, se désactive de
+                    // lui-même dans `commit_straighten_line`.
+                    if self.straighten_line_mode {
+                        if response.drag_started() {
+                            if let Some(p) = response.interact_pointer_pos() {
+                                self.update_straighten_line(view.screen_to_doc(p));
+                            }
+                        }
+                        if response.dragged() {
+                            if let Some(p) = response.interact_pointer_pos() {
+                                self.update_straighten_line(view.screen_to_doc(p));
+                            }
+                        }
+                        if response.drag_stopped() {
+                            self.commit_straighten_line();
+                        }
+                        return;
+                    }
                     if response.drag_started() {
                         if let Some(p) = response.interact_pointer_pos() {
                             let d = view.screen_to_doc(p);
@@ -138,6 +158,27 @@ impl PaintApp {
                     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                         self.retouch_mode = None;
                         self.retouch_rect = None;
+                    }
+                    return;
+                }
+                // Panneau perspective ouvert (audit_100_features.md #87) :
+                // glisser directement les 4 coins plutôt que des sliders X/Y,
+                // même schéma modal que crop_mode/retouch_mode ci-dessus —
+                // tant que le panneau est ouvert, le canevas ne sert qu'à
+                // manipuler ses poignées.
+                if self.show_perspective_panel {
+                    if response.drag_started() {
+                        if let Some(p) = response.interact_pointer_pos() {
+                            self.start_perspective_drag_if_handle(p, view);
+                        }
+                    }
+                    if response.dragged() {
+                        if let Some(p) = response.interact_pointer_pos() {
+                            self.update_perspective_drag(p, view);
+                        }
+                    }
+                    if response.drag_stopped() {
+                        self.perspective_drag = None;
                     }
                     return;
                 }

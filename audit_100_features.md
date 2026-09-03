@@ -7,7 +7,7 @@ lecture de code**, puis confrontées au code réel de QuickPaint par lecture
 directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 **✅ Implémenté** · **🟡 Partiel** · **❌ Absent**.
 
-**Score global : 66 ✅ / 8 🟡 / 26 ❌ sur 100 — mis à jour le 1er septembre 2026 (BMP #1, soulignement #61, Unsharp Mask #68, Refine Edge #38 corrigés ; initialement 62/12/26).**
+**Score global : 68 ✅ / 6 🟡 / 26 ❌ sur 100 — mis à jour le 1er septembre 2026 (BMP #1, soulignement #61, Unsharp Mask #68, Refine Edge #38, Perspective #87, Redressement #88 corrigés ; initialement 62/12/26).**
 
 ---
 
@@ -140,14 +140,14 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 83 | Correction automatique | ✅ | `Filter::AutoLevels` |
 | 84 | Gestion de la couleur (ICC/CMJN) | ❌ | Introuvable |
 
-## 10. Transformation — 2 ✅ / 2 🟡 / 2 ❌
+## 10. Transformation — 4 ✅ / 0 🟡 / 2 ❌
 
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
 | 85 | Déplacer/redimensionner/pivoter une sélection | ✅ | [app/transform.rs:34-120](src/app/transform.rs:34) |
 | 86 | Retourner horizontal/vertical | ✅ | `flip_document()`, annulable |
-| 87 | Perspective / distorsion libre | 🟡 | Homographie 4 points réglée par sliders, pas de poignées de coin glissables directement |
-| 88 | Redressement d'horizon | 🟡 | `straighten_and_crop` réglé par slider d'angle, pas en traçant une ligne |
+| 87 | Perspective / distorsion libre | ✅ *(corrigé le 1er septembre 2026)* | Les 4 coins se glissent directement sur le canevas (poignées orange, aperçu du quadrilatère en direct), sliders retirés — `PaintApp::perspective_handles`/`start_perspective_drag_if_handle`/`update_perspective_drag` |
+| 88 | Redressement d'horizon | ✅ *(corrigé le 1er septembre 2026)* | Bouton « 📐 Tracer l'horizon » : glisser une ligne cyan sur le canevas calcule l'angle de redressement (`commit_straighten_line`), en plus du curseur d'angle conservé |
 | 89 | Alignement automatique / panorama | ❌ | Introuvable |
 | 90 | Recadrage avec grille des tiers | ❌ | Ratios/redressement présents, pas de grille des tiers superposée |
 

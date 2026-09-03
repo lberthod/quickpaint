@@ -756,9 +756,11 @@ fn lut_window(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
-/// Transformation en perspective (Sprint 7.2) : 4 curseurs (un par coin, en
-/// fraction de la largeur/hauteur de l'image) plutôt qu'un glissé interactif
-/// des coins — plus simple à intégrer, tout aussi contrôlable.
+/// Transformation en perspective (Sprint 7.2) : glisser directement les 4
+/// coins sur le canevas (audit_100_features.md #87 — poignées orange,
+/// `app/canvas_overlay.rs::paint_perspective_handles`) plutôt que des
+/// sliders X/Y par coin ; ce panneau ne garde que Réinitialiser/Appliquer/
+/// Fermer.
 fn perspective_window(ctx: &egui::Context, app: &mut PaintApp) {
     if !app.show_perspective_panel {
         return;
@@ -772,22 +774,9 @@ fn perspective_window(ctx: &egui::Context, app: &mut PaintApp) {
         .show(ctx, |ui| {
             ui.set_min_width(280.0);
             ui.label(t(
-                "S'applique à l'image sélectionnée (outil Sélection)",
-                "Applies to the selected image (Select tool)",
+                "S'applique à l'image sélectionnée (outil Sélection) — glisse les 4 poignées orange sur le canevas.",
+                "Applies to the selected image (Select tool) — drag the 4 orange handles on the canvas.",
             ));
-            let labels = [
-                t("Haut-gauche", "Top-left"),
-                t("Haut-droit", "Top-right"),
-                t("Bas-droit", "Bottom-right"),
-                t("Bas-gauche", "Bottom-left"),
-            ];
-            for (i, label) in labels.iter().enumerate() {
-                ui.horizontal(|ui| {
-                    ui.label(*label);
-                    ui.add(egui::Slider::new(&mut app.perspective_offsets[i].0, -0.5..=0.5).text("X"));
-                    ui.add(egui::Slider::new(&mut app.perspective_offsets[i].1, -0.5..=0.5).text("Y"));
-                });
-            }
             ui.separator();
             ui.horizontal(|ui| {
                 if ui.button(t("Réinitialiser", "Reset")).clicked() {
@@ -2696,6 +2685,23 @@ fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
         // le contenu ressort droit une fois le recadrage validé.
         ui.separator();
         ui.label(t("Redressement :", "Straighten:"));
+        // Tracé de ligne (audit_100_features.md #88), en plus du curseur :
+        // geste direct sur le canevas plutôt que deviner l'angle en degrés.
+        let armed = app.straighten_line_mode;
+        if ui
+            .selectable_label(armed, t("📐 Tracer l'horizon", "📐 Draw horizon"))
+            .on_hover_text(t(
+                "Glisse une ligne le long de l'horizon sur le canevas — son angle devient le redressement",
+                "Drag a line along the horizon on the canvas — its angle becomes the straighten amount",
+            ))
+            .clicked()
+        {
+            if armed {
+                app.straighten_line_mode = false;
+            } else {
+                app.start_straighten_line();
+            }
+        }
         let mut degrees = app.crop_angle.to_degrees();
         if ui
             .add(egui::Slider::new(&mut degrees, -45.0..=45.0).suffix("°"))

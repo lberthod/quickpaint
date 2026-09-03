@@ -322,6 +322,12 @@ pub struct PaintApp {
     /// bas-gauche), en fraction de la largeur/hauteur de l'image (-0.5..=0.5)
     /// — indépendant de l'échelle, plus simple à régler que des pixels bruts.
     pub perspective_offsets: [(f32, f32); 4],
+    /// Coin en cours de glissé sur le canevas (audit_100_features.md #87) :
+    /// remplace les sliders X/Y du panneau perspective par une manipulation
+    /// directe des 4 coins, comme les poignées d'échelle/rotation
+    /// (`app/transform.rs`) — index dans `perspective_offsets`, `None` hors
+    /// glissé.
+    perspective_drag: Option<usize>,
     /// Nom en cours de saisie pour enregistrer le pinceau actuel.
     pub brush_preset_name: String,
     /// Groupes de la barre d'outils repliés (UX-2.1), clés stables — voir
@@ -433,6 +439,14 @@ pub struct PaintApp {
     pub crop_angle: f32,
     /// Contrainte de ratio largeur/hauteur du recadrage (`None` = libre).
     pub crop_ratio: Option<f32>,
+    /// Redressement par ligne tracée (audit_100_features.md #88), en plus du
+    /// curseur d'angle : tant que vrai, le prochain glissé sur le canevas
+    /// (en mode recadrage) trace une ligne de référence au lieu de redéfinir
+    /// le rectangle — sa pente devient `crop_angle` au relâchement, geste
+    /// unique qui se désactive de lui-même ensuite.
+    pub straighten_line_mode: bool,
+    /// Ligne en cours de tracé (coords document), `None` hors glissé.
+    straighten_drag: Option<((f32, f32), (f32, f32))>,
     // Plume (roadmap #9) : ancres du chemin en cours.
     pen: Vec<crate::tools::pen::Anchor>,
     // Édition de nœuds après coup (roadmap P2 #12) : id du trait rouvert +
@@ -648,6 +662,7 @@ impl Default for PaintApp {
             show_perspective_panel: false,
             jpeg_quality: 90,
             perspective_offsets: [(0.0, 0.0); 4],
+            perspective_drag: None,
             collapsed_toolbar_groups: crate::i18n::load_collapsed_toolbar_groups().into_iter().collect(),
             layers_panel_width: crate::i18n::load_layers_panel_width(),
             show_style_presets: false,
@@ -700,6 +715,8 @@ impl Default for PaintApp {
             retouch_mode: None,
             retouch_rect: None,
             crop_angle: 0.0,
+            straighten_line_mode: false,
+            straighten_drag: None,
             crop_ratio: None,
             text_size: 28.0,
             text_font: crate::model::text::TextFont::Proportional,
@@ -1270,6 +1287,39 @@ impl PaintApp {
         }
     }
 
+    /// Démarre le tracé d'une ligne de référence pour le redressement
+    /// d'horizon (audit_100_features.md #88), en plus du curseur d'angle —
+    /// geste à la Photoshop : tracer une ligne le long de l'horizon plutôt
+    /// que deviner l'angle en degrés. Un seul glissé, se désactive de
+    /// lui-même après (`update_straighten_line`).
+    pub fn start_straighten_line(&mut self) {
+        self.straighten_line_mode = true;
+        self.info(t("Trace une ligne le long de l'horizon à redresser.", "Draw a line along the horizon to straighten."));
+    }
+
+    pub(super) fn update_straighten_line(&mut self, p: (f32, f32)) {
+        match &mut self.straighten_drag {
+            Some((_, end)) => *end = p,
+            None => self.straighten_drag = Some((p, p)),
+        }
+    }
+
+    /// Termine le tracé : la pente de la ligne devient `crop_angle`. Une
+    /// ligne trop courte (clic sans glissé réel) est ignorée plutôt que de
+    /// produire un angle bruité par imprécision du pointeur.
+    pub(super) fn commit_straighten_line(&mut self) {
+        self.straighten_line_mode = false;
+        let Some((a, b)) = self.straighten_drag.take() else { return };
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        if dx.hypot(dy) < 4.0 {
+            return;
+        }
+        // Même sens que `straighten_and_crop` : le rééchantillonnage tourne
+        // le contenu dans le sens *inverse* de `crop_angle` (voir sa doc) —
+        // une ligne tracée avec une pente `angle` ressort donc horizontale.
+        self.crop_angle = dy.atan2(dx);
+    }
+
     /// Active le mode recadrage si une seule image est sélectionnée.
     pub fn start_crop(&mut self) {
         if self.single_image_idx().is_some() {
@@ -1727,6 +1777,54 @@ impl PaintApp {
     }
 
     // --- Transformation en perspective (Sprint 7.2) -------------------------
+
+    /// Position écran des 4 poignées de coin (audit_100_features.md #87) :
+    /// coin d'origine de l'image sélectionnée + décalage courant de
+    /// `perspective_offsets`, dans cet ordre (haut-gauche, haut-droit,
+    /// bas-droit, bas-gauche — même ordre que `perspective_offsets` et
+    /// `selected_image_corners`). `None` si le panneau perspective n'est pas
+    /// ouvert ou si la sélection n'est pas une image unique.
+    pub(super) fn perspective_handles(&self, view: &crate::render::canvas::ViewTransform) -> Option<[egui::Pos2; 4]> {
+        if !self.show_perspective_panel {
+            return None;
+        }
+        let (_, corners) = self.selected_image_corners()?;
+        let (w, h) = (corners[2].0 - corners[0].0, corners[2].1 - corners[0].1);
+        Some(std::array::from_fn(|i| {
+            let (ox, oy) = self.perspective_offsets[i];
+            view.doc_to_screen((corners[i].0 + ox * w, corners[i].1 + oy * h))
+        }))
+    }
+
+    /// Démarre le glissé d'un coin si `p` (écran) tombe sur l'une des 4
+    /// poignées de `perspective_handles`.
+    pub(super) fn start_perspective_drag_if_handle(&mut self, p: egui::Pos2, view: &crate::render::canvas::ViewTransform) -> bool {
+        let Some(handles) = self.perspective_handles(view) else { return false };
+        for (i, h) in handles.iter().enumerate() {
+            if (*h - p).length() <= 10.0 {
+                self.perspective_drag = Some(i);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Met à jour le décalage du coin en cours de glissé, en fraction de la
+    /// largeur/hauteur de l'image (même unité que les anciens sliders X/Y,
+    /// bornée un peu plus large — -1.0..=1.0 — puisqu'un glissé direct sur
+    /// le canevas se prête mieux à une grande distorsion qu'un curseur).
+    pub(super) fn update_perspective_drag(&mut self, p: egui::Pos2, view: &crate::render::canvas::ViewTransform) {
+        let Some(i) = self.perspective_drag else { return };
+        let Some((_, corners)) = self.selected_image_corners() else { return };
+        let (w, h) = (corners[2].0 - corners[0].0, corners[2].1 - corners[0].1);
+        if w.abs() < 1e-3 || h.abs() < 1e-3 {
+            return;
+        }
+        let d = view.screen_to_doc(p);
+        let ox = (d.0 - corners[i].0) / w;
+        let oy = (d.1 - corners[i].1) / h;
+        self.perspective_offsets[i] = (ox.clamp(-1.0, 1.0), oy.clamp(-1.0, 1.0));
+    }
 
     /// Applique `perspective_offsets` (4 coins réglés dans le panneau) à
     /// l'image sélectionnée : reprojette son contenu dans le quadrilatère
@@ -3927,6 +4025,7 @@ impl eframe::App for PaintApp {
             self.paint_pen_edit(&content, &view);
             self.paint_crop(&painter, &view);
             self.paint_retouch(&painter, &view);
+            self.paint_perspective_handles(&painter, &view);
             self.paint_marquee(&painter, &view);
             self.paint_manual_guides(&painter, &view);
             self.paint_measure(&painter, &view);
@@ -4704,6 +4803,74 @@ mod tests {
         assert_eq!((after.w, after.h), (4, 3));
     }
 
+    /// Poignées de perspective glissables (audit_100_features.md #87),
+    /// remplaçant les anciens sliders X/Y par coin. Vue identité (origine
+    /// nulle, échelle 1, sans rotation) : coordonnées écran = coordonnées
+    /// document, pour des assertions directes.
+    fn identity_view() -> crate::render::canvas::ViewTransform {
+        crate::render::canvas::ViewTransform { origin: egui::Pos2::ZERO, scale: 1.0, angle: 0.0 }
+    }
+
+    #[test]
+    fn perspective_handles_is_none_when_panel_closed() {
+        let mut app = app_with_layers(1);
+        let im = crate::model::ImageItem::from_rgba(1, (0.0, 0.0), 10, 10, vec![200u8; 10 * 10 * 4]);
+        app.doc.layers[0].images.push(im);
+        app.selection = [1].into_iter().collect();
+        assert!(!app.show_perspective_panel);
+        assert!(app.perspective_handles(&identity_view()).is_none());
+    }
+
+    #[test]
+    fn perspective_handles_match_image_corners_at_zero_offset() {
+        let mut app = app_with_layers(1);
+        let im = crate::model::ImageItem::from_rgba(1, (0.0, 0.0), 10, 10, vec![200u8; 10 * 10 * 4]);
+        app.doc.layers[0].images.push(im);
+        app.selection = [1].into_iter().collect();
+        app.show_perspective_panel = true;
+
+        let handles = app.perspective_handles(&identity_view()).expect("image sélectionnée, panneau ouvert");
+        assert_eq!(handles[0], egui::Pos2::new(0.0, 0.0), "haut-gauche");
+        assert_eq!(handles[2], egui::Pos2::new(10.0, 10.0), "bas-droit");
+    }
+
+    #[test]
+    fn dragging_a_perspective_handle_updates_its_fractional_offset() {
+        let mut app = app_with_layers(1);
+        let im = crate::model::ImageItem::from_rgba(1, (0.0, 0.0), 10, 10, vec![200u8; 10 * 10 * 4]);
+        app.doc.layers[0].images.push(im);
+        app.selection = [1].into_iter().collect();
+        app.show_perspective_panel = true;
+        let view = identity_view();
+
+        // Clic sur la poignée haut-gauche (écran = doc = (0,0) à vue identité).
+        assert!(app.start_perspective_drag_if_handle(egui::Pos2::new(0.0, 0.0), &view));
+        // Glissé de 2px en x, 3px en y (image 10×10 → fractions 0.2/0.3).
+        app.update_perspective_drag(egui::Pos2::new(2.0, 3.0), &view);
+
+        let (ox, oy) = app.perspective_offsets[0];
+        assert!((ox - 0.2).abs() < 1e-4, "décalage X attendu ≈0.2, got {ox}");
+        assert!((oy - 0.3).abs() < 1e-4, "décalage Y attendu ≈0.3, got {oy}");
+        // Les 3 autres coins restent à leur décalage nul.
+        assert_eq!(app.perspective_offsets[1], (0.0, 0.0));
+    }
+
+    #[test]
+    fn clicking_away_from_any_handle_does_not_start_a_perspective_drag() {
+        let mut app = app_with_layers(1);
+        // 100×100 : le centre (50,50) est à ~70px de chaque coin, largement
+        // hors du rayon d'accroche de 10px des poignées (contrairement à une
+        // image 10×10, où le centre serait à ~7px de chaque coin — donc dans
+        // le rayon des 4 poignées à la fois).
+        let im = crate::model::ImageItem::from_rgba(1, (0.0, 0.0), 100, 100, vec![200u8; 100 * 100 * 4]);
+        app.doc.layers[0].images.push(im);
+        app.selection = [1].into_iter().collect();
+        app.show_perspective_panel = true;
+
+        assert!(!app.start_perspective_drag_if_handle(egui::Pos2::new(50.0, 50.0), &identity_view()));
+        assert!(app.perspective_drag.is_none());
+    }
+
     #[test]
     fn merge_selection_to_image_replaces_selected_elements_with_one_image() {
         let mut app = app_with_layers(1);
@@ -5094,6 +5261,53 @@ mod tests {
         assert_eq!(px(1, 0), d);
         assert_eq!(px(0, 1), a);
         assert_eq!(px(1, 1), c);
+    }
+
+    /// Redressement par ligne tracée (audit_100_features.md #88) : vérifie
+    /// le sens de rotation bout-en-bout plutôt que de le déduire de tête —
+    /// une image coupée en diagonale (y=x) où l'utilisateur trace la ligne
+    /// (0,0)→(20,20) doit ressortir avec cette diagonale devenue
+    /// **horizontale** (deux points de la même ligne de sortie, loin l'un
+    /// de l'autre en x, doivent avoir la même couleur). Si le signe de
+    /// `crop_angle` était inversé, la diagonale ressortirait verticale à la
+    /// place, et ce test échouerait.
+    #[test]
+    fn straighten_line_makes_a_diagonal_split_horizontal() {
+        let mut app = app_with_layers(1);
+        let (w, h) = (20u32, 20u32);
+        let (above, below) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                rgba.extend_from_slice(if y < x { &above } else { &below });
+            }
+        }
+        let im = crate::model::ImageItem::from_rgba(1, (0.0, 0.0), w, h, rgba);
+
+        app.start_straighten_line();
+        assert!(app.straighten_line_mode);
+        app.update_straighten_line((0.0, 0.0));
+        app.update_straighten_line((20.0, 20.0));
+        app.commit_straighten_line();
+        assert!(!app.straighten_line_mode, "geste unique : se désactive après le tracé");
+        assert!((app.crop_angle - std::f32::consts::FRAC_PI_4).abs() < 1e-4, "45° attendus, got {}", app.crop_angle.to_degrees());
+
+        let (nw, nh, out) = straighten_and_crop(&im, (0.0, 0.0, w as f32, h as f32), 1.0, 1.0, app.crop_angle);
+        let px = |x: u32, y: u32| out[((y * nw + x) * 4) as usize..][..4].to_vec();
+        // Même ligne de sortie, loin en x de part et d'autre du centre —
+        // doivent tomber du même côté d'une coupure devenue horizontale.
+        let y = nh / 2 + 5; // net d'un côté de l'ancienne diagonale, pas pile au centre
+        assert_eq!(px(2, y), px(nw - 3, y), "la diagonale doit être devenue horizontale");
+    }
+
+    #[test]
+    fn commit_straighten_line_ignores_a_click_without_real_drag() {
+        let mut app = app_with_layers(1);
+        app.start_straighten_line();
+        app.update_straighten_line((10.0, 10.0));
+        app.update_straighten_line((10.5, 10.2)); // en-deçà du seuil de 4px
+        app.commit_straighten_line();
+        assert_eq!(app.crop_angle, 0.0, "un clic sans glissé réel ne doit pas modifier l'angle");
     }
 
     /// `save_brush_preset` persiste via `i18n::save_brush_presets`, qui écrit

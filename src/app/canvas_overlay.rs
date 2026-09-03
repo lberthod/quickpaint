@@ -160,6 +160,7 @@ impl PaintApp {
             || self.selection.is_empty()
             || self.crop_mode
             || self.retouch_mode.is_some()
+            || self.show_perspective_panel
         {
             return;
         }
@@ -240,6 +241,14 @@ impl PaintApp {
         if !self.crop_mode {
             return;
         }
+        // Ligne d'horizon en cours de tracé (audit_100_features.md #88) :
+        // cyan pour rester distincte de l'orange du rectangle de recadrage —
+        // ce n'est pas la même chose qui est en train de se dessiner.
+        if let Some((a, b)) = self.straighten_drag {
+            let cyan = Color32::from_rgb(40, 210, 210);
+            painter.line_segment([view.doc_to_screen(a), view.doc_to_screen(b)], egui::Stroke::new(2.0_f32, cyan));
+            return;
+        }
         let orange = Color32::from_rgb(255, 170, 0);
         if let Some((a, b)) = self.crop_rect {
             if self.crop_angle.abs() < 1e-4 {
@@ -285,6 +294,20 @@ impl PaintApp {
         } else if let Some((_, corners)) = self.selected_image_corners() {
             let r = Rect::from_two_pos(view.doc_to_screen(corners[0]), view.doc_to_screen(corners[2]));
             painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, color));
+        }
+    }
+
+    /// Quadrilatère + 4 poignées de coin du panneau perspective
+    /// (audit_100_features.md #87) : aperçu en direct du résultat avant
+    /// application, orange pour rester visuellement distinct du cadre de
+    /// sélection bleu habituel (panneau modal, pas une sélection normale).
+    pub(super) fn paint_perspective_handles(&self, painter: &egui::Painter, view: &ViewTransform) {
+        let Some(handles) = self.perspective_handles(view) else { return };
+        let orange = Color32::from_rgb(230, 140, 40);
+        painter.add(egui::Shape::closed_line(handles.to_vec(), egui::Stroke::new(1.5_f32, orange)));
+        for h in handles {
+            painter.circle_filled(h, 5.0, Color32::WHITE);
+            painter.circle_stroke(h, 5.0, egui::Stroke::new(1.5_f32, orange));
         }
     }
 
