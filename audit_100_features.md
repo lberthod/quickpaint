@@ -7,7 +7,7 @@ lecture de code**, puis confrontées au code réel de QuickPaint par lecture
 directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 **✅ Implémenté** · **🟡 Partiel** · **❌ Absent**.
 
-**Score global : 68 ✅ / 6 🟡 / 26 ❌ sur 100 — mis à jour le 1er septembre 2026 (BMP #1, soulignement #61, Unsharp Mask #68, Refine Edge #38, Perspective #87, Redressement #88 corrigés ; initialement 62/12/26).**
+**Score global : 72 ✅ / 6 🟡 / 22 ❌ sur 100 — mis à jour le 1er septembre 2026 (initialement 62/12/26 le 29 août). Corrigés : BMP #1, soulignement #61, Unsharp Mask #68, Refine Edge #38, Perspective #87, Redressement #88, Plage de couleurs #34, Pointillés #55, Grille des tiers #90, Plein écran #17, Texte→tracés #64, Kit de marque #92. Vérifié infaisable sans réécrire le moteur de police d'egui : Polices variables #65. Reporté à une session dédiée (trop gros pour cette passe) : Macros #96 / Traitement par lots #99.**
 
 ---
 
@@ -36,7 +36,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 14 | Règles et guides | ✅ | Guides manuels persistés, [model/document.rs:451](src/model/document.rs:451) |
 | 15 | Grille + magnétisme | ✅ | `snap()`, [tools/guides.rs:24](src/tools/guides.rs:24) |
 | 16 | Zoom fluide + pan | ✅ | [app/mod.rs:2719](src/app/mod.rs:2719) |
-| 17 | Mode plein écran / sans distraction | ❌ | Introuvable |
+| 17 | Mode plein écran / sans distraction | ✅ *(corrigé le 1er septembre 2026)* | `PaintApp::toggle_distraction_free` — plein écran natif + masquage des 3 panneaux, Échap pour sortir |
 | 18 | Rotation du canevas (affichage) | ✅ | [app/mod.rs:606](src/app/mod.rs:606) `view_angle`, désactive règles/pot de peinture hors 0° |
 
 ## 3. Calques — 10 ✅ / 1 🟡 / 1 ❌
@@ -108,8 +108,8 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | 61 | Gras/italique/soulignement | ✅ *(corrigé le 30 août 2026)* | Gras (faux, décalage), italique (vraie fonte) et **soulignement** tous les trois présents |
 | 62 | Interlignage et crénage | ✅ | `line_height`/`letter_spacing` |
 | 63 | Contour de texte | ✅ | `outline_w`/`outline_color`, 8 passes |
-| 64 | Texte → tracés vectoriels | ❌ | Introuvable |
-| 65 | Polices variables / Google Fonts | ❌ | Scan des polices système uniquement, aucune police embarquée |
+| 64 | Texte → tracés vectoriels | ✅ *(corrigé le 1er septembre 2026)* | `tools/text_outline.rs` via `ttf-parser` (nouvelle dépendance directe) — contour non rempli par défaut, limite documentée sur les lettres à trou (« O ») si remplies manuellement |
+| 65 | Polices variables / Google Fonts | ❌ *(vérifié infaisable le 1er septembre 2026)* | Le rendu de texte d'egui repose sur `ab_glyph`, qui ne supporte pas l'interpolation d'axes fvar/gvar — un slider de graisse continue n'affecterait pas le texte réellement rendu sans réécrire tout le pipeline de police |
 | 66 | Vérification orthographique | ❌ | Introuvable |
 
 ## 8. Filtres & Effets — 8 ✅ / 1 🟡 / 2 ❌
@@ -156,7 +156,7 @@ directe (grep + lecture de fichiers, pas d'estimation). Statuts :
 | # | Fonctionnalité | Statut | Constat |
 |---|---|---|---|
 | 91 | Bibliothèque de modèles par catégorie | 🟡 | Galerie de formats/tailles vierges, pas de designs pré-remplis (texte/formes/mise en page) |
-| 92 | Kit de marque | ❌ | Introuvable |
+| 92 | Kit de marque | ✅ *(corrigé le 1er septembre 2026)* | `model::BrandKit` (couleurs + polices + logo PNG base64), extension du mécanisme de presets existant (`StylePreset`/`BrushPreset`) |
 | 93 | Édition collaborative temps réel | ❌ | Confirmé absent par design (README) |
 | 94 | Historique cloud + partage par lien | ❌ | Undo/redo local uniquement, confirmé absent par design |
 | 95 | Redimensionnement magique vers un autre format | ❌ | Redimensionne le canevas, ne recompose pas la mise en page |
