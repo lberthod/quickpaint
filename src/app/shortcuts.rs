@@ -4,7 +4,7 @@
 //! `match` d'évènements qui route vers les actions déjà définies ailleurs
 //! dans `impl PaintApp`, pas une nouvelle logique.
 
-use super::{t, PaintApp, ZMove};
+use super::{t, PaintApp, PendingDocAction, ZMove};
 
 impl PaintApp {
     /// Dépouille les clics du menu Édition natif (UIX_ANALYSE.md U1) et les
@@ -13,8 +13,8 @@ impl PaintApp {
     /// les actions déjà existantes, pas un chemin d'exécution séparé.
     pub(super) fn handle_native_menu(&mut self) {
         let Some(ids) = &self.native_edit_menu else { return };
-        let (undo, redo, cut, copy, paste) =
-            (ids.undo.clone(), ids.redo.clone(), ids.cut.clone(), ids.copy.clone(), ids.paste.clone());
+        let (undo, redo, cut, copy, paste, quit) =
+            (ids.undo.clone(), ids.redo.clone(), ids.cut.clone(), ids.copy.clone(), ids.paste.clone(), ids.quit.clone());
         for id in crate::native_menu::poll_events() {
             if id == undo {
                 self.undo();
@@ -26,6 +26,8 @@ impl PaintApp {
                 self.copy_selection();
             } else if id == paste && !self.paste_clipboard() {
                 self.paste_image();
+            } else if id == quit {
+                self.guard_doc_action(PendingDocAction::Quit);
             }
         }
     }
@@ -45,7 +47,19 @@ impl PaintApp {
     }
 
     /// Importe un seul fichier déposé, sans dialogue (chemin déjà connu).
+    /// Un `.psd`/`.json`/`.svg` remplace le document courant : gardé (voir
+    /// `guard_doc_action`) comme `open_project`/`import_psd`/`import_svg`.
+    /// Une image se pose dans le document courant sans le remplacer, donc
+    /// s'exécute directement.
     pub fn import_dropped_file(&mut self, path: &std::path::Path) {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        match ext.as_str() {
+            "psd" | "json" | "svg" => self.guard_doc_action(super::PendingDocAction::DropFile(path.to_path_buf())),
+            _ => self.import_dropped_file_now(path),
+        }
+    }
+
+    pub(super) fn import_dropped_file_now(&mut self, path: &std::path::Path) {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
         match ext.as_str() {
             "psd" => match crate::psd_import::import_psd(path) {
@@ -130,6 +144,7 @@ impl PaintApp {
         let mut want_save = false;
         let mut want_save_as = false;
         let mut want_paste = false;
+        let mut want_quit = false;
         ctx.input(|i| {
             let cmd = i.modifiers.command || i.modifiers.ctrl;
             if cmd && i.key_pressed(egui::Key::Z) {
@@ -159,9 +174,16 @@ impl PaintApp {
             if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::InvertSelection, i) {
                 self.invert_selection();
             }
-            // Fichier (conventions macOS) : ⌘N / ⌘O / ⌘S / ⌘E.
+            // Fichier (conventions macOS) : ⌘N / ⌘O / ⌘S / ⌘E / ⌘Q.
             if cmd && i.key_pressed(egui::Key::N) {
                 want_new = true;
+            }
+            // Le menu ⌘ natif n'a plus d'accélérateur clavier propre sur
+            // Quitter (native_menu.rs : MenuItem ordinaire, pas
+            // PredefinedMenuItem::quit) — ⌘Q est donc géré ici, comme les
+            // autres raccourcis Fichier, pour passer par guard_doc_action.
+            if cmd && i.key_pressed(egui::Key::Q) {
+                want_quit = true;
             }
             if cmd && i.key_pressed(egui::Key::O) {
                 want_open = true;
@@ -247,6 +269,9 @@ impl PaintApp {
                 }
             }
         });
+        if want_quit {
+            self.guard_doc_action(PendingDocAction::Quit);
+        }
         if want_new {
             self.new_document();
         }

@@ -14,6 +14,11 @@
 //! egui/winit n'en est pas un, l'action serait silencieusement ignorée.
 //! [`poll_events`] route donc les clics vers les mêmes méthodes que les
 //! raccourcis clavier déjà câblés dans `app/mod.rs::handle_shortcuts`.
+//!
+//! `quit` est du même bois, pour une raison différente : `PredefinedMenuItem
+//! ::quit` appelle `[NSApp terminate:]` directement, qui contournerait
+//! `PaintApp::guard_doc_action` et fermerait l'app sans jamais proposer
+//! d'enregistrer un document modifié (audit_septembre.md P0.2).
 
 use muda::{AboutMetadata, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 
@@ -25,6 +30,7 @@ pub struct EditMenuIds {
     pub cut: MenuId,
     pub copy: MenuId,
     pub paste: MenuId,
+    pub quit: MenuId,
 }
 
 /// Construit et installe le menu ⌘/Édition natif. À appeler une seule fois,
@@ -48,6 +54,14 @@ pub fn install() -> EditMenuIds {
         version: Some(env!("CARGO_PKG_VERSION").into()),
         ..Default::default()
     };
+    // `quit` : `MenuItem` ordinaire, PAS `PredefinedMenuItem::quit` — ce
+    // dernier appelle `[NSApp terminate:]` directement, qui contourne
+    // `PaintApp::update`/`guard_doc_action` et fermerait l'app sans jamais
+    // proposer d'enregistrer un document modifié (previous_audit.md /
+    // audit_septembre.md P0.2). Routé comme Annuler/Coller ci-dessous vers
+    // `handle_native_menu`, même mécanisme que ⌘Q au clavier
+    // (`app/shortcuts.rs`).
+    let quit = MenuItem::new("Quitter QuickPaint", true, None);
     let app_menu = Submenu::new("QuickPaint", true);
     let _ = app_menu.append_items(&[
         &PredefinedMenuItem::about(None, Some(about_meta)),
@@ -58,7 +72,7 @@ pub fn install() -> EditMenuIds {
         &PredefinedMenuItem::hide_others(None),
         &PredefinedMenuItem::show_all(None),
         &PredefinedMenuItem::separator(),
-        &PredefinedMenuItem::quit(None),
+        &quit,
     ]);
 
     // Pas d'`Accelerator` sur ces items : ⌘Z/⇧⌘Z/⌘X/⌘C/⌘V sont déjà gérés
@@ -91,6 +105,7 @@ pub fn install() -> EditMenuIds {
         cut: cut.id().clone(),
         copy: copy.id().clone(),
         paste: paste.id().clone(),
+        quit: quit.id().clone(),
     }
 }
 

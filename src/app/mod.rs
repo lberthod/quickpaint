@@ -265,6 +265,21 @@ pub enum SelectionMaskAction {
     RefineEdges,
 }
 
+/// Action qui remplacerait ou fermerait le document courant : différée
+/// derrière la modale « Enregistrer les modifications ? » (`guard_doc_action`)
+/// tant que le document a des changements non enregistrés.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PendingDocAction {
+    New,
+    NewSized(u32, u32),
+    Open,
+    OpenRecent(String),
+    ImportPsd,
+    ImportSvg,
+    DropFile(std::path::PathBuf),
+    Quit,
+}
+
 /// Cache des « fourmis en marche » du masque de sélection : hash de contenu
 /// (invalidation) + boucles de contour en coordonnées document.
 type SelectionAntsCache = (u64, Vec<Vec<(f32, f32)>>);
@@ -635,6 +650,13 @@ pub struct PaintApp {
     /// Dernier titre envoyé à la fenêtre, pour n'émettre la commande que
     /// lorsqu'il change (pas à chaque frame).
     last_window_title: String,
+    /// Action différée tant que l'utilisateur n'a pas répondu à la modale
+    /// « Enregistrer les modifications ? » (`Some` ⇔ modale ouverte).
+    pending_doc_action: Option<PendingDocAction>,
+    /// La fermeture de la fenêtre a été confirmée (document propre, ou
+    /// « Ne pas enregistrer » choisi explicitement) : `update` envoie
+    /// `ViewportCommand::Close` sans réintercepter la demande.
+    quit_confirmed: bool,
     /// Un fichier de récupération d'une session précédente a été détecté au
     /// démarrage : propose à l'utilisateur de le restaurer ou de l'ignorer.
     pub show_recovery_prompt: bool,
@@ -821,6 +843,8 @@ impl Default for PaintApp {
             doc_path: None,
             saved_rev: 0,
             last_window_title: String::new(),
+            pending_doc_action: None,
+            quit_confirmed: false,
             show_recovery_prompt: false,
             native_edit_menu: None,
             ui_theme: UiTheme::load(),
@@ -921,17 +945,111 @@ impl PaintApp {
         }
     }
 
+    /// Nouveau document vierge, à la taille du document courant. Passe par
+    /// `guard_doc_action` : diffère derrière la modale « Enregistrer les
+    /// modifications ? » si le document courant n'est pas enregistré.
     pub fn new_document(&mut self) {
+        self.guard_doc_action(PendingDocAction::New);
+    }
+
+    fn new_document_now(&mut self) {
         self.apply_loaded(Document::new(self.doc.size));
         self.info(t("Nouveau document.", "New document."));
     }
 
     /// Nouveau document vierge à une taille donnée (roadmap P1 #9, galerie
     /// de modèles) — contrairement à `set_canvas_size`, repart de zéro.
+    /// Gardé comme `new_document` (voir `guard_doc_action`).
     pub fn new_document_sized(&mut self, w: u32, h: u32) {
+        self.guard_doc_action(PendingDocAction::NewSized(w, h));
+    }
+
+    fn new_document_sized_now(&mut self, w: u32, h: u32) {
         let (w, h) = clamp_doc_dims(w, h);
         self.apply_loaded(Document::new((w, h)));
         self.info(format!("{} {w}×{h}.", t("Nouveau document", "New document")));
+    }
+
+    /// Point d'entrée unique pour tout ce qui remplacerait ou fermerait le
+    /// document courant (Nouveau, Ouvrir, import PSD/SVG, glisser un fichier,
+    /// Quitter) : exécute immédiatement si le document est propre, sinon
+    /// diffère derrière la modale « Enregistrer les modifications ? »
+    /// (`show_unsaved_dialog`, appelée depuis `update`).
+    pub fn guard_doc_action(&mut self, action: PendingDocAction) {
+        if self.is_dirty() {
+            self.pending_doc_action = Some(action);
+        } else {
+            self.run_doc_action(action);
+        }
+    }
+
+    fn run_doc_action(&mut self, action: PendingDocAction) {
+        match action {
+            PendingDocAction::New => self.new_document_now(),
+            PendingDocAction::NewSized(w, h) => self.new_document_sized_now(w, h),
+            PendingDocAction::Open => self.open_project_now(),
+            PendingDocAction::OpenRecent(path) => self.open_recent_project_now(&path),
+            PendingDocAction::ImportPsd => self.import_psd_now(),
+            PendingDocAction::ImportSvg => self.import_svg_now(),
+            PendingDocAction::DropFile(path) => self.import_dropped_file_now(&path),
+            // `update` envoie ViewportCommand::Close dès que ce drapeau est vrai.
+            PendingDocAction::Quit => self.quit_confirmed = true,
+        }
+    }
+
+    /// Modale « Enregistrer les modifications ? » — affichée tant que
+    /// `pending_doc_action` est `Some` (posé par `guard_doc_action`).
+    fn show_unsaved_dialog(&mut self, ctx: &egui::Context) {
+        let Some(action) = self.pending_doc_action.clone() else { return };
+        let mut choice: Option<u8> = None; // 0 = annuler, 1 = ne pas enregistrer, 2 = enregistrer
+        egui::Window::new(t("Modifications non enregistrées", "Unsaved changes"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} « {} » ?",
+                    t("Enregistrer les modifications du document", "Save changes to"),
+                    self.doc_display_name()
+                ));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button(t("Annuler", "Cancel")).clicked() {
+                        choice = Some(0);
+                    }
+                    if ui.button(t("Ne pas enregistrer", "Don't save")).clicked() {
+                        choice = Some(1);
+                    }
+                    if ui.button(t("Enregistrer", "Save")).clicked() {
+                        choice = Some(2);
+                    }
+                });
+            });
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            choice = Some(0);
+        }
+        match choice {
+            Some(0) => {
+                self.pending_doc_action = None;
+            }
+            Some(1) => {
+                self.pending_doc_action = None;
+                self.run_doc_action(action);
+            }
+            Some(2) => {
+                self.save_project(); // peut ouvrir un dialogue « Enregistrer sous »
+                if !self.is_dirty() {
+                    // Enregistrement réussi (ou dialogue annulé mais document
+                    // déjà propre par ailleurs) : l'action différée peut suivre.
+                    self.pending_doc_action = None;
+                    self.run_doc_action(action);
+                }
+                // Sinon (dialogue annulé, ou échec d'écriture affiché par
+                // `save_to`) : la modale reste ouverte, rien n'est perdu.
+            }
+            None => {}
+            Some(_) => unreachable!(),
+        }
     }
 
     /// Profondeur monotone pour qu'un nouvel élément passe au-dessus des autres.
@@ -3958,7 +4076,20 @@ impl eframe::App for PaintApp {
         // interaction) ne redéclenche jamais `update` et l'autosave ne
         // tourne plus — un crash après une longue pause perdrait tout.
         ctx.request_repaint_after(Self::AUTOSAVE_INTERVAL);
+        // Fermeture (croix, ⌘Q traduit par winit, Dock › Quitter) : si le
+        // document a des modifications non enregistrées, on annule la
+        // fermeture et on affiche la même modale que Nouveau/Ouvrir/import —
+        // sinon `on_exit` supprimerait le brouillon de récupération, la
+        // seule copie du travail non enregistré, sans jamais le demander.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed && self.is_dirty() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending_doc_action = Some(PendingDocAction::Quit);
+        }
+        if self.quit_confirmed {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         self.show_recovery_dialog(ctx);
+        self.show_unsaved_dialog(ctx);
         self.handle_screenshot(ctx);
         self.handle_native_menu();
         self.handle_shortcuts(ctx);
@@ -4590,6 +4721,47 @@ mod tests {
 
         assert!(!app.is_dirty());
         assert!(app.doc_path.is_none());
+    }
+
+    #[test]
+    fn guard_runs_immediately_when_clean_and_defers_when_dirty() {
+        let mut app = PaintApp::default();
+        app.guard_doc_action(PendingDocAction::NewSized(30, 20));
+        assert_eq!(app.doc.size, (30, 20), "document propre : l'action s'exécute tout de suite");
+        assert!(app.pending_doc_action.is_none());
+
+        let mut s = Stroke::new([0, 0, 0, 255], 2.0, Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (1.0, 1.0), width: 2.0 }];
+        app.commit_stroke(s);
+        app.guard_doc_action(PendingDocAction::NewSized(40, 40));
+        assert_eq!(app.doc.size, (30, 20), "document modifié : l'action ne s'exécute pas encore");
+        assert_eq!(app.pending_doc_action, Some(PendingDocAction::NewSized(40, 40)));
+    }
+
+    #[test]
+    fn quit_action_sets_quit_confirmed_once_run() {
+        let mut app = PaintApp::default();
+        assert!(!app.quit_confirmed);
+        app.guard_doc_action(PendingDocAction::Quit);
+        assert!(app.quit_confirmed, "document propre : Quitter s'exécute tout de suite");
+    }
+
+    #[test]
+    fn quit_is_deferred_behind_the_unsaved_dialog_when_dirty() {
+        let mut app = PaintApp::default();
+        let mut s = Stroke::new([0, 0, 0, 255], 2.0, Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (1.0, 1.0), width: 2.0 }];
+        app.commit_stroke(s);
+
+        app.guard_doc_action(PendingDocAction::Quit);
+        assert!(!app.quit_confirmed, "document modifié : pas de fermeture avant confirmation");
+        assert_eq!(app.pending_doc_action, Some(PendingDocAction::Quit));
+
+        // « Ne pas enregistrer » dans la modale : `run_doc_action` exécute
+        // l'action différée sans se soucier de l'état modifié.
+        let action = app.pending_doc_action.take().unwrap();
+        app.run_doc_action(action);
+        assert!(app.quit_confirmed);
     }
 
     /// Symétrie miroir (Sprint O, point 54) : en mode MirrorH, un trait est

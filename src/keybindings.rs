@@ -173,8 +173,8 @@ impl CommandAction {
 
 /// Touches ⌘ **non** rebindables (conventions macOS) : refusées comme cible
 /// d'un rebind de [`CommandAction`] pour ne jamais masquer ⌘Z/⌘C/⌘V/⌘X/
-/// ⌘S/⌘O/⌘N ni l'ordre de superposition ⌘[/⌘].
-const RESERVED_CMD_KEYS: [Key; 10] = [
+/// ⌘S/⌘O/⌘N/⌘Q ni l'ordre de superposition ⌘[/⌘].
+const RESERVED_CMD_KEYS: [Key; 11] = [
     Key::Z,
     Key::C,
     Key::V,
@@ -183,6 +183,7 @@ const RESERVED_CMD_KEYS: [Key; 10] = [
     Key::O,
     Key::N,
     Key::P, // ⌘P = Imprimer (Sprint T, point 20)
+    Key::Q, // ⌘Q = Quitter (audit_septembre.md P0.2, guard_doc_action)
     Key::OpenBracket,
     Key::CloseBracket,
 ];

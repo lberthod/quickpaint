@@ -41,7 +41,13 @@ impl PaintApp {
     /// Importe un fichier `.psd` (Sprint 8.3) : contrairement à
     /// `import_image` (une image posée dans le document courant), un PSD
     /// devient un **nouveau document** multi-calques, comme `open_project`.
+    /// Gardé (voir `guard_doc_action`) : un PSD devient un nouveau document,
+    /// donc remplace le document courant comme `open_project`/`new_document`.
     pub fn import_psd(&mut self) {
+        self.guard_doc_action(super::PendingDocAction::ImportPsd);
+    }
+
+    pub(super) fn import_psd_now(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("Photoshop (.psd)", &["psd"]).pick_file() else {
             return;
         };
@@ -60,7 +66,13 @@ impl PaintApp {
     /// (Sprint L.5) — contrairement à `import_image` (qui poserait un rendu
     /// bitmap dans le document courant), un SVG devient un **nouveau
     /// document** multi-éléments éditables, comme `import_psd`.
+    /// Gardé (voir `guard_doc_action`) : un SVG devient un nouveau document,
+    /// donc remplace le document courant comme `import_psd`/`open_project`.
     pub fn import_svg(&mut self) {
+        self.guard_doc_action(super::PendingDocAction::ImportSvg);
+    }
+
+    pub(super) fn import_svg_now(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("SVG", &["svg"]).pick_file() else {
             return;
         };
@@ -156,7 +168,12 @@ impl PaintApp {
         }
     }
 
+    /// Gardé (voir `guard_doc_action`) : remplace le document courant.
     pub fn open_project(&mut self) {
+        self.guard_doc_action(super::PendingDocAction::Open);
+    }
+
+    pub(super) fn open_project_now(&mut self) {
         match crate::project::open_dialog() {
             Some((path, Ok(doc))) => {
                 self.apply_loaded(doc);
@@ -173,8 +190,12 @@ impl PaintApp {
     }
 
     /// Ouvre un projet depuis un chemin déjà connu (UX-4.3, menu **Fichier ›
-    /// Ouvrir récent**) — pas de dialogue.
+    /// Ouvrir récent**) — pas de dialogue. Gardé (voir `guard_doc_action`).
     pub fn open_recent_project(&mut self, path: &str) {
+        self.guard_doc_action(super::PendingDocAction::OpenRecent(path.to_string()));
+    }
+
+    pub(super) fn open_recent_project_now(&mut self, path: &str) {
         match crate::project::open_path(std::path::Path::new(path)) {
             Ok(doc) => {
                 self.apply_loaded(doc);
