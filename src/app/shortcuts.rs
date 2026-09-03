@@ -58,6 +58,8 @@ impl PaintApp {
             "json" => match crate::project::open_path(path) {
                 Ok(doc) => {
                     self.apply_loaded(doc);
+                    self.doc_path = Some(path.to_path_buf());
+                    self.saved_rev = self.history.revision();
                     crate::i18n::push_recent_project(&path.display().to_string());
                     self.info(t("Projet ouvert.", "Project opened."));
                 }
@@ -126,6 +128,7 @@ impl PaintApp {
         let mut want_new = false;
         let mut want_open = false;
         let mut want_save = false;
+        let mut want_save_as = false;
         let mut want_paste = false;
         ctx.input(|i| {
             let cmd = i.modifiers.command || i.modifiers.ctrl;
@@ -164,7 +167,11 @@ impl PaintApp {
                 want_open = true;
             }
             if cmd && i.key_pressed(egui::Key::S) {
-                want_save = true;
+                if i.modifiers.shift {
+                    want_save_as = true;
+                } else {
+                    want_save = true;
+                }
             }
             if self.keybindings.cmd_pressed(crate::keybindings::CommandAction::Export, i) {
                 want_export = true;
@@ -248,6 +255,9 @@ impl PaintApp {
         }
         if want_save {
             self.save_project();
+        }
+        if want_save_as {
+            self.save_project_as();
         }
         if want_paste {
             // Priorité au presse-papiers interne (éléments), sinon image système.

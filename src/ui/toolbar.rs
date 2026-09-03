@@ -1503,6 +1503,10 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.save_project();
                 ui.close_menu();
             }
+            if ui.button(t("Enregistrer sous… (⌘⇧S)", "Save as… (⌘⇧S)")).clicked() {
+                app.save_project_as();
+                ui.close_menu();
+            }
             ui.separator();
             if ui.button(t("Importer une image…", "Import image…")).clicked() {
                 app.import_image();

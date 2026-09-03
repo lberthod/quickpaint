@@ -113,8 +113,26 @@ impl PaintApp {
         }
     }
 
+    /// ⌘S : écrit directement dans le fichier courant (`doc_path`) s'il y en
+    /// a un, sinon se comporte comme « Enregistrer sous » (premier
+    /// enregistrement d'un document jamais nommé).
     pub fn save_project(&mut self) {
-        let Some(path) = crate::project::save_dialog_path(t("dessin.json", "drawing.json")) else { return };
+        match self.doc_path.clone() {
+            Some(path) => self.save_to(&path),
+            None => self.save_project_as(),
+        }
+    }
+
+    /// ⌘⇧S : demande toujours un emplacement, en proposant le nom du
+    /// document courant (ou « dessin.json » s'il n'en a pas encore).
+    pub fn save_project_as(&mut self) {
+        let suggested = self
+            .doc_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| t("dessin.json", "drawing.json").to_string());
+        let Some(path) = crate::project::save_dialog_path(&suggested) else { return };
         self.save_to(&path);
     }
 
@@ -131,6 +149,8 @@ impl PaintApp {
                 // projet choisi par l'utilisateur : le brouillon de récupération
                 // n'a plus lieu d'être.
                 crate::project::clear_recovery();
+                self.doc_path = Some(path.to_path_buf());
+                self.saved_rev = self.history.revision();
             }
             Err(msg) => self.fail(format!("{} : {msg}", t("Impossible d'enregistrer le projet", "Couldn't save the project"))),
         }
@@ -140,6 +160,8 @@ impl PaintApp {
         match crate::project::open_dialog() {
             Some((path, Ok(doc))) => {
                 self.apply_loaded(doc);
+                self.doc_path = Some(path.clone());
+                self.saved_rev = self.history.revision();
                 crate::i18n::push_recent_project(&path.display().to_string());
                 self.info(t("Projet ouvert.", "Project opened."));
             }
@@ -156,6 +178,8 @@ impl PaintApp {
         match crate::project::open_path(std::path::Path::new(path)) {
             Ok(doc) => {
                 self.apply_loaded(doc);
+                self.doc_path = Some(std::path::PathBuf::from(path));
+                self.saved_rev = self.history.revision();
                 crate::i18n::push_recent_project(path);
                 self.info(t("Projet ouvert.", "Project opened."));
             }
@@ -185,6 +209,12 @@ impl PaintApp {
         // resynchronise le compteur d'autosave pour ne pas rater le premier
         // changement réel de cette nouvelle session de document.
         self.autosave_last_rev = 0;
+        // Document tout juste chargé : rien à enregistrer, pas encore de
+        // fichier connu (l'appelant renseigne `doc_path` juste après quand
+        // il vient d'un `.json` déjà nommé — voir `open_project`/
+        // `open_recent_project`/le cas "json" de `import_dropped_file`).
+        self.saved_rev = 0;
+        self.doc_path = None;
         self.cache.clear();
         self.image_textures.clear();
         self.erase_pending.clear();

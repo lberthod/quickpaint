@@ -622,6 +622,19 @@ pub struct PaintApp {
     /// lorsque le document a réellement changé depuis le dernier tick.
     autosave_last_rev: u64,
     autosave_last_at: std::time::Instant,
+    /// Fichier du projet courant (`Some` après Ouvrir/Enregistrer sous) :
+    /// ⌘S écrit dedans directement, sans dialogue. `None` pour un document
+    /// jamais enregistré, ou chargé depuis un format qu'on ne réécrit pas
+    /// tel quel (PSD/SVG importés).
+    pub doc_path: Option<std::path::PathBuf>,
+    /// Révision d'historique au dernier enregistrement ou chargement
+    /// réussi. `history.revision() != saved_rev` ⇔ document modifié
+    /// (`is_dirty`) — sert à la fois au titre de fenêtre et à la modale de
+    /// confirmation avant de perdre le document courant.
+    saved_rev: u64,
+    /// Dernier titre envoyé à la fenêtre, pour n'émettre la commande que
+    /// lorsqu'il change (pas à chaque frame).
+    last_window_title: String,
     /// Un fichier de récupération d'une session précédente a été détecté au
     /// démarrage : propose à l'utilisateur de le restaurer ou de l'ignorer.
     pub show_recovery_prompt: bool,
@@ -805,6 +818,9 @@ impl Default for PaintApp {
             measure: None,
             autosave_last_rev: 0,
             autosave_last_at: std::time::Instant::now(),
+            doc_path: None,
+            saved_rev: 0,
+            last_window_title: String::new(),
             show_recovery_prompt: false,
             native_edit_menu: None,
             ui_theme: UiTheme::load(),
@@ -3476,6 +3492,33 @@ impl PaintApp {
         });
     }
 
+    /// `true` si le document a des modifications non enregistrées depuis le
+    /// dernier `save_to`/`apply_loaded` réussi.
+    pub fn is_dirty(&self) -> bool {
+        self.history.revision() != self.saved_rev
+    }
+
+    /// Nom affiché du document courant (nom de fichier sans extension, ou
+    /// « Sans titre » tant qu'il n'a jamais été enregistré/ouvert).
+    fn doc_display_name(&self) -> String {
+        self.doc_path
+            .as_ref()
+            .and_then(|p| p.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| t("Sans titre", "Untitled").to_string())
+    }
+
+    /// Reflète le nom du document et son état modifié dans le titre de la
+    /// fenêtre (convention macOS) — n'envoie la commande que si le titre a
+    /// changé, pour ne pas le faire à chaque frame.
+    fn sync_window_title(&mut self, ctx: &egui::Context) {
+        let title = format!("{}{} — QuickPaint", if self.is_dirty() { "• " } else { "" }, self.doc_display_name());
+        if title != self.last_window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.last_window_title = title;
+        }
+    }
+
     /// Recalcule (si nécessaire) les contours du masque de sélection pour les
     /// « fourmis en marche » (Sprint O, point 60) — même invalidation par
     /// hash de contenu que `selection_overlay_texture`.
@@ -3909,6 +3952,7 @@ impl PaintApp {
 impl eframe::App for PaintApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.apply_theme(ctx);
+        self.sync_window_title(ctx);
         self.autosave_tick();
         // Sans repaint périodique, une session restée inactive (aucune
         // interaction) ne redéclenche jamais `update` et l'autosave ne
@@ -4506,6 +4550,47 @@ fn draw_text_arc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fresh_app_is_clean_and_any_stroke_makes_it_dirty() {
+        let mut app = PaintApp::default();
+        assert!(!app.is_dirty());
+        let mut s = Stroke::new([0, 0, 0, 255], 2.0, Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (1.0, 1.0), width: 2.0 }];
+        app.commit_stroke(s);
+        assert!(app.is_dirty());
+    }
+
+    #[test]
+    fn saving_to_a_path_clears_dirty_and_remembers_the_path() {
+        // save_to touche settings.json (fichiers récents) via push_recent_project.
+        let _g = crate::project::home_env_lock().lock().unwrap();
+        let mut app = PaintApp::default();
+        let mut s = Stroke::new([0, 0, 0, 255], 2.0, Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (1.0, 1.0), width: 2.0 }];
+        app.commit_stroke(s);
+        assert!(app.is_dirty());
+
+        let path = std::env::temp_dir().join("quickpaint-test-dirty.json");
+        app.save_to(&path);
+        assert!(!app.is_dirty());
+        assert_eq!(app.doc_path.as_deref(), Some(path.as_path()));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn apply_loaded_resets_dirty_state_and_current_path() {
+        let mut app = PaintApp::default();
+        let mut s = Stroke::new([0, 0, 0, 255], 2.0, Tool::Brush);
+        s.points = vec![crate::model::StrokePoint { pos: (1.0, 1.0), width: 2.0 }];
+        app.commit_stroke(s);
+        app.doc_path = Some(std::path::PathBuf::from("/tmp/whatever.json"));
+
+        app.apply_loaded(Document::new((5, 5)));
+
+        assert!(!app.is_dirty());
+        assert!(app.doc_path.is_none());
+    }
 
     /// Symétrie miroir (Sprint O, point 54) : en mode MirrorH, un trait est
     /// validé en deux copies — l'original et sa réflexion autour de l'axe

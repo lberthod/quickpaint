@@ -261,6 +261,12 @@ impl KeyBindings {
         if !shift && RESERVED_CMD_KEYS.contains(&key) {
             return false;
         }
+        // ⌘⇧S (Enregistrer sous) est réservé au même titre que ⌘S
+        // (Enregistrer) — contrairement aux autres touches de
+        // `RESERVED_CMD_KEYS`, dont la variante ⇧ reste rebindable.
+        if shift && key == Key::S {
+            return false;
+        }
         let previous = self.cmd.get(&action).copied();
         if let Some(other) = self
             .cmd
@@ -354,7 +360,7 @@ mod tests {
             let mut kb = KeyBindings::load();
             assert!(!kb.set_cmd(CommandAction::Export, Key::S, false), "⌘S (Enregistrer) doit être refusé");
             assert_eq!(kb.cmd_binding(CommandAction::Export).0, Key::E, "binding inchangé après refus");
-            assert!(kb.set_cmd(CommandAction::Export, Key::S, true), "⌘⇧S n'est pas réservé");
+            assert!(!kb.set_cmd(CommandAction::Export, Key::S, true), "⌘⇧S (Enregistrer sous) doit être refusé");
         });
     }
 
