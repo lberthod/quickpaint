@@ -82,7 +82,7 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
   (switchable anytime from the menu bar, preference persisted).
 
 Not supported by design (see [audit_next.md](audit_next.md) and
-[sprint_fonctionnalites.md](sprint_fonctionnalites.md) for the reasoning):
+[CHANGELOG.md](CHANGELOG.md) (0.20.0) for the reasoning):
 HEIC and camera RAW import (the only available Rust libraries are
 AGPL/LGPL-licensed, incompatible with a simple standalone distribution),
 lossy WebP export with an adjustable quality slider (would require the

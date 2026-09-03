@@ -244,8 +244,8 @@ impl PaintApp {
     /// Impression (Sprint T, point 20) — version « PDF vers Aperçu » : le
     /// document est rendu en PDF vectoriel dans un fichier temporaire puis
     /// ouvert dans l'application PDF par défaut (Aperçu), où l'utilisateur
-    /// imprime avec le vrai dialogue macOS. Choix assumé (voir
-    /// sprint_fonctionnalites.md) : couvre l'usage sans dépendance objc2
+    /// imprime avec le vrai dialogue macOS. Choix assumé (voir CHANGELOG.md
+    /// 0.20.0) : couvre l'usage sans dépendance objc2
     /// supplémentaire ; un `NSPrintOperation` natif reste possible plus
     /// tard. Note sandbox : `open` fonctionne aussi dans l'App Sandbox
     /// (LaunchServices), contrairement à un accès disque arbitraire.

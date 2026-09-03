@@ -2,6 +2,48 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.20.0 — juillet 2026 (Sprints O à U — 18 des 19 fonctionnalités restantes)
+
+Version jamais taguée au moment de sa livraison (20 juillet 2026) —
+régularisée ici a posteriori ; le contenu vivait jusque-là dans
+`sprint_fonctionnalites.md`, retiré une fois migré (même traitement que
+les versions 0.16.0-0.18.0, voir plus bas dans ce fichier).
+
+- **Sprint O** (transformations/sélection) : retourner horizontal/vertical
+  (`Document::flip_content`, document entier plutôt que sélection —
+  glyphes de texte non inversés, limite documentée), lasso polygonal,
+  symétrie miroir axial (radial/horizontal/vertical/les deux), fourmis en
+  marche animées sur le contour de sélection (marching squares).
+- **Sprint P** (calques/compositing) : fusion de calques qui compose
+  vraiment le raster peint (opacité/masque du calque source cuits dans le
+  résultat — il était silencieusement perdu avant), modes de fusion 6 → 12
+  (Lumière tamisée/crue, Différence, Exclusion, Densité couleur ± ),
+  mapping PSD étendu en conséquence.
+- **Sprint Q** (texte) : italique (vraie fonte système si disponible, sinon
+  repli romain), interlignage et crénage réglables (mêmes valeurs dans le
+  rendu live et le compositeur).
+- **Sprint R** (UI/navigation macOS) : mode sombre (suit la préférence
+  système via `ThemePreference`), guides manuels tirés depuis les règles,
+  rotation du canevas (affichage seulement — désactive règles/pot de
+  peinture/détourage hors 0°), raccourcis ⌘ personnalisables. Gestes
+  multi-touch : trackpad déjà couvert (pinch/pan) ; écran tactile natif
+  non engagé, décision produit en attente.
+- **Sprint S** (ajustements) : courbes libres par canal (spline monotone
+  Fritsch–Carlson, jusqu'à 16 points), l'ancienne courbe à 3 points reste
+  lisible sur les projets existants.
+- **Sprint T** (import/export/impression) : impression ⌘P via PDF
+  vectoriel ouvert dans Aperçu (vrai dialogue macOS) ; export vidéo en
+  APNG plutôt que MP4 (aucune dépendance système, décision produit).
+  Non-support documenté et assumé : export PSD, import `.abr`, WebP
+  lossy (dépendance `libwebp` refusée) — voir le README.
+- **Sprint U** (animation) : pelure d'oignon (onion skin) sur les frames
+  voisines, teintes rouge/verte à l'origine (passées à orange/bleu plus
+  tard pour l'accessibilité daltonisme, voir `audit_uix_expert.md`).
+
+325 tests au total, 0 warning clippy. Bilan : 18 des 19 items visés
+livrés — le seul non-engagement (gestes écran tactile) est une décision
+produit, pas un reste à faire.
+
 ## 0.19.0 — juillet 2026 (les 4 derniers points optionnels de l'audit)
 
 299 tests au total, 0 warning clippy.

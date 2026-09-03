@@ -1,14 +1,14 @@
 # audit_aout.md — Audit technique & plan d'optimisation (29 août 2026)
 
 Consolide un audit technique frais (build/tests/clippy/robustesse, ce jour)
-avec l'état déjà connu et documenté ailleurs (`sprint.md`,
-`sprint_next.md`, `sprint_fonctionnalites.md`, `deployappstore.md`) pour
-produire **une seule liste d'actions priorisée**, orientée « rendre l'app
-plus rapide/robuste et livrable à de vrais utilisateurs ».
+avec l'état déjà connu et documenté ailleurs (`sprint.md`, CHANGELOG.md,
+`deployappstore.md`) pour produire **une seule liste d'actions
+priorisée**, orientée « rendre l'app plus rapide/robuste et livrable à de
+vrais utilisateurs ».
 
 Ne re-décrit pas ce qui est déjà fait — voir [audit_next.md](audit_next.md)
-et [sprint_fonctionnalites.md](sprint_fonctionnalites.md) pour le détail
-fonctionnel (score global : quasi 100 % des ~120 items produit couverts).
+et [CHANGELOG.md](CHANGELOG.md) (0.20.0) pour le détail fonctionnel
+(score global : quasi 100 % des ~120 items produit couverts).
 
 ---
 
@@ -244,7 +244,7 @@ pour l'utilisateur au moment où il les rencontre (risque de confusion
   dialogue), pas découverte après coup dans le fichier généré.
 
 ### 12. Gestes multi-touch écran tactile — décision produit à formaliser
-`sprint_fonctionnalites.md` note que le trackpad est couvert (pinch/pan)
+CHANGELOG.md (0.20.0, Sprint R) note que le trackpad est couvert (pinch/pan)
 mais qu'un **écran tactile** natif (NSEvent hors winit) reste un chantier
 non engagé, faute de décision produit. Si le nom du projet
 (« paint_tactile ») implique un usage sur écran tactile réel (type
@@ -258,7 +258,7 @@ sommeil.
 ## Ce qui n'a PAS besoin d'action (déjà solide, à ne pas re-auditer)
 
 - Couverture fonctionnelle : ~120 items produit, quasi 100 % ✅ (voir
-  `audit_next.md`, `sprint_fonctionnalites.md`).
+  `audit_next.md`, CHANGELOG.md 0.20.0).
 - Format natif, import/export multi-formats, calques, historique,
   filtres, texte, animation : tous couverts avec tests dédiés.
 - Hygiène dépôt : `.gitignore` correct, pas de secret, pas de dépendance

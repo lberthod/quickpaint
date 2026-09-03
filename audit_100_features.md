@@ -1,7 +1,7 @@
 # audit_100_features.md — QuickPaint vs. Canva / Photoshop / Illustrator / GIMP (29 août 2026)
 
-Nouvel audit, indépendant des précédents (`audit_next.md`,
-`sprint_fonctionnalites.md`) : 100 fonctionnalités représentatives du
+Nouvel audit, indépendant des précédents (`audit_next.md`, CHANGELOG.md) :
+100 fonctionnalités représentatives du
 superset Canva + Photoshop + Illustrator + GIMP, **choisies avant toute
 lecture de code**, puis confrontées au code réel de QuickPaint par lecture
 directe (grep + lecture de fichiers, pas d'estimation). Statuts :
