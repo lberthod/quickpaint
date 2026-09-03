@@ -622,6 +622,11 @@ pub struct PaintApp {
     /// désactivé par défaut pour ne pas alourdir l'usage souris/clavier
     /// habituel, restaure une identification visuelle directe.
     pub show_tool_labels: bool,
+    /// Mode plein écran / sans distraction (audit_100_features.md #17) :
+    /// masque barre d'outils/panneau de calques/pied de page, ne garde que
+    /// le canevas — gagne de l'espace sur un usage tactile où chaque
+    /// centimètre compte. Pas persisté (redémarrer l'app en sort toujours).
+    pub distraction_free: bool,
     /// Guide manuel en cours de glissé (Sprint R, point 95) : création
     /// depuis une règle ou déplacement d'un guide existant.
     guide_drag: Option<GuideDrag>,
@@ -785,6 +790,7 @@ impl Default for PaintApp {
             native_edit_menu: None,
             ui_theme: UiTheme::load(),
             show_tool_labels: crate::i18n::load_show_tool_labels(),
+            distraction_free: false,
             guide_drag: None,
             view_angle: 0.0,
             onion_skin: false,
@@ -2283,6 +2289,16 @@ impl PaintApp {
         self.status_error = true;
     }
 
+    /// Bascule le mode plein écran / sans distraction (audit_100_features.md
+    /// #17) : plein écran natif macOS (`ViewportCommand::Fullscreen`) et
+    /// masquage des panneaux vont toujours ensemble — un plein écran natif
+    /// qui garderait la barre d'outils n'apporterait pas grand-chose de
+    /// plus qu'agrandir la fenêtre.
+    pub fn toggle_distraction_free(&mut self, ctx: &egui::Context) {
+        self.distraction_free = !self.distraction_free;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.distraction_free));
+    }
+
     /// Replie/déplie un groupe de la barre d'outils (UX-2.1), persisté
     /// immédiatement — même mécanique que la palette personnalisable.
     pub fn toggle_toolbar_group(&mut self, key: &str) {
@@ -3764,36 +3780,46 @@ impl eframe::App for PaintApp {
             self.measure = None;
         }
 
+        // Sans distraction (audit_100_features.md #17) : Échap en sort
+        // toujours, même si la barre d'outils (donc le bouton pour en
+        // sortir) est justement ce qui est masqué — sans ça, un
+        // utilisateur au clavier/à la souris seule serait coincé.
+        if self.distraction_free && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.toggle_distraction_free(ctx);
+        }
+
         let panel_frame = egui::Frame::default()
             .fill(ctx.style().visuals.panel_fill)
             .inner_margin(Margin::symmetric(10.0, 6.0));
 
-        egui::TopBottomPanel::top("toolbar")
-            .frame(panel_frame)
-            .show(ctx, |ui| toolbar::show(ui, self, ctx));
+        if !self.distraction_free {
+            egui::TopBottomPanel::top("toolbar")
+                .frame(panel_frame)
+                .show(ctx, |ui| toolbar::show(ui, self, ctx));
 
-        // Panneau redimensionnable (UX-3.2) — était figé à 170px, un nom de
-        // calque long était tronqué sans recours (constat C5). `default_width`
-        // ne s'applique qu'à la toute première frame d'une session egui : au
-        // relancement de l'app, elle restaure donc la largeur persistée.
-        let layers_resp = egui::SidePanel::right("layers")
-            .resizable(true)
-            .default_width(self.layers_panel_width)
-            .width_range(140.0..=320.0)
-            .show(ctx, |ui| layers::show(ui, self));
-        let new_width = layers_resp.response.rect.width();
-        if (new_width - self.layers_panel_width).abs() > 0.5 {
-            self.layers_panel_width = new_width;
-            // Écrit seulement une fois le glissé terminé (bouton relâché) :
-            // évite une écriture disque à chaque frame pendant le drag.
-            if !ctx.input(|i| i.pointer.any_down()) {
-                crate::i18n::save_layers_panel_width(new_width);
+            // Panneau redimensionnable (UX-3.2) — était figé à 170px, un nom de
+            // calque long était tronqué sans recours (constat C5). `default_width`
+            // ne s'applique qu'à la toute première frame d'une session egui : au
+            // relancement de l'app, elle restaure donc la largeur persistée.
+            let layers_resp = egui::SidePanel::right("layers")
+                .resizable(true)
+                .default_width(self.layers_panel_width)
+                .width_range(140.0..=320.0)
+                .show(ctx, |ui| layers::show(ui, self));
+            let new_width = layers_resp.response.rect.width();
+            if (new_width - self.layers_panel_width).abs() > 0.5 {
+                self.layers_panel_width = new_width;
+                // Écrit seulement une fois le glissé terminé (bouton relâché) :
+                // évite une écriture disque à chaque frame pendant le drag.
+                if !ctx.input(|i| i.pointer.any_down()) {
+                    crate::i18n::save_layers_panel_width(new_width);
+                }
             }
-        }
 
-        egui::TopBottomPanel::bottom("footer")
-            .frame(panel_frame)
-            .show(ctx, |ui| footer::show(ui, self));
+            egui::TopBottomPanel::bottom("footer")
+                .frame(panel_frame)
+                .show(ctx, |ui| footer::show(ui, self));
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let avail = ui.available_size();

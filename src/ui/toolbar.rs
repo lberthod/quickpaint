@@ -1957,6 +1957,17 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             {
                 crate::i18n::save_show_tool_labels(app.show_tool_labels);
             }
+            // Sans distraction (audit_100_features.md #17) : plein écran
+            // natif + masquage des panneaux, Échap pour en ressortir même
+            // sans accès à ce menu (voir `toggle_distraction_free`).
+            if ui
+                .selectable_label(app.distraction_free, t("🖥 Sans distraction", "🖥 Distraction-free"))
+                .on_hover_text(t("Masque les panneaux, plein écran — Échap pour sortir", "Hides the panels, full screen — Escape to exit"))
+                .clicked()
+            {
+                app.toggle_distraction_free(ctx);
+                ui.close_menu();
+            }
             ui.separator();
             ui.checkbox(&mut app.show_grid, t("Grille", "Grid"));
             ui.checkbox(&mut app.show_rulers, t("Règles", "Rulers"));
