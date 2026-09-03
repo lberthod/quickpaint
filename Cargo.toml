@@ -1,6 +1,6 @@
 [package]
 name = "quickpaint"
-version = "0.20.0"
+version = "0.21.0"
 edition = "2021"
 # slice::as_chunks/as_chunks_mut (tools/filter.rs, render/compositor.rs, etc.),
 # stable depuis 1.88 — voir plan_implementation.md étape 1.

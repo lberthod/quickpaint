@@ -2,6 +2,59 @@
 
 Versions alignées sur les sprints. Détail complet : le journal git.
 
+## 0.21.0 — septembre 2026 (fonctionnalités du 30 août-1er sept. + livrabilité)
+
+365 tests au total, CI verte (0 warning clippy avec la CI actuelle,
+rustc 1.98). Deux volets : des fonctionnalités ajoutées après le bump de
+version 0.20.0 (jamais publiées sous leur propre numéro), et un audit de
+livrabilité (`audit_septembre.md`) qui corrige ce qui empêchait de confier
+l'app à un vrai utilisateur externe sans risque de perte de travail.
+
+**Fonctionnalités** (audit_100_features.md, contenu migré dans
+`previous_audit.md`) :
+- Correction de l'import BMP, soulignement de texte.
+- Unsharp Mask réglable ; amélioration des bords (Refine Edge) généralisée
+  à n'importe quelle sélection par région, plus seulement le détourage en
+  un clic.
+- Perspective et redressement de l'horizon : manipulation directe des
+  coins/de la ligne à la place des anciens sliders.
+- Plage de couleurs (sélection par teinte), traits pointillés, grille des
+  tiers.
+- Mode plein écran / sans distraction.
+- Texte → tracés vectoriels ; kits de marque (couleurs/logo réutilisables).
+
+**Livrabilité** (`audit_septembre.md`, correctifs détaillés dans
+`plan_implementation.md`) :
+- **CI verte** pour la première fois depuis le 20 juillet : 38 lints
+  clippy (`slice::as_chunks`, alias de type, un `?`, un `while let`)
+  laissaient la CI rouge sur 8 pushs consécutifs sans que personne ne le
+  remarque.
+- **Plus de perte silencieuse du travail** : enregistrer un projet
+  renvoie maintenant une vraie erreur (disque plein, permissions) au lieu
+  d'être confondu avec une annulation ; les écritures (projet, autosave,
+  préférences) sont atomiques (plus de fichier tronqué en cas de crash
+  pendant l'écriture).
+- **⌘S enregistre directement** dans le fichier courant (avant : toujours
+  un dialogue « Enregistrer sous ») ; ⌘⇧S pour en choisir un autre ; le
+  titre de la fenêtre reflète le document ouvert et son état modifié.
+- **Confirmation avant de perdre un document modifié** : fermeture de la
+  fenêtre, ⌘Q, menu ⌘ › Quitter, Nouveau, Ouvrir, Ouvrir récent, import
+  PSD/SVG et glisser-déposer proposent d'enregistrer plutôt que de
+  remplacer le document en silence.
+- **App Sandbox retirée** du bundle Developer ID (résidu de la piste
+  App Store abandonnée le 30 août) : elle empêchait *Ouvrir récent* de
+  fonctionner d'une session à l'autre.
+- **Historique plafonné** (768 Mo / 500 commandes) : un redimensionnement
+  répété d'un gros document multi-calques ne pouvait plus grossir la
+  mémoire sans limite.
+- **`cargo audit`** de nouveau suivi : une vraie vulnérabilité corrigée
+  (`webbrowser`, injection d'argument via `BROWSER` sur Unix,
+  RUSTSEC-2026-0257), job CI ajouté (`ttf-parser`/`rustybuzz` restent
+  volontairement visibles, décision de les accepter non tranchée).
+
+Reste ouvert (voir `sprint.md` T5) : branche `egui-upgrade` à rebaser ou
+fermer, test VoiceOver réel, décision produit sur l'écran tactile natif.
+
 ## 0.20.0 — juillet 2026 (Sprints O à U — 18 des 19 fonctionnalités restantes)
 
 Version jamais taguée au moment de sa livraison (20 juillet 2026) —
