@@ -207,11 +207,8 @@ fn read_settings() -> Settings {
 
 fn write_settings(settings: &Settings) {
     let Some(path) = settings_path() else { return };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     if let Ok(data) = serde_json::to_string_pretty(settings) {
-        let _ = std::fs::write(path, data);
+        let _ = crate::project::write_atomic(&path, data.as_bytes());
     }
 }
 

@@ -114,14 +114,25 @@ impl PaintApp {
     }
 
     pub fn save_project(&mut self) {
+        let Some(path) = crate::project::save_dialog_path(t("dessin.json", "drawing.json")) else { return };
+        self.save_to(&path);
+    }
+
+    /// Écrit le document à `path` (dialogue déjà résolu par l'appelant) et
+    /// affiche le résultat — succès **ou** échec, plus jamais silencieux
+    /// (un `fs::write` raté n'est plus confondu avec une annulation).
+    pub(super) fn save_to(&mut self, path: &std::path::Path) {
         self.encode_all_images();
-        if let Some(p) = crate::project::save_dialog(&self.doc) {
-            crate::i18n::push_recent_project(&p.display().to_string());
-            self.info(format!("{} : {}", t("Projet enregistré", "Project saved"), p.display()));
-            // Le travail est maintenant en sécurité dans le fichier de
-            // projet choisi par l'utilisateur : le brouillon de récupération
-            // n'a plus lieu d'être.
-            crate::project::clear_recovery();
+        match crate::project::save_to_path(&self.doc, path) {
+            Ok(()) => {
+                crate::i18n::push_recent_project(&path.display().to_string());
+                self.info(format!("{} : {}", t("Projet enregistré", "Project saved"), path.display()));
+                // Le travail est maintenant en sécurité dans le fichier de
+                // projet choisi par l'utilisateur : le brouillon de récupération
+                // n'a plus lieu d'être.
+                crate::project::clear_recovery();
+            }
+            Err(msg) => self.fail(format!("{} : {msg}", t("Impossible d'enregistrer le projet", "Couldn't save the project"))),
         }
     }
 

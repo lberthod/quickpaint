@@ -8,20 +8,51 @@ use crate::model::document::CURRENT_FORMAT_VERSION;
 use crate::model::{image::check_dims, Document};
 use std::path::PathBuf;
 
-/// Ouvre un sélecteur « Enregistrer » et écrit le document en JSON.
-/// Renvoie le chemin écrit, ou `None` si annulé / erreur.
-pub fn save_dialog(doc: &Document) -> Option<PathBuf> {
-    let path = rfd::FileDialog::new()
+/// Écrit `bytes` dans `path` sans jamais laisser un fichier tronqué : on
+/// écrit d'abord `<path>.tmp` dans le même dossier, puis `rename` (atomique
+/// sur APFS/ext4/NTFS — le fichier cible passe d'un état valide à l'autre,
+/// jamais à moitié écrit). Un crash pendant l'écriture laisse l'ancien
+/// fichier intact et au pire un `.tmp` orphelin, jamais un projet corrompu
+/// à la place de la seule copie valide.
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension(match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => format!("{ext}.tmp"),
+        None => "tmp".to_string(),
+    });
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&tmp, bytes)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+/// Ouvre un sélecteur « Enregistrer » ; ne fait qu'interroger l'utilisateur,
+/// n'écrit rien (voir [`save_to_path`]). `suggested` : nom de fichier
+/// proposé par défaut (le nom du projet courant, ou « dessin.json »).
+pub fn save_dialog_path(suggested: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new()
         .add_filter(t("Projet QuickPaint", "QuickPaint project"), &["json"])
-        .set_file_name(t("dessin.json", "drawing.json"))
-        .save_file()?;
+        .set_file_name(suggested)
+        .save_file()
+}
+
+/// Écrit le document en JSON à `path`. Toute erreur (disque plein,
+/// permissions, volume déconnecté) est renvoyée avec un message localisé
+/// prêt à afficher — jamais confondue avec une annulation utilisateur.
+pub fn save_to_path(doc: &Document, path: &std::path::Path) -> Result<(), String> {
     // Stampée à la version courante à chaque écriture (pas seulement à la
     // création) : rouvrir puis resauvegarder un vieux projet le met à jour.
     let mut doc = doc.clone();
     doc.format_version = CURRENT_FORMAT_VERSION;
-    let json = serde_json::to_string_pretty(&doc).ok()?;
-    std::fs::write(&path, json).ok()?;
-    Some(path)
+    let json = serde_json::to_string_pretty(&doc)
+        .map_err(|e| format!("{} : {e}", t("sérialisation impossible", "couldn't serialize")))?;
+    write_atomic(path, json.as_bytes()).map_err(|e| format!("{} : {e}", t("écriture impossible", "couldn't write file")))
 }
 
 /// Ouvre un sélecteur « Ouvrir » et charge un document JSON.
@@ -125,11 +156,8 @@ pub fn has_recovery() -> bool {
 /// l'appelant au-delà du logging silencieux.
 pub fn autosave(doc: &Document) {
     let Some(path) = recovery_path() else { return };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
     if let Ok(json) = serde_json::to_string(doc) {
-        let _ = std::fs::write(path, json);
+        let _ = write_atomic(&path, json.as_bytes());
     }
 }
 
@@ -166,6 +194,37 @@ pub(crate) fn home_env_lock() -> &'static std::sync::Mutex<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_to_path_writes_a_loadable_file_and_leaves_no_tmp() {
+        let dir = std::env::temp_dir().join("quickpaint-test-save-atomic");
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("p.json");
+        save_to_path(&Document::new((12, 9)), &path).expect("save");
+        assert_eq!(load_from_path(&path).unwrap().size, (12, 9));
+        assert!(!dir.join("p.json.tmp").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_to_path_reports_an_error_instead_of_silently_failing() {
+        // Un fichier à la place du dossier parent : create_dir_all échoue.
+        let blocker = std::env::temp_dir().join("quickpaint-test-save-blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let err = save_to_path(&Document::new((1, 1)), &blocker.join("p.json")).unwrap_err();
+        assert!(!err.is_empty());
+        let _ = std::fs::remove_file(&blocker);
+    }
+
+    #[test]
+    fn write_atomic_keeps_the_previous_file_when_rename_target_is_a_dir() {
+        let dir = std::env::temp_dir().join("quickpaint-test-atomic-dir");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("target.json")).unwrap(); // rename vers un dossier échoue
+        assert!(write_atomic(&dir.join("target.json"), b"new").is_err());
+        assert!(!dir.join("target.json.tmp").exists(), "le .tmp doit être nettoyé");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn import_image_from_path_decodes_gif() {
