@@ -1,6 +1,6 @@
 # explication_artboards_smart_objects.md — Artboards & Smart Objects, et pourquoi c'est une question de positionnement (30 août 2026)
 
-Contexte : `audit_100_features.md` liste « Plans de travail multiples
+Contexte : `previous_audit.md` liste « Plans de travail multiples
 (artboards) » et « Objets dynamiques (Smart Objects) » comme absents de
 QuickPaint, en notant que les intégrer rapprocherait le produit d'un
 « outil de PAO professionnel » plutôt que d'un « outil de dessin/retouche
@@ -27,7 +27,7 @@ Tous les artboards partagent le même espace de travail (on peut faire
 glisser un élément d'un artboard à l'autre), mais chacun a sa **propre
 taille, son propre fond, et s'exporte indépendamment**. C'est l'outil de
 base de la déclinaison multi-format d'un même visuel — exactement le cas
-d'usage que couvre le « Redimensionnement magique » de Canva (`audit_100_features.md`
+d'usage que couvre le « Redimensionnement magique » de Canva (`previous_audit.md`
 #95), qui n'existe que parce que les artboards existent en amont.
 
 ### Comment QuickPaint fonctionne aujourd'hui
@@ -101,7 +101,7 @@ transformations, mais :
   transformations appliquées à la volée au rendu plutôt que cuites dans
   les pixels — un changement du pipeline de composition (`render/compositor.rs`)
   qui aujourd'hui rasterise chaque calque une fois pour toutes (avec cache
-  par hash, voir `audit_aout.md` §8).
+  par hash, voir `previous_audit.md` §8).
 - Il faudrait gérer la **propagation** : quand la source change, retrouver
   et invalider toutes les occurrences qui la référencent, potentiellement
   à travers plusieurs documents (Smart Objects « liés » vs « embarqués »).
@@ -134,4 +134,4 @@ légitimes. La question à trancher est : est-ce que QuickPaint veut rester
 un outil de session courte et focalisée, ou évoluer vers un outil de
 production multi-livrables ? La réponse change complètement la priorité
 (et la faisabilité à effort raisonnable) de ces deux fonctionnalités par
-rapport au reste de la liste des 38 items non-✅ de `audit_100_features.md`.
+rapport au reste de la liste des 38 items non-✅ de `previous_audit.md`.

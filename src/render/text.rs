@@ -120,7 +120,7 @@ pub fn passes(t: &TextItem) -> Vec<Pass> {
     v
 }
 
-/// Trait de soulignement (audit_100_features.md #61), en unités écran
+/// Trait de soulignement (previous_audit.md #61), en unités écran
 /// (`scale` = unités document → pixels). `None` si `t.underline` est
 /// désactivé. Épaisseur proportionnelle à la taille de police, comme le
 /// faux-bold de `passes()`. N'est appliqué qu'à la **dernière** passe (le

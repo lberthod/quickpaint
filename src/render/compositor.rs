@@ -398,7 +398,7 @@ fn layer_hash(l: &crate::model::Layer, skip_text: Option<u64>) -> u64 {
         // ombre — chacun manquant ici invaliderait le cache trop tard
         // (le rendu resterait périmé jusqu'au prochain changement qui,
         // lui, touche un champ déjà couvert). Trouvé en ajoutant le
-        // soulignement (audit_100_features.md #61) : italique/interligne/
+        // soulignement (previous_audit.md #61) : italique/interligne/
         // espacement/police système/ombre en manquaient déjà depuis leur
         // introduction (Sprint Q).
         mix(t.font as u64);
@@ -927,7 +927,7 @@ fn raster_text_glyphs(
         }
     }
 
-    // Soulignement (audit_100_features.md #61) : un bandeau plein par
+    // Soulignement (previous_audit.md #61) : un bandeau plein par
     // rangée, à la base de sa boîte (même repère que le tessellateur egui
     // pour le chemin painter live — `row_rect.bottom()`), dessiné une fois
     // après toutes les passes de glyphes plutôt que par passe (sinon un

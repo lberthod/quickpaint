@@ -308,7 +308,7 @@ impl PaintApp {
         self.info(t("Sélection dilatée.", "Selection dilated."));
     }
 
-    /// Amélioration des bords (audit_100_features.md #38, façon Refine
+    /// Amélioration des bords (previous_audit.md #38, façon Refine
     /// Edge/Select and Mask) : affine le bord du masque de sélection selon
     /// la texture locale de l'image composée — les zones plates gardent un
     /// dégradé doux, les zones texturées (feuillage, cheveux, herbe…) sont

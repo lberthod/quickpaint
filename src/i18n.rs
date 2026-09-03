@@ -112,10 +112,10 @@ struct Settings {
     #[serde(default)]
     theme: Option<String>,
     /// Affiche le nom de chaque outil sous son icône dans la barre
-    /// (audit_uix_expert.md critique n°1), pour la découvrabilité tactile.
+    /// (previous_audit.md critique n°1), pour la découvrabilité tactile.
     #[serde(default)]
     show_tool_labels: bool,
-    /// Kits de marque nommés (audit_100_features.md #92), même fichier local.
+    /// Kits de marque nommés (previous_audit.md #92), même fichier local.
     #[serde(default)]
     brand_kits: Vec<crate::model::BrandKit>,
 }
@@ -311,7 +311,7 @@ pub fn save_layers_panel_width(width: f32) {
     write_settings(&settings);
 }
 
-/// Libellés d'outils visibles sous les icônes (audit_uix_expert.md critique
+/// Libellés d'outils visibles sous les icônes (previous_audit.md critique
 /// n°1), même fichier local.
 pub fn load_show_tool_labels() -> bool {
     read_settings().show_tool_labels
@@ -323,7 +323,7 @@ pub fn save_show_tool_labels(value: bool) {
     write_settings(&settings);
 }
 
-/// Kits de marque (audit_100_features.md #92), même fichier local.
+/// Kits de marque (previous_audit.md #92), même fichier local.
 pub fn load_brand_kits() -> Vec<crate::model::BrandKit> {
     read_settings().brand_kits
 }

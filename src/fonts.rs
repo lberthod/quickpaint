@@ -112,7 +112,7 @@ impl FontManager {
         true
     }
 
-    /// Octets bruts de la police système `family` (audit_100_features.md
+    /// Octets bruts de la police système `family` (previous_audit.md
     /// #64, extraction de contours de glyphes via `ttf-parser`) — au plus
     /// proche du style demandé (gras/italique), avec repli sur la variante
     /// normale si la famille n'a pas exactement ce style. `None` si la

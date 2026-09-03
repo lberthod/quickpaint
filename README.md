@@ -81,7 +81,7 @@ Author: **Loïc Berthod** — <https://github.com/lberthod>
 - **Languages**: **FR/EN** UI, detected from the system locale at launch
   (switchable anytime from the menu bar, preference persisted).
 
-Not supported by design (see [audit_next.md](audit_next.md) and
+Not supported by design (see [previous_audit.md](previous_audit.md) and
 [CHANGELOG.md](CHANGELOG.md) (0.20.0) for the reasoning):
 HEIC and camera RAW import (the only available Rust libraries are
 AGPL/LGPL-licensed, incompatible with a simple standalone distribution),
@@ -124,18 +124,20 @@ window needed — the model, tools and history layers are UI-independent).
 - [ARCHITECTURE.md](ARCHITECTURE.md) — layers, data model, input pipeline,
   rendering, undo/redo design.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
-- [audit_next.md](audit_next.md) — latest functional audit against a product
-  feature checklist (what's implemented, partial, or absent, with code
-  references).
+- [previous_audit.md](previous_audit.md) — the project's audit trail, merged
+  into one file: functional coverage against a product feature checklist,
+  a technical/robustness audit, a UI/UX expert review, and a 100-feature
+  comparison against Canva/Photoshop/Illustrator/GIMP (what's implemented,
+  partial, or absent, with code references).
 - [packaging/SANDBOX_NOTES.md](packaging/SANDBOX_NOTES.md) — Mac App Store
   sandbox validation notes.
 - In-app: **About ▸ Tool documentation** — a reference window covering every
   tool and the project's design philosophy, in French.
 
-Older planning/audit documents (feature roadmap, sprint-by-sprint logs, the
-UI/UX audit, prior functional audits) are retired once acted upon — see the
-git log for that history. Only the latest audit is kept at the repo root, to
-avoid accumulating stale planning documents over time.
+Older planning/audit documents (feature roadmap, sprint-by-sprint logs) are
+retired once acted upon — see the git log for that history. Audits are kept
+merged into a single file at the repo root, to avoid accumulating stale
+planning documents over time.
 
 ## License
 

@@ -38,7 +38,7 @@ les versions 0.16.0-0.18.0, voir plus bas dans ce fichier).
   lossy (dépendance `libwebp` refusée) — voir le README.
 - **Sprint U** (animation) : pelure d'oignon (onion skin) sur les frames
   voisines, teintes rouge/verte à l'origine (passées à orange/bleu plus
-  tard pour l'accessibilité daltonisme, voir `audit_uix_expert.md`).
+  tard pour l'accessibilité daltonisme, voir `previous_audit.md`).
 
 325 tests au total, 0 warning clippy. Bilan : 18 des 19 items visés
 livrés — le seul non-engagement (gestes écran tactile) est une décision
@@ -82,7 +82,7 @@ produit, pas un reste à faire.
 - Pinceau pixel, Gomme pixel et Aérographe respectent désormais le masque
   de sélection (pas le pot de peinture, le tampon de clonage ni les autres
   outils raster — périmètre volontairement limité).
-- 91 ✅ / 10 🟡 / 1 ❌ sur les 102 items de `audit_next.md` — seul le rendu
+- 91 ✅ / 10 🟡 / 1 ❌ sur les 102 items de `previous_audit.md` — seul le rendu
   GPU `wgpu` (Sprint N) reste comme décision d'architecture non tranchée.
 
 ## 0.17.0 — juillet 2026 (Sprint L.6 : export GIF statique et animé)
@@ -131,7 +131,7 @@ produit, pas un reste à faire.
 ## 0.15.0 — juillet 2026 (audit fonctionnel de suivi — Sprints A à F)
 
 Audit et plan de sprints (`audit_newxxx.md`/`audit_sprint_xx.md`) retirés une
-fois acté — voir [audit_next.md](audit_next.md) pour l'audit suivant.
+fois acté — voir [previous_audit.md](previous_audit.md) pour l'audit suivant.
 211 tests au total (+15), 0 warning clippy.
 
 - **Sprint D — Retouche photo** : calques de réglage **Exposition** (gain en

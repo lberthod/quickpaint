@@ -241,7 +241,7 @@ impl PaintApp {
         if !self.crop_mode {
             return;
         }
-        // Ligne d'horizon en cours de tracé (audit_100_features.md #88) :
+        // Ligne d'horizon en cours de tracé (previous_audit.md #88) :
         // cyan pour rester distincte de l'orange du rectangle de recadrage —
         // ce n'est pas la même chose qui est en train de se dessiner.
         if let Some((a, b)) = self.straighten_drag {
@@ -254,7 +254,7 @@ impl PaintApp {
             if self.crop_angle.abs() < 1e-4 {
                 let r = Rect::from_two_pos(view.doc_to_screen(a), view.doc_to_screen(b));
                 painter.rect_stroke(r, 0.0, egui::Stroke::new(1.5_f32, orange));
-                // Grille des tiers (audit_100_features.md #90) : aide de
+                // Grille des tiers (previous_audit.md #90) : aide de
                 // composition, aucun effet sur le recadrage réel — seulement
                 // dans le cas non tourné, une grille sur un rectangle
                 // pivoté (redressement en cours) ajouterait de la
@@ -310,7 +310,7 @@ impl PaintApp {
     }
 
     /// Quadrilatère + 4 poignées de coin du panneau perspective
-    /// (audit_100_features.md #87) : aperçu en direct du résultat avant
+    /// (previous_audit.md #87) : aperçu en direct du résultat avant
     /// application, orange pour rester visuellement distinct du cadre de
     /// sélection bleu habituel (panneau modal, pas une sélection normale).
     pub(super) fn paint_perspective_handles(&self, painter: &egui::Painter, view: &ViewTransform) {

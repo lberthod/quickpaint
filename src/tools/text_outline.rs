@@ -1,5 +1,5 @@
 //! Extraction de contours de glyphes pour « Texte → tracés » (roadmap
-//! audit_100_features.md #64) : convertit une chaîne en polylignes fermées
+//! previous_audit.md #64) : convertit une chaîne en polylignes fermées
 //! (une ou plusieurs par caractère — une lettre comme « O » a un contour
 //! extérieur ET un contour intérieur), positionnées le long de la ligne de
 //! base, en unités document (pas en unités de police).

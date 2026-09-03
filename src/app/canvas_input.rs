@@ -93,7 +93,7 @@ impl PaintApp {
                 }
                 // Mode recadrage : le glissé définit la zone à conserver.
                 if self.crop_mode {
-                    // Tracé de la ligne d'horizon (audit_100_features.md #88),
+                    // Tracé de la ligne d'horizon (previous_audit.md #88),
                     // prioritaire sur le glissé normal du rectangle tant que
                     // le geste est armé — un seul glissé, se désactive de
                     // lui-même dans `commit_straighten_line`.
@@ -161,7 +161,7 @@ impl PaintApp {
                     }
                     return;
                 }
-                // Panneau perspective ouvert (audit_100_features.md #87) :
+                // Panneau perspective ouvert (previous_audit.md #87) :
                 // glisser directement les 4 coins plutôt que des sliders X/Y,
                 // même schéma modal que crop_mode/retouch_mode ci-dessus —
                 // tant que le panneau est ouvert, le canevas ne sert qu'à

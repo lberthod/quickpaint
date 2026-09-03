@@ -259,7 +259,7 @@ pub enum SelectionMaskAction {
     Feather,
     Dilate,
     Contract,
-    /// Amélioration des bords (audit_100_features.md #38) : généralise
+    /// Amélioration des bords (previous_audit.md #38) : généralise
     /// `bucket::refine_edges`, jusque-là câblé seulement au détourage en un
     /// clic, à n'importe quelle sélection par région.
     RefineEdges,
@@ -279,7 +279,7 @@ pub struct PaintApp {
     pub stroke_stabilization: f32,
     /// Remplir les formes fermées au lieu du contour.
     pub fill_shapes: bool,
-    /// Trait en pointillés pour les outils Forme (audit_100_features.md
+    /// Trait en pointillés pour les outils Forme (previous_audit.md
     /// #55) — motif fixe relatif à l'épaisseur du trait plutôt que deux
     /// champs numériques de plus dans une barre déjà dense.
     pub dashed_stroke: bool,
@@ -298,7 +298,7 @@ pub struct PaintApp {
     /// persistés localement. Les préréglages fournis (`BrushPreset::builtins`)
     /// s'affichent en plus, jamais dans cette liste.
     pub brush_presets: Vec<crate::model::BrushPreset>,
-    /// Kits de marque nommés (audit_100_features.md #92), persistés
+    /// Kits de marque nommés (previous_audit.md #92), persistés
     /// localement — extension du même mécanisme que `style_presets`/
     /// `brush_presets`.
     pub brand_kits: Vec<crate::model::BrandKit>,
@@ -334,7 +334,7 @@ pub struct PaintApp {
     /// bas-gauche), en fraction de la largeur/hauteur de l'image (-0.5..=0.5)
     /// — indépendant de l'échelle, plus simple à régler que des pixels bruts.
     pub perspective_offsets: [(f32, f32); 4],
-    /// Coin en cours de glissé sur le canevas (audit_100_features.md #87) :
+    /// Coin en cours de glissé sur le canevas (previous_audit.md #87) :
     /// remplace les sliders X/Y du panneau perspective par une manipulation
     /// directe des 4 coins, comme les poignées d'échelle/rotation
     /// (`app/transform.rs`) — index dans `perspective_offsets`, `None` hors
@@ -451,7 +451,7 @@ pub struct PaintApp {
     pub crop_angle: f32,
     /// Contrainte de ratio largeur/hauteur du recadrage (`None` = libre).
     pub crop_ratio: Option<f32>,
-    /// Redressement par ligne tracée (audit_100_features.md #88), en plus du
+    /// Redressement par ligne tracée (previous_audit.md #88), en plus du
     /// curseur d'angle : tant que vrai, le prochain glissé sur le canevas
     /// (en mode recadrage) trace une ligne de référence au lieu de redéfinir
     /// le rectangle — sa pente devient `crop_angle` au relâchement, geste
@@ -488,7 +488,7 @@ pub struct PaintApp {
     /// Italique (Sprint Q, point 82) — effectif pour les polices système
     /// disposant d'une vraie fonte italique (voir `TextItem::italic`).
     pub text_italic: bool,
-    /// Soulignement (audit_100_features.md #61).
+    /// Soulignement (previous_audit.md #61).
     pub text_underline: bool,
     /// Interligne (Sprint Q, point 83), multiple de la taille.
     pub text_line_height: f32,
@@ -624,13 +624,13 @@ pub struct PaintApp {
     /// Thème d'interface (Sprint R, point 96), persisté dans `settings.json`.
     pub ui_theme: UiTheme,
     /// Affiche le nom de chaque outil sous son icône dans la barre
-    /// (audit_uix_expert.md critique n°1) : un tooltip au survol ne se
+    /// (previous_audit.md critique n°1) : un tooltip au survol ne se
     /// déclenche jamais au doigt sur écran tactile, ce qui rend les 32
     /// outils indiscoverables sans essai-erreur sur ce canal — ce réglage,
     /// désactivé par défaut pour ne pas alourdir l'usage souris/clavier
     /// habituel, restaure une identification visuelle directe.
     pub show_tool_labels: bool,
-    /// Mode plein écran / sans distraction (audit_100_features.md #17) :
+    /// Mode plein écran / sans distraction (previous_audit.md #17) :
     /// masque barre d'outils/panneau de calques/pied de page, ne garde que
     /// le canevas — gagne de l'espace sur un usage tactile où chaque
     /// centimètre compte. Pas persisté (redémarrer l'app en sort toujours).
@@ -1310,7 +1310,7 @@ impl PaintApp {
     }
 
     /// Démarre le tracé d'une ligne de référence pour le redressement
-    /// d'horizon (audit_100_features.md #88), en plus du curseur d'angle —
+    /// d'horizon (previous_audit.md #88), en plus du curseur d'angle —
     /// geste à la Photoshop : tracer une ligne le long de l'horizon plutôt
     /// que deviner l'angle en degrés. Un seul glissé, se désactive de
     /// lui-même après (`update_straighten_line`).
@@ -1607,7 +1607,7 @@ impl PaintApp {
         }
     }
 
-    /// Texte → tracés vectoriels (audit_100_features.md #64) : remplace le
+    /// Texte → tracés vectoriels (previous_audit.md #64) : remplace le
     /// texte sélectionné par un `Stroke` non rempli par contour de glyphe
     /// (extraction via `tools::text_outline`, sur les octets réels de la
     /// police système). Snapshot avant/après du document entier
@@ -1871,7 +1871,7 @@ impl PaintApp {
 
     // --- Transformation en perspective (Sprint 7.2) -------------------------
 
-    /// Position écran des 4 poignées de coin (audit_100_features.md #87) :
+    /// Position écran des 4 poignées de coin (previous_audit.md #87) :
     /// coin d'origine de l'image sélectionnée + décalage courant de
     /// `perspective_offsets`, dans cet ordre (haut-gauche, haut-droit,
     /// bas-droit, bas-gauche — même ordre que `perspective_offsets` et
@@ -2371,7 +2371,7 @@ impl PaintApp {
         self.status_error = true;
     }
 
-    /// Bascule le mode plein écran / sans distraction (audit_100_features.md
+    /// Bascule le mode plein écran / sans distraction (previous_audit.md
     /// #17) : plein écran natif macOS (`ViewportCommand::Fullscreen`) et
     /// masquage des panneaux vont toujours ensemble — un plein écran natif
     /// qui garderait la barre d'outils n'apporterait pas grand-chose de
@@ -2659,7 +2659,7 @@ impl PaintApp {
         self.info(format!("{} « {} ».", t("Pinceau appliqué", "Brush applied"), preset.name));
     }
 
-    // --- Kit de marque (audit_100_features.md #92) --------------------------
+    // --- Kit de marque (previous_audit.md #92) --------------------------
 
     /// Enregistre la palette personnalisée et la police système courantes
     /// sous `name` — écrase un kit existant du même nom (mêmes règles que
@@ -3839,7 +3839,7 @@ impl PaintApp {
         self.history.push(&mut self.doc, Command::AddMany { layer, strokes });
     }
 
-    /// Motif de pointillés courant (audit_100_features.md #55), ou `None`
+    /// Motif de pointillés courant (previous_audit.md #55), ou `None`
     /// pour un trait plein. Relatif à l'épaisseur du trait plutôt que deux
     /// champs numériques séparés — un rapport plein/trou fixe (3:2) qui
     /// reste lisible à toute échelle sans exposer plus de réglages.
@@ -3922,7 +3922,7 @@ impl eframe::App for PaintApp {
             self.measure = None;
         }
 
-        // Sans distraction (audit_100_features.md #17) : Échap en sort
+        // Sans distraction (previous_audit.md #17) : Échap en sort
         // toujours, même si la barre d'outils (donc le bouton pour en
         // sortir) est justement ce qui est masqué — sans ça, un
         // utilisateur au clavier/à la souris seule serait coincé.
@@ -3998,7 +3998,7 @@ impl eframe::App for PaintApp {
             // Rouge/vert (couleurs d'origine) sont la paire la moins
             // distinguable en cas de daltonisme rouge-vert (proto/deutéranopie,
             // ~8 % des hommes) — orange/bleu reste net dans ce cas
-            // (audit_uix_expert.md critique n°2), en plus d'une opacité
+            // (previous_audit.md critique n°2), en plus d'une opacité
             // différente entre les deux comme second signal.
             if self.onion_skin && self.doc.is_animated() {
                 let active = self.doc.active_frame;
@@ -4758,7 +4758,7 @@ mod tests {
         }
     }
 
-    /// Soulignement de texte (audit_100_features.md #61) : preuve de bout en
+    /// Soulignement de texte (previous_audit.md #61) : preuve de bout en
     /// bout que le trait est bien blitté par le compositeur CPU (pas
     /// seulement que `underline_stroke()` retourne un `Stroke`, déjà couvert
     /// par des tests unitaires dans `render/text.rs`) — compare le rendu
@@ -4786,7 +4786,7 @@ mod tests {
         assert_ne!(with_underline, without_underline, "le soulignement doit changer le rendu ({w}x{h})");
     }
 
-    /// Perf smoke test (audit_aout.md P1.8 : aucun profilage n'existait avant
+    /// Perf smoke test (previous_audit.md P1.8 : aucun profilage n'existait avant
     /// ce test) — pas un vrai benchmark `criterion` (le crate est un seul
     /// binaire, sans cible `[lib]` séparée pour qu'un fichier `benches/`
     /// externe puisse le lier), mais une mesure grossière avec seuil large,
@@ -4827,7 +4827,7 @@ mod tests {
     }
 
     /// Voir `compose_stays_reasonably_fast_on_a_large_document` — même
-    /// principe côté undo/redo (audit_aout.md P1.8), sur une session longue
+    /// principe côté undo/redo (previous_audit.md P1.8), sur une session longue
     /// de traits vectoriels (le chemin `PaintRaster`, par tuile, n'est pas
     /// couvert ici : il a sa propre garantie de coût par la conception même
     /// de `Command::PaintRaster`, voir `history.rs`).
@@ -4855,7 +4855,7 @@ mod tests {
         assert!(elapsed.as_secs() < 5, "undo/redo anormalement lent : {elapsed:?}");
     }
 
-    /// Texte → tracés (audit_100_features.md #64) : le texte sélectionné
+    /// Texte → tracés (previous_audit.md #64) : le texte sélectionné
     /// disparaît, remplacé par au moins un trait non rempli par contour de
     /// glyphe visible, et l'opération s'annule en un coup (`Command::SetDoc`).
     #[test]
@@ -5031,7 +5031,7 @@ mod tests {
         assert_eq!((after.w, after.h), (4, 3));
     }
 
-    /// Poignées de perspective glissables (audit_100_features.md #87),
+    /// Poignées de perspective glissables (previous_audit.md #87),
     /// remplaçant les anciens sliders X/Y par coin. Vue identité (origine
     /// nulle, échelle 1, sans rotation) : coordonnées écran = coordonnées
     /// document, pour des assertions directes.
@@ -5290,7 +5290,7 @@ mod tests {
         assert_eq!(app.selection_mask.as_ref().unwrap().get_pixel(21, 30)[3], 0, "contracter devrait ronger le bord de la sélection");
     }
 
-    /// Amélioration des bords (audit_100_features.md #38) : bout-en-bout à
+    /// Amélioration des bords (previous_audit.md #38) : bout-en-bout à
     /// travers l'API `PaintApp` (le mécanisme lui-même — durcir plus dans
     /// les zones texturées — est déjà couvert au niveau pur par
     /// `refine_edges_sharpens_boundary_more_in_textured_zones` dans
@@ -5491,7 +5491,7 @@ mod tests {
         assert_eq!(px(1, 1), c);
     }
 
-    /// Redressement par ligne tracée (audit_100_features.md #88) : vérifie
+    /// Redressement par ligne tracée (previous_audit.md #88) : vérifie
     /// le sens de rotation bout-en-bout plutôt que de le déduire de tête —
     /// une image coupée en diagonale (y=x) où l'utilisateur trace la ligne
     /// (0,0)→(20,20) doit ressortir avec cette diagonale devenue
@@ -5584,7 +5584,7 @@ mod tests {
         });
     }
 
-    /// Kit de marque (audit_100_features.md #92) : enregistrer capture la
+    /// Kit de marque (previous_audit.md #92) : enregistrer capture la
     /// palette + la police système courantes, appliquer les restaure sur un
     /// état différent — même round-trip que les autres presets.
     #[test]

@@ -76,7 +76,7 @@ pub struct TextItem {
     /// egui ne sait pas incliner un galley, limite documentée).
     #[serde(default)]
     pub italic: bool,
-    /// Soulignement (audit_100_features.md #61) : un trait sous la dernière
+    /// Soulignement (previous_audit.md #61) : un trait sous la dernière
     /// ligne de base de chaque rangée, dessiné une seule fois sur la passe
     /// de remplissage principale (pas sur les passes d'ombre/contour/faux-
     /// bold, pour éviter un trait dédoublé/plus épais qu'attendu).

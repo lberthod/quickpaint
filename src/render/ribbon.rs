@@ -93,7 +93,7 @@ pub fn build(stroke: &Stroke) -> Mesh {
     }
 }
 
-/// Pointillés (audit_100_features.md #55) : découpe `samples` en sous-runs
+/// Pointillés (previous_audit.md #55) : découpe `samples` en sous-runs
 /// selon la longueur d'arc cumulée (période `on + off`), puis construit
 /// chaque run séparément avec le ruban habituel (solide ou bande selon
 /// l'opacité) — les jointures/bouts ronds existants restent inchangés,

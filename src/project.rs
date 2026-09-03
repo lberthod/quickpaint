@@ -226,7 +226,7 @@ mod tests {
         let _ = std::fs::remove_file(&dir);
     }
 
-    /// BMP (audit_100_features.md #1) : listé dans le filtre du dialogue
+    /// BMP (previous_audit.md #1) : listé dans le filtre du dialogue
     /// d'import depuis toujours, mais la feature `bmp` de la crate `image`
     /// n'était pas activée dans `Cargo.toml` — le dialogue promettait un
     /// format qu'il ne savait pas réellement décoder. Même régression que

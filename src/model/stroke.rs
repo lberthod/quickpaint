@@ -76,7 +76,7 @@ pub struct StylePreset {
     pub gradient: Option<Gradient>,
 }
 
-/// Kit de marque (audit_100_features.md #92) : palette de couleurs, polices
+/// Kit de marque (previous_audit.md #92) : palette de couleurs, polices
 /// et logo réutilisables d'un projet à l'autre, sous un même nom — extension
 /// du mécanisme de presets déjà là (`StylePreset`/`BrushPreset`) plutôt
 /// qu'un nouveau système. Persisté localement comme les autres presets,
@@ -202,7 +202,7 @@ pub struct Stroke {
     /// à l'outil Forme ressortait avec des coins arrondis).
     #[serde(default = "default_smooth")]
     pub smooth: bool,
-    /// Pointillés (audit_100_features.md #55), `(longueur pleine, longueur
+    /// Pointillés (previous_audit.md #55), `(longueur pleine, longueur
     /// de trou)` en unités document. `None` = trait plein (comportement
     /// historique). Géré au niveau du ruban (`render::ribbon`), donc rendu
     /// identique à l'écran et à l'export — pas une astuce d'overlay.

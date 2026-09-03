@@ -60,7 +60,7 @@ pub fn show(ui: &mut Ui, app: &mut PaintApp) {
         let remaining = ui.available_width();
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| match &app.status {
             Some(msg) => {
-                // Icône en plus de la couleur (audit_uix_expert.md critique
+                // Icône en plus de la couleur (previous_audit.md critique
                 // n°2) : rouge/vert seuls sont peu distinguables en cas de
                 // daltonisme rouge-vert — un second canal (forme) garde le
                 // message lisible même sans percevoir la teinte.

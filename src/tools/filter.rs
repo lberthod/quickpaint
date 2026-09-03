@@ -199,7 +199,7 @@ pub enum Adjustment {
     /// normalisation forcée : l'utilisateur peut sur/sous-exposer certains
     /// canaux volontairement.
     ChannelMixerBw { r: f32, g: f32, b: f32 },
-    /// Netteté réglable façon Unsharp Mask (audit_100_features.md #68) :
+    /// Netteté réglable façon Unsharp Mask (previous_audit.md #68) :
     /// `Filter::Sharpen` a un noyau 3×3 fixe (rayon 1, quantité fixe), sans
     /// seuil — amplifie le bruit dans les zones plates. Ici : flou gaussien
     /// de référence (`radius`), différence source-flou amplifiée par
@@ -1779,7 +1779,7 @@ fn sharpen(src: &[u8], w: usize, h: usize) -> Vec<u8> {
     out
 }
 
-/// Netteté réglable (audit_100_features.md #68) : Unsharp Mask classique —
+/// Netteté réglable (previous_audit.md #68) : Unsharp Mask classique —
 /// `sharpened = src + amount * (src - blurred)`, `blurred` un flou gaussien
 /// de rayon `radius` (référence de basses fréquences à retirer), appliqué
 /// seulement où l'écart dépasse `threshold` (0..=255, en niveaux par canal)

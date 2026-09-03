@@ -758,7 +758,7 @@ fn lut_window(ctx: &egui::Context, app: &mut PaintApp) {
 }
 
 /// Transformation en perspective (Sprint 7.2) : glisser directement les 4
-/// coins sur le canevas (audit_100_features.md #87 — poignées orange,
+/// coins sur le canevas (previous_audit.md #87 — poignées orange,
 /// `app/canvas_overlay.rs::paint_perspective_handles`) plutôt que des
 /// sliders X/Y par coin ; ce panneau ne garde que Réinitialiser/Appliquer/
 /// Fermer.
@@ -887,7 +887,7 @@ fn brush_library_window(ctx: &egui::Context, app: &mut PaintApp) {
     }
 }
 
-/// Kits de marque (audit_100_features.md #92) : même schéma que la
+/// Kits de marque (previous_audit.md #92) : même schéma que la
 /// bibliothèque de brosses ci-dessus (nom + Enregistrer, liste avec
 /// Appliquer/Supprimer) — extension du mécanisme de presets déjà là plutôt
 /// qu'une UI ad hoc.
@@ -1061,7 +1061,7 @@ fn animation_panel_window(ctx: &egui::Context, app: &mut PaintApp) {
                 // Pelure d'oignon (Sprint U) : précédente en orange,
                 // suivante en bleu (couples orange/bleu plutôt que
                 // rouge/vert — lisible en cas de daltonisme rouge-vert,
-                // audit_uix_expert.md critique n°2), sous la frame active.
+                // previous_audit.md critique n°2), sous la frame active.
                 ui.checkbox(&mut app.onion_skin, t("Pelure d'oignon", "Onion skin")).on_hover_text(t(
                     "Affiche la frame précédente (orange) et la suivante (bleu) en fantôme",
                     "Shows the previous frame (orange) and the next one (blue) as ghosts",
@@ -1643,7 +1643,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 app.invert_selection();
                 ui.close_menu();
             }
-            // Plage de couleurs (audit_100_features.md #34) : la baguette
+            // Plage de couleurs (previous_audit.md #34) : la baguette
             // magique en portée « Global » fait déjà exactement ça (toute
             // couleur proche sur le calque, pas seulement la région
             // connexe) — cette entrée l'active explicitement plutôt que de
@@ -2030,7 +2030,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
                 }
             });
             ui.separator();
-            // Libellés d'outils (audit_uix_expert.md critique n°1) : un
+            // Libellés d'outils (previous_audit.md critique n°1) : un
             // tooltip au survol ne se déclenche jamais au doigt sur écran
             // tactile — ce réglage affiche le nom sous chaque icône pour
             // rester identifiable sans survol.
@@ -2044,7 +2044,7 @@ fn menu_bar(ui: &mut Ui, app: &mut PaintApp, ctx: &egui::Context) {
             {
                 crate::i18n::save_show_tool_labels(app.show_tool_labels);
             }
-            // Sans distraction (audit_100_features.md #17) : plein écran
+            // Sans distraction (previous_audit.md #17) : plein écran
             // natif + masquage des panneaux, Échap pour en ressortir même
             // sans accès à ce menu (voir `toggle_distraction_free`).
             if ui
@@ -2248,7 +2248,7 @@ fn shape_family_selector(ui: &mut Ui, app: &mut PaintApp, group: &[(ActiveTool, 
     let accent = tool_accent(face_tool);
 
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(34.0, 30.0), Sense::click());
-    // Même correctif que `tool_button` (audit_uix_expert.md critique n°4) :
+    // Même correctif que `tool_button` (previous_audit.md critique n°4) :
     // couleur neutre au repos, accent réservé au survol/à la sélection.
     let (bg, icon_col) = if selected {
         (accent, Color32::WHITE)
@@ -2335,7 +2335,7 @@ fn tool_accent(tool: ActiveTool) -> Color32 {
     }
 }
 
-/// Nom court d'un outil pour l'étiquette sous l'icône (audit_uix_expert.md
+/// Nom court d'un outil pour l'étiquette sous l'icône (previous_audit.md
 /// critique n°1) : tronque le suffixe raccourci (« Sélection (V) » →
 /// « Sélection ») pour rester lisible sur 52px de large.
 fn short_tool_label(name: &str) -> &str {
@@ -2344,7 +2344,7 @@ fn short_tool_label(name: &str) -> &str {
 
 fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hint: &str) {
     // Bouton élargi/rehaussé quand les libellés sont actifs (réglage Vue,
-    // audit_uix_expert.md critique n°1) : un tooltip au survol ne se
+    // previous_audit.md critique n°1) : un tooltip au survol ne se
     // déclenche jamais au doigt sur écran tactile, donc les 32 outils sont
     // indiscoverables sur ce canal sans un nom visible en permanence.
     let show_label = app.show_tool_labels;
@@ -2353,7 +2353,7 @@ fn tool_button(ui: &mut Ui, app: &mut PaintApp, tool: ActiveTool, name: &str, hi
     let selected = app.active_tool == tool;
     let accent = tool_accent(tool);
     // Au repos, icône en couleur neutre du thème plutôt que la couleur
-    // d'accent de l'outil (audit_uix_expert.md critique n°4) : avec 32
+    // d'accent de l'outil (previous_audit.md critique n°4) : avec 32
     // outils, peindre les 32 accents en permanence créait du bruit
     // chromatique qui annulait le regroupement par catégorie de la barre.
     // L'accent reste réservé au survol/à la sélection, où il sert de
@@ -2481,7 +2481,7 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
     // Icônes Phosphor plutôt que les glyphes Unicode "𝐆"/"𝐼" (bloc
     // Mathematical Alphanumeric Symbols) : absents de la police par défaut
     // d'egui, ils s'affichaient en carré vide (même défaut que undo/redo
-    // avant leur migration vers Phosphor, cf. audit_uix_expert.md).
+    // avant leur migration vers Phosphor, cf. previous_audit.md).
     if ui
         .selectable_label(app.text_bold, egui::RichText::new(egui_phosphor::fill::TEXT_B).font(fill_font(16.0)))
         .on_hover_text(t("Gras", "Bold"))
@@ -2501,7 +2501,7 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
         app.text_italic = !app.text_italic;
         changed = true;
     }
-    // Soulignement (audit_100_features.md #61) : seul manquant du trio
+    // Soulignement (previous_audit.md #61) : seul manquant du trio
     // gras/italique/souligné, jamais ajouté depuis l'introduction de
     // TextItem — pas un choix assumé, un oubli.
     if ui
@@ -2621,7 +2621,7 @@ fn text_options(ui: &mut Ui, app: &mut PaintApp) {
         app.sync_text_style();
     }
 
-    // Texte → tracés (audit_100_features.md #64) : action ponctuelle, pas
+    // Texte → tracés (previous_audit.md #64) : action ponctuelle, pas
     // un réglage de style — remplace le texte sélectionné, ne s'applique
     // pas à `changed`/`sync_text_style` comme le reste de cette barre.
     ui.separator();
@@ -2817,7 +2817,7 @@ fn selection_actions(ui: &mut Ui, app: &mut PaintApp) {
         // le contenu ressort droit une fois le recadrage validé.
         ui.separator();
         ui.label(t("Redressement :", "Straighten:"));
-        // Tracé de ligne (audit_100_features.md #88), en plus du curseur :
+        // Tracé de ligne (previous_audit.md #88), en plus du curseur :
         // geste direct sur le canevas plutôt que deviner l'angle en degrés.
         let armed = app.straighten_line_mode;
         if ui
